@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "inbox",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "server.ts"],
+      "port": 3789
+    }
+  ]
+}

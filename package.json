@@ -1,0 +1,14 @@
+{
+  "name": "fincasya-v2",
+  "private": true,
+  "packageManager": "bun@1.3.13",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2"
+  }
+}

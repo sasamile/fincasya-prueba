@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+/*
+ * FincasYa inbox — shadcn zinc/black + verde WhatsApp
+ */
+:root {
+  --radius: 0.5rem;
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --primary: 142.1 76.2% 36.3%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 240 4.8% 95.9%;
+  --accent: 240 4.8% 95.9%;
+  --destructive: 0 84.2% 60.2%;
+  --ring: 142.1 76.2% 36.3%;
+  --bubble-in: 210 20% 92%;
+  --bubble-bot: 142 40% 92%;
+  --bubble-advisor: 240 5% 90%;
+}
+
+.dark {
+  --background: 0 0% 0%;
+  --foreground: 0 0% 95%;
+  --card: 210 12% 7%;
+  --muted: 210 10% 12%;
+  --muted-foreground: 215 10% 55%;
+  --border: 210 10% 16%;
+  --input: 210 10% 11%;
+  --primary: 142 70% 45%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 10% 14%;
+  --accent: 210 10% 14%;
+  --destructive: 0 72% 51%;
+  --ring: 142 70% 45%;
+  /* entrante: azul-gris WhatsApp */
+  --bubble-in: 200 18% 18%;
+  /* bot: verde oscuro con acento */
+  --bubble-bot: 158 45% 12%;
+  --bubble-bot-accent: 142 70% 45%;
+  /* asesor: gris neutro */
+  --bubble-advisor: 210 10% 16%;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-accent: hsl(var(--accent));
+  --color-destructive: hsl(var(--destructive));
+  --color-ring: hsl(var(--ring));
+  --color-bubble-in: hsl(var(--bubble-in));
+  --color-bubble-bot: hsl(var(--bubble-bot));
+  --color-bubble-advisor: hsl(var(--bubble-advisor));
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+}
+
+*::-webkit-scrollbar {
+  width: 5px;
+}
+*::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 9999px;
+}
+
+.chat-bg {
+  background: hsl(var(--background));
+}
+
+/* Burbuja cliente (izquierda) */
+.bubble-in {
+  background: hsl(var(--bubble-in));
+  color: hsl(var(--foreground));
+  border-radius: 0 12px 12px 12px;
+}
+
+/* Burbuja bot (derecha, verde) */
+.bubble-bot {
+  background: hsl(var(--bubble-bot));
+  color: hsl(0 0% 92%);
+  border-left: 3px solid hsl(var(--bubble-bot-accent, var(--primary)));
+  border-radius: 12px 0 12px 12px;
+}
+
+/* Burbuja asesor (derecha, gris) */
+.bubble-advisor {
+  background: hsl(var(--bubble-advisor));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px 0 12px 12px;
+}
+
+/* Toggle shadcn-style */
+.toggle-track {
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+}
+.toggle-track[data-on='true'] {
+  background: hsl(var(--primary) / 0.25);
+  border-color: hsl(var(--primary) / 0.5);
+}
+.toggle-thumb {
+  background: hsl(var(--muted-foreground));
+}
+.toggle-track[data-on='true'] .toggle-thumb {
+  background: hsl(var(--primary));
+  transform: translateX(1.125rem);
+}
