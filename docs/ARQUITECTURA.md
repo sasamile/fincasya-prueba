@@ -53,7 +53,7 @@ mejora solo — sin el riesgo de aprender de sus propios errores.
 │   · problemática → quejas/errores → NUNCA entra al RAG    │
 │   · neutra       → se ignora                              │
 │  extrae pares cliente→respuesta de las buenas,            │
-│  prioriza respuestas escritas por asesores humanos,       │
+│  prioriza respuestas escritas por Expertoes humanos,       │
 │  descarta bloques repetidos, calcula embeddings.          │
 └───────────────────────────────────────────────────────────┘
 ```
@@ -91,7 +91,7 @@ Resultado: **279 ejemplares curados e indexados** (244 del histórico +
 - Cada noche (cron 02:30) el pipeline revisa las conversaciones nuevas:
   las que terminaron en reserva o cierre positivo entran solas al índice;
   las problemáticas quedan marcadas y jamás se usan como ejemplo.
-- Las respuestas escritas a mano por asesores (`sentByUserId`) tienen
+- Las respuestas escritas a mano por Expertoes (`sentByUserId`) tienen
   prioridad sobre las del bot: el agente aprende del equipo, no de sí mismo.
 - Todo queda auditado en `conversationLabels` (por qué se etiquetó así,
   cuántos ejemplares salieron de cada conversación).
@@ -107,5 +107,5 @@ Resultado: **279 ejemplares curados e indexados** (244 del histórico +
 3. **Corte de canal.** Apuntar el webhook de YCloud de producción a
    `https://modest-husky-871.convex.site/ycloud/webhook` (o al deployment de
    producción). Es un switch: un solo bot responde a la vez.
-4. **Operación.** Panel/inbox para asesores (escalados, prioridades) y
+4. **Operación.** Panel/inbox para Expertoes (escalados, prioridades) y
    métricas: tasa de escalado, conversaciones→reserva, ejemplares nuevos/semana.

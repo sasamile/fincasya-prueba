@@ -230,35 +230,51 @@ Para darte el presupuesto exacto, por favor confírmanos:
 A la mayor brevedad te compartiremos la información detallada de esta casa y otras opciones similares. 😊🚀`,
   },
   {
+    key: 'sit:finca-dudas',
+    situation:
+      'El cliente señala una finca del catalogo pero tiene dudas o preguntas antes de decidir (precio, disponibilidad, comodidades, capacidad, mascotas, que incluye).',
+    clientExamples: [
+      'La segunda tiene piscina?',
+      'Cuanto sale exactamente esa finca?',
+      'Esta disponible del 8 al 10?',
+      'Me gusta la de Melgar pero cuantas personas caben?',
+      'Que incluye esa propiedad?',
+    ],
+    response: `Responde la duda con la informacion que tengas (buscar_fincas o consultar_disponibilidad). Si el dato no esta confirmado, dilo con honestidad — no inventes. NO escales ni confirmes reserva en este turno: primero resuelve la duda. Al cerrar, invita a decir si esa finca le sirve para avanzar 🤝`,
+  },
+  {
+    key: 'sit:finca-elegida',
+    situation:
+      'El cliente confirmo que quiere una finca del catalogo (sin dudas pendientes). Se confirma su interes y se escala a un experto humano.',
+    clientExamples: [
+      'Me gusto esta finca',
+      'Quiero reservar la segunda opcion',
+      'Esa me sirve, sigamos',
+      'Quiero separar esa finca',
+    ],
+    response: `¡Excelente elección! Nos alegra saber que esta propiedad es de tu interés. En breve, uno de nuestros expertos se comunicará contigo para brindarte toda la información, resolver tus dudas y ayudarte a gestionar el mejor precio posible para tu reserva. ¡Gracias por confiar en nosotros!`,
+  },
+  {
     key: 'sit:contrato-datos',
     situation:
-      'El cliente decidio reservar, pregunta que se requiere para el alquiler, como separar la fecha, o anuncia que va a hacer el abono. Se le piden los datos del contrato.',
+      'El cliente pregunta que se requiere para el alquiler o como separar, pero aun no ha confirmado finca o disponibilidad. El bot NO envia el proceso de contrato.',
     clientExamples: [
       'Que se requiere para el alquiler?',
       'Como seria la separacion y demas',
-      'Quiero reservar esa finca',
+      'Cual es el paso a seguir?',
+    ],
+    response: `Cuando confirmes la finca de tu interés, uno de nuestros expertos verificará la disponibilidad para tus fechas y te guiará en los pasos para separarla 🤝 Somos FincasYa.com, con RNT 163658 verificable — tu reserva siempre es segura y respaldada.`,
+  },
+  {
+    key: 'sit:contrato-pago',
+    situation:
+      'El cliente ya decidio reservar y envia o pide datos de pago o contrato. Se escala a humano.',
+    clientExamples: [
       'Mañana se realiza el giro del 50% por Nequi',
       'Me regalas el numero de cuenta para hacer el pago',
+      'Te envio mis datos para el contrato',
     ],
-    response: `¡Excelente elección! ✨ Para formalizar tu *contrato de arrendamiento* y asegurar la fecha, necesito los datos de quien firmará como responsable:
-
-📋 *Datos necesarios*
-• Nombre completo
-• Cédula: número, ciudad de expedición y foto del frente
-• Correo electrónico
-• Teléfono de contacto
-• Dirección de residencia
-• Fechas exactas de ingreso y salida
-• Número total de huéspedes (adultos y niños)
-
-🏢 Si la reserva es a nombre de empresa: RUT, Cámara de Comercio y cédula del representante legal.
-
-🔐 *Proceso*
-1. Te enviamos el contrato y nuestro respaldo legal para tu revisión 📄
-2. Realizas el abono del *50%* para separar la fecha 💰
-3. Validamos tu pago y recibes el soporte oficial con la ubicación exacta 📍
-
-🛡️ RNT *163658* — tu reserva va con respaldo legal en FincasYa.com 🤝✨`,
+    response: `Perfecto, en un momento un Experto de nuestro equipo se comunica contigo para confirmar disponibilidad y los siguientes pasos ✅`,
   },
   {
     key: 'sit:temporada-especial',
@@ -291,9 +307,9 @@ Si tus fechas cumplen el mínimo, con gusto te compartimos las opciones disponib
       'Somos 12 personas para Melgar del 8 al 10',
       'Me muestras las fincas disponibles?',
     ],
-    response: `A continuación te comparto las opciones disponibles para tus fechas 📅:
-💰 Tarifa: el valor que muestra cada finca es por noche y varía según la temporada.
-🏊 Si alguna de estas propiedades te gusta, dímelo y te ayudaré a gestionar el mejor precio posible 🤝`,
+    response: `Con gusto en atenderte 🙋
+
+A continuación, te comparto las opciones disponibles para tus fechas 📅 Si alguna de estas propiedades te gusta, dímelo y te ayudaré a gestionar el mejor precio posible 🤝`,
   },
   {
     key: 'sit:post-catalogo-cierre',

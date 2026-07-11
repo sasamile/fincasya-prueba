@@ -1,11 +1,11 @@
 /**
- * Backend del inbox de asesores (panel web estilo WhatsApp).
+ * Backend del inbox de Expertoes (panel web estilo WhatsApp).
  *
  * OJO: funciones publicas SIN auth (fase dev en el deployment `prueba`).
  * Antes de exponer esto a internet real hay que ponerle autenticacion.
  *
- * Responder como asesor:
- *   1. guarda el mensaje (sender 'assistant' + sentByUserId 'panel-asesor')
+ * Responder como Experto:
+ *   1. guarda el mensaje (sender 'assistant' + sentByUserId 'panel-Experto')
  *   2. pasa la conversacion a 'human' (el agente IA se apaga para ese chat)
  *   3. agenda el envio real por YCloud y actualiza el wamid al confirmarse
  */
@@ -29,7 +29,7 @@ import {
   isQuickEligibleForAi,
 } from './lib/agentEligibility';
 
-const ADVISOR_SENDER_ID = 'panel-asesor';
+const ADVISOR_SENDER_ID = 'panel-Experto';
 
 /** Recorte seguro por code points: no parte emojis (surrogates UTF-16). */
 function previewSlice(text: string, max: number): string {
@@ -117,7 +117,7 @@ export const sendAdvisorMessage = mutation({
       sentByUserId: ADVISOR_SENDER_ID,
       createdAt: now,
     });
-    // El asesor toma el control: el agente IA deja de responder este chat.
+    // El Experto toma el control: el agente IA deja de responder este chat.
     await ctx.db.patch(conversationId, { status: 'human', lastMessageAt: now, aiManualOverride: false });
     await ctx.scheduler.runAfter(0, internal.inbox.deliverAdvisorMessage, {
       messageId,
@@ -219,7 +219,7 @@ export const demoteIneligibleConversation = internalMutation({
   },
 });
 
-/** Datos minimos para despachar el mensaje del asesor por YCloud. */
+/** Datos minimos para despachar el mensaje del Experto por YCloud. */
 export const getDeliveryInfo = internalMutation({
   args: { messageId: v.id('messages'), conversationId: v.id('conversations') },
   handler: async (
@@ -264,7 +264,7 @@ export const deliverAdvisorMessage = internalAction({
       wamid = sent.wamid;
     } catch (err) {
       failed = true;
-      console.error('[inbox] fallo el envio del mensaje del asesor', err);
+      console.error('[inbox] fallo el envio del mensaje del Experto', err);
     }
     await ctx.runMutation(internal.inbox.markDelivery, { messageId, wamid, failed });
   },

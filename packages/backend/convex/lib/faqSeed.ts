@@ -95,7 +95,7 @@ export const FAQ_INITIAL_SEED: Array<{
       '• 👥 Grupos mayores a 15 personas: para garantizar una atención excelente durante esas 8 horas, sugerimos contratar a 2 personas de servicio ✅.',
       '• 🏠 Políticas de la propiedad: en algunas fincas la contratación del personal de servicio es obligatoria por políticas de cuidado de la casa.',
       '',
-      'Si deseas que te contactemos con el personal para tu fecha seleccionada, ¡avísale a nuestro asesor para coordinarlo! 👨‍💻✨',
+      'Si deseas que te contactemos con el personal para tu fecha seleccionada, ¡avísale a nuestro Experto para coordinarlo! 👨‍💻✨',
     ].join('\n'),
   },
   {
@@ -109,7 +109,7 @@ export const FAQ_INITIAL_SEED: Array<{
       '',
       '🏡 Hora de salida: La salida de la finca es a las 10:00 a.m.',
       '',
-      '⏰ Late Check-out: Si deseas salir más tarde, puedes solicitarlo con el asesor para verificar disponibilidad. Ten en cuenta que este servicio puede tener un costo adicional.',
+      '⏰ Late Check-out: Si deseas salir más tarde, puedes solicitarlo con el Experto para verificar disponibilidad. Ten en cuenta que este servicio puede tener un costo adicional.',
       '',
       '¿Te gustaría que revisemos la disponibilidad para las fechas que tienes en mente? 🏡✨',
     ].join('\n'),

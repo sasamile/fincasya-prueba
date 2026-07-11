@@ -24,11 +24,13 @@ import {
 } from './lib/openai';
 import { buildSystemPrompt } from './lib/prompts';
 import {
+  buildPropertySelectionHandoff,
   buildWelcomeMessage,
-  DATOS_CONTRATO,
-  isPureGreeting,
-  PROCESO_RESERVA,
-  respectfulGreetingName,
+  burstHasOnlyGreeting,
+  CATALOGO_INTRO,
+  formalSalutationName,
+  getUserBurstSinceLastBot,
+  prependGreetingIfNeeded,
 } from './lib/copys';
 import { detectPriceLoopEscalation, isPriceDeflection, isPriceQuestion } from './lib/agentEscalation';
 import { sendWhatsappText } from './lib/ycloud';
@@ -597,7 +599,7 @@ const TOOL_DEFS: ToolDef[] = [
     function: {
       name: 'iniciar_reserva',
       description:
-        'El cliente eligio una finca y quiere avanzar ("me gusto esta", "estamos interesados en esta finca", "cual es el paso a seguir", "quiero reservarla"). Envia los DOS bloques oficiales del equipo verbatim: el proceso de reserva (contrato, formas de pago, 50%) y la solicitud de datos del contrato. Usala EN EL MISMO TURNO en que el cliente muestra intencion de reservar — NUNCA preguntes "¿te gustaria seguir con la reserva?" ni "¿seguimos?": el equipo avanza de una.',
+        'SOLO cuando el cliente CONFIRMA que quiere reservar una finca y NO esta haciendo preguntas ("me gusto esta", "quiero reservarla", "esa me sirve", "sigamos con esa"). PROHIBIDO si el mensaje es una duda o pregunta (precio, disponibilidad, comodidades, que incluye, capacidad...): en ese caso responde primero con buscar_fincas o consultar_disponibilidad. Envia el mensaje oficial de confirmacion de interes y escala a un experto humano.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -606,7 +608,7 @@ const TOOL_DEFS: ToolDef[] = [
     function: {
       name: 'escalar_a_humano',
       description:
-        'Pasa la conversacion a un asesor humano y apaga el agente. Usar ante emergencias, quejas serias, propietarios, reservas activas con problemas o peticion explicita de hablar con una persona.',
+        'Pasa la conversacion a un Experto humano y apaga el agente. Usar ante emergencias, quejas serias, propietarios, reservas activas con problemas o peticion explicita de hablar con una persona.',
       parameters: {
         type: 'object',
         properties: {
@@ -657,10 +659,10 @@ function parseDateMs(iso: string): number {
 // ---------------------------------------------------------------------------
 
 function buildPriceHandoffReply(contactName: string): string {
-  const name = respectfulGreetingName(contactName);
+  const name = formalSalutationName(contactName);
   return name
-    ? `Listo ${name}, un asesor de nuestro equipo te confirma el valor exacto y los detalles de la finca 🤝✨`
-    : `Listo, un asesor de nuestro equipo te confirma el valor exacto y los detalles de la finca 🤝✨`;
+    ? `Listo, ${name}, un Experto de nuestro equipo le confirma el valor exacto y los detalles de la finca 🤝✨`
+    : `Listo, un Experto de nuestro equipo le confirma el valor exacto y los detalles de la finca 🤝✨`;
 }
 
 export const runAgentTurn = internalAction({
@@ -692,6 +694,7 @@ export const runAgentTurn = internalAction({
     }
 
     const botHasSpoken = context.history.some((m) => m.sender === 'assistant');
+    const userBurst = getUserBurstSinceLastBot(context.history);
 
     const priceLoopMotivo = detectPriceLoopEscalation(
       context.history,
@@ -725,11 +728,8 @@ export const runAgentTurn = internalAction({
       return;
     }
 
-    // Primer turno + el ULTIMO mensaje es un saludo puro → welcome oficial
-    // DETERMINISTICO (formato exacto aprobado por el equipo, con Señor/Señora).
-    // Garantiza la bienvenida correcta aunque haya mensajes-ruido previos
-    // (reenvios, documentos, invitaciones) que confundirian al LLM.
-    if (!botHasSpoken && isPureGreeting(last.content)) {
+    // Primer turno + rafaga solo saludos → welcome oficial determinista.
+    if (!botHasSpoken && userBurst.length > 0 && burstHasOnlyGreeting(userBurst)) {
       const welcome = buildWelcomeMessage(context.contactName);
       let welcomeWamid: string | undefined;
       if (context.contactPhone) {
@@ -795,6 +795,7 @@ export const runAgentTurn = internalAction({
     ];
 
     let escalated = false;
+    let skipFinalReply = false;
     let finalText: string | null = null;
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
       const { content, toolCalls } = await chatCompletion({
@@ -843,7 +844,7 @@ export const runAgentTurn = internalAction({
             } else {
               // Intro ANTES de las fichas (asi lo hace el equipo). SIN numero:
               // algunas fichas pueden fallar al enviarse y el conteo mentiria.
-              const introText = 'Te comparto algunas de nuestras opciones de fincas:';
+              const introText = CATALOGO_INTRO;
               let introWamid: string | undefined;
               try {
                 const introSent = await sendWhatsappText({
@@ -889,7 +890,7 @@ export const runAgentTurn = internalAction({
                 });
                 result = {
                   enviadas: sent.map((s) => s.title),
-                  nota: 'Ya se envio el intro y las fichas. Ahora escribe SOLO el mensaje de CIERRE con el estilo del equipo, sin repetir las fincas ni sus precios. NO empieces con "Gracias" ni agradezcas. NO ofrezcas video ni fotos (las fichas YA traen fotos e informacion). PROHIBIDO nombrar la temporada de precios (media/alta/baja/actual): di SOLO que "el valor que muestra cada finca varia segun la temporada" — nunca des a entender que ese precio es el definitivo. Luego: "si alguna te llama la atencion, dinos cual y te ayudamos a gestionar el mejor precio 🤝" e invita a elegir o pedir mas opciones. Ejemplo del tono: "Estas son nuestras mejores opciones disponibles para ti! 🤩🏡 El valor que muestra cada finca varia segun la temporada. Si alguna te llama la atencion, dinos cual y te ayudamos a gestionar el mejor precio 🤝"',
+                  nota: 'Ya se envio el intro y las fichas. El intro YA dijo lo de gestionar el mejor precio — NO lo repitas. Escribe SOLO el CIERRE corto (1-2 lineas), sin "gracias" al inicio: aclara que el valor que muestra cada finca es por noche y varia segun la temporada (sin nombrar media/alta/baja) e invita a decir cual le gusta o si quiere ver mas opciones. Ejemplo del tono: "El valor que muestra cada finca es por noche y varia segun la temporada. Si alguna te llama la atencion, dinos cual y seguimos 🤝"',
                 };
               } else {
                 // Catalogo no conectado al numero / producto invalido: NO
@@ -908,28 +909,37 @@ export const runAgentTurn = internalAction({
               fechaSalida: String(args.fechaSalida ?? ''),
             });
           } else if (call.function.name === 'iniciar_reserva') {
-            // Bloques oficiales verbatim, como mensajes separados (asi los
-            // manda el equipo): proceso de reserva + datos del contrato.
-            for (const bloque of [PROCESO_RESERVA, DATOS_CONTRATO]) {
-              let bloqueWamid: string | undefined;
-              try {
-                const sentBlock = await sendWhatsappText({
-                  to: context.contactPhone,
-                  text: bloque,
-                });
-                bloqueWamid = sentBlock.wamid;
-              } catch (err) {
-                console.error('[agent] fallo el envio de bloque de reserva', err);
-              }
-              await ctx.runMutation(internal.agent.saveAssistantMessage, {
-                conversationId,
-                content: bloque,
-                wamid: bloqueWamid,
+            const handoffText = buildPropertySelectionHandoff(
+              context.contactName,
+            );
+            let handoffWamid: string | undefined;
+            try {
+              const sentHandoff = await sendWhatsappText({
+                to: context.contactPhone,
+                text: handoffText,
               });
+              handoffWamid = sentHandoff.wamid;
+            } catch (err) {
+              console.error(
+                '[agent] fallo el envio del handoff de finca elegida',
+                err,
+              );
             }
+            await ctx.runMutation(internal.agent.saveAssistantMessage, {
+              conversationId,
+              content: handoffText,
+              wamid: handoffWamid,
+            });
+            await ctx.runMutation(internal.agent.toolEscalar, {
+              conversationId,
+              motivo: 'cliente eligio una finca — seguimiento de reserva',
+            });
+            escalated = true;
+            skipFinalReply = true;
             result = {
               enviado: true,
-              nota: 'El proceso de reserva y la solicitud de datos del contrato YA se enviaron como mensajes oficiales. Tu texto final debe ser MUY corto (1 linea, ej: "Quedamos atentos a tus datos para elaborar el contrato ✅") o vacio de contenido nuevo. NO repitas el proceso ni los datos, NO des las gracias.',
+              escalado: true,
+              nota: 'El mensaje de confirmacion de interes YA se envio y la conversacion fue escalada a un experto. NO escribas texto final — el mensaje oficial ya cubre todo.',
             };
           } else if (call.function.name === 'escalar_a_humano') {
             result = await ctx.runMutation(internal.agent.toolEscalar, {
@@ -955,6 +965,8 @@ export const runAgentTurn = internalAction({
         });
       }
     }
+
+    if (skipFinalReply) return;
 
     let reply = (finalText ?? '').trim();
     if (!reply) {
@@ -993,6 +1005,8 @@ export const runAgentTurn = internalAction({
       console.log('[agent] respuesta descartada: el cliente escribio mientras generabamos');
       return;
     }
+
+    reply = prependGreetingIfNeeded(reply, context.contactName, userBurst);
 
     let wamid: string | undefined;
     if (context.contactPhone) {

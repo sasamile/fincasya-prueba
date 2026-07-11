@@ -42,7 +42,7 @@
   /* bot: verde oscuro con acento */
   --bubble-bot: 158 45% 12%;
   --bubble-bot-accent: 142 70% 45%;
-  /* asesor: gris neutro */
+  /* Experto: gris neutro */
   --bubble-advisor: 210 10% 16%;
 }
 
@@ -109,7 +109,7 @@ body {
   border-radius: 12px 0 12px 12px;
 }
 
-/* Burbuja asesor (derecha, gris) */
+/* Burbuja Experto (derecha, gris) */
 .bubble-advisor {
   background: hsl(var(--bubble-advisor));
   color: hsl(var(--foreground));

@@ -33,7 +33,7 @@ type Filter = 'todas' | 'human' | 'ai' | 'unread' | 'whatsapp' | 'web' | 'nuevas
 
 const OPERATIONAL_LABELS: Record<string, string> = {
   pending_data: 'Pendiente datos',
-  requires_advisor: 'Requiere asesor',
+  requires_advisor: 'Requiere Experto',
   validate_availability: 'Validar disponibilidad',
   ready_to_book: 'Listo reservar',
   pending_payment: 'Pendiente pago',
@@ -265,7 +265,7 @@ function MessageBubble({
               </>
             ) : (
               <>
-                <UserRound className="h-3 w-3" /> Asesor
+                <UserRound className="h-3 w-3" /> Experto
               </>
             )}
           </div>

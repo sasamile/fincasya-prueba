@@ -61,7 +61,7 @@ export function isConversationEligibleForAi(
   const quick = isQuickEligibleForAi(conversation);
   if (!quick.eligible) return quick;
   if (signals.advisorMessageCount > 0) {
-    return { eligible: false, reason: 'asesor_ya_participo' };
+    return { eligible: false, reason: 'Experto_ya_participo' };
   }
   if (signals.totalMessageCount > MAX_MESSAGES_FOR_AI) {
     return { eligible: false, reason: 'historial_largo' };
@@ -85,7 +85,7 @@ export function ineligibilityLabel(reason: string): string {
     escalada_a_humano: 'Escalada a humano',
     proceso_avanzado: 'Ya hay un proceso en curso',
     catalogo_ya_enviado: 'Ya se envió catálogo',
-    asesor_ya_participo: 'Un asesor ya participó',
+    Experto_ya_participo: 'Un Experto ya participó',
     historial_largo: 'Historial demasiado largo para el bot',
     bot_global_apagado: 'Activa el bot global primero',
     auto_solo_nuevas: 'El bot no se activa solo en este chat',

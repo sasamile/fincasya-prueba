@@ -7,7 +7,7 @@
  *   2. Solo de las 'venta' y 'positiva' extrae pares cliente->respuesta como
  *      ejemplares. Las 'problematica' quedan marcadas y JAMAS se usan como
  *      ejemplo de como responder.
- *   3. Prioriza respuestas escritas por asesores humanos (sentByUserId) y
+ *   3. Prioriza respuestas escritas por Expertoes humanos (sentByUserId) y
  *      descarta respuestas repetidas (bloques estaticos del bot viejo).
  *   4. `embedPending` calcula embeddings de lo nuevo (idempotente).
  *

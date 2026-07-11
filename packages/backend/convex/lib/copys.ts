@@ -5,10 +5,10 @@
  */
 
 /**
- * Primer nombre usable para saludar. Descarta telefonos, basura y nombres
- * fuera de 2..20 caracteres.
+ * Nombre completo usable para saludar (title case). Si solo hay un nombre, se
+ * usa ese. Descarta telefonos y basura.
  */
-export function firstNameForGreeting(rawName?: string | null): string | null {
+export function fullNameForGreeting(rawName?: string | null): string | null {
   const raw = String(rawName ?? '').trim();
   if (!raw) return null;
   if (/^[\d+\-\s()]+$/.test(raw)) return null;
@@ -17,12 +17,17 @@ export function firstNameForGreeting(rawName?: string | null): string | null {
     .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned) return null;
-  const firstWord = cleaned.split(' ')[0] ?? '';
-  if (firstWord.length < 2 || firstWord.length > 20) return null;
-  return (
-    firstWord.charAt(0).toLocaleUpperCase('es-CO') +
-    firstWord.slice(1).toLocaleLowerCase('es-CO')
-  );
+  const words = cleaned.split(' ').filter((w) => w.length >= 2);
+  if (words.length === 0) return null;
+  const firstWord = words[0] ?? '';
+  if (firstWord.length < 2 || firstWord.length > 30) return null;
+  return words
+    .map(
+      (w) =>
+        w.charAt(0).toLocaleUpperCase('es-CO') +
+        w.slice(1).toLocaleLowerCase('es-CO'),
+    )
+    .join(' ');
 }
 
 /**
@@ -66,9 +71,32 @@ export function inferGenderFromFirstName(
   return null;
 }
 
+/** Primer nombre (para heuristica de genero y compatibilidad). */
+export function firstNameForGreeting(rawName?: string | null): string | null {
+  const full = fullNameForGreeting(rawName);
+  if (!full) return null;
+  return full.split(' ')[0] ?? null;
+}
+
+/**
+ * Trato formal para saludo: "señor Juan Pérez" / "señora María Gómez".
+ */
+export function formalSalutationName(
+  contactName?: string | null,
+  gender?: 'male' | 'female' | null,
+): string | null {
+  const fullName = fullNameForGreeting(contactName);
+  if (!fullName) return null;
+  const first = fullName.split(' ')[0] ?? '';
+  const effective = gender ?? inferGenderFromFirstName(first);
+  const title = effective === 'female' ? 'señora' : 'señor';
+  return `${title} ${fullName}`;
+}
+
 /**
  * Nombre formal para saludar: "Don Camilo" / "Doña Adriana" / "Señor Alex".
  * NUNCA devuelve el nombre pelado — siempre lleva titulo de cortesia.
+ * @deprecated Preferir formalSalutationName en saludos nuevos.
  */
 export function respectfulGreetingName(
   contactName?: string | null,
@@ -86,15 +114,82 @@ export function respectfulGreetingName(
   return `${hon} ${first}`;
 }
 
+const BOGOTA_TZ = 'America/Bogota';
+
+type TimeSlot = 'morning' | 'afternoon' | 'night';
+
+function getBogotaHour(now: Date = new Date()): number {
+  return Number(
+    now.toLocaleString('en-US', {
+      timeZone: BOGOTA_TZ,
+      hour: 'numeric',
+      hour12: false,
+    }),
+  );
+}
+
+function getTimeSlot(hour: number): TimeSlot {
+  if (hour >= 5 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 18) return 'afternoon';
+  return 'night';
+}
+
+/** Saludo según hora en Colombia: Buenos días / Buenas tardes / Buenas noches. */
+export function timeOfDayGreeting(now: Date = new Date()): string {
+  const slot = getTimeSlot(getBogotaHour(now));
+  if (slot === 'morning') return 'Buenos días';
+  if (slot === 'afternoon') return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+function timeOfDayCourtesyPhrase(
+  slot: TimeSlot,
+  gender: 'male' | 'female' | null,
+): string {
+  if (slot === 'morning') {
+    return 'gracias por comunicarse con nosotros. ¿En qué podemos ayudarle?';
+  }
+  if (slot === 'afternoon') {
+    return gender === 'female'
+      ? 'es un gusto atenderla. ¿Cómo podemos colaborarle?'
+      : 'es un gusto atenderlo. ¿Cómo podemos colaborarle?';
+  }
+  return 'gracias por escribirnos. Estamos atentos para ayudarle.';
+}
+
+/**
+ * Apertura oficial del saludo: "Hola, señor Juan Pérez. Buenos días, ..."
+ */
+export function buildGreetingOpener(
+  contactName?: string | null,
+  gender?: 'male' | 'female' | null,
+  now: Date = new Date(),
+): string {
+  const hour = getBogotaHour(now);
+  const slot = getTimeSlot(hour);
+  const timeGreeting = timeOfDayGreeting(now);
+  const fullName = fullNameForGreeting(contactName);
+  const first = fullName?.split(' ')[0] ?? '';
+  const effectiveGender = gender ?? (first ? inferGenderFromFirstName(first) : null);
+  const courtesy = timeOfDayCourtesyPhrase(slot, effectiveGender);
+
+  if (fullName) {
+    const title = effectiveGender === 'female' ? 'señora' : 'señor';
+    return `Hola, ${title} ${fullName}. ${timeGreeting}, ${courtesy}`;
+  }
+  return `Hola. ${timeGreeting}, ${courtesy}`;
+}
+
 /** Mensaje de bienvenida oficial (verbatim del equipo). */
 export function buildWelcomeMessage(
   contactName?: string | null,
   gender?: 'male' | 'female' | null,
+  now: Date = new Date(),
 ): string {
-  const name = respectfulGreetingName(contactName, gender);
-  const opener = name ? `¡Hola ${name}! 🙋` : `¡Hola! 🙋`;
+  const opener = buildGreetingOpener(contactName, gender, now);
   return `${opener}
-Gracias por comunicarte con *FINCASYA.COM* ®️ 💻 En breve te brindaremos atención personalizada. Para agilizar tu proceso, indícanos por favor la siguiente información:
+
+En *FINCASYA.COM* ®️ 💻 te brindamos atención personalizada. Para agilizar tu proceso, indícanos por favor la siguiente información:
 
 📅 Fecha probable de ingreso y salida
 👥 Número de personas entre adultos y niños
@@ -115,6 +210,14 @@ export const HORARIO_SIMPLE = `🕛 Horario de atención:
 ✔️ 07:30 AM A 07:00 PM`;
 
 /**
+ * Intro oficial ANTES de las fichas del catalogo (verbatim del equipo).
+ * Va justo antes de las tarjetas de WhatsApp; el cierre va despues.
+ */
+export const CATALOGO_INTRO = `Con gusto en atenderte 🙋
+
+A continuación, te comparto las opciones disponibles para tus fechas 📅 Si alguna de estas propiedades te gusta, dímelo y te ayudaré a gestionar el mejor precio posible 🤝`;
+
+/**
  * Horario DETALLADO (de la respuesta rapida oficial "/fuera de horario").
  * Solo se usa cuando el cliente pregunta explicitamente por los horarios;
  * en la bienvenida va el corto.
@@ -126,7 +229,8 @@ export const HORARIOS_OFICIALES = `🕒 Horario de atención:
 
 /**
  * Bloque oficial del PROCESO DE RESERVA (verbatim, copy real de produccion).
- * Se envia cuando el cliente elige finca y quiere avanzar (tool iniciar_reserva).
+ * Bloques de referencia del proceso de reserva (solo RAG / experto humano).
+ * El bot NO los envia: aun no hay disponibilidad confirmada.
  */
 export const PROCESO_RESERVA = `Proceso de reserva en FINCASYA.COM®️
 
@@ -155,7 +259,7 @@ En FincasYa.com te garantizamos un proceso claro, seguro y con respaldo profesio
 
 /**
  * Bloque oficial de DATOS DEL CONTRATO (verbatim, copy real de produccion).
- * Se envia junto con PROCESO_RESERVA en la tool iniciar_reserva.
+ * Se envia junto con PROCESO_RESERVA (referencia / RAG; el bot escala a humano).
  */
 export const DATOS_CONTRATO = `📋 Para elaborar tu contrato de arrendamiento y formalizar la reserva, necesitamos los datos de la persona responsable del alquiler:
 
@@ -187,29 +291,126 @@ export const DATOS_CONTRATO = `📋 Para elaborar tu contrato de arrendamiento y
 🏡 En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilidad`;
 
 /**
+ * Mensaje oficial cuando el cliente ELIGE una finca del catalogo. Se envia
+ * antes de escalar a un experto humano (tool iniciar_reserva).
+ */
+export function buildPropertySelectionHandoff(
+  contactName?: string | null,
+): string {
+  const first = firstNameForGreeting(contactName);
+  const opener = first
+    ? `¡Excelente elección, ${first}!`
+    : `¡Excelente elección!`;
+  return `${opener} Nos alegra saber que esta propiedad es de tu interés. En breve, uno de nuestros expertos se comunicará contigo para brindarte toda la información, resolver tus dudas y ayudarte a gestionar el mejor precio posible para tu reserva. ¡Gracias por confiar en nosotros!`;
+}
+
+/**
  * Saludo corto (cuando el primer mensaje del cliente YA trae datos utiles y
  * no tiene sentido el welcome largo — se antepone a la respuesta del agente).
  */
 export function buildShortGreeting(
   contactName?: string | null,
   gender?: 'male' | 'female' | null,
+  now: Date = new Date(),
 ): string {
-  const name = respectfulGreetingName(contactName, gender);
-  return name
-    ? `¡Hola ${name}! 🙋 Gracias por comunicarte con *FINCASYA.COM* ®️`
-    : `¡Hola! 🙋 Gracias por comunicarte con *FINCASYA.COM* ®️`;
+  return buildGreetingOpener(contactName, gender, now);
 }
+
+function normalizeGreetingText(text: string): string {
+  return String(text ?? '')
+    .trim()
+    .replace(/^[¿¡\s]+/g, '')
+    .replace(/[!?.…]+\s*$/gu, '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+const GREETING_INTENT =
+  /\b(para|alquilar|finca|reservar|necesito|busco|quiero|personas|fecha|villavicencio|melgar|anapoima)\b/;
+
+const TIME_GREETING =
+  /^(buen[oa]s?\s*d[ií]as|buenas?\s*tardes|buenas?\s*noches)\b/;
 
 const GREETINGS =
   /^(hola|hoal|holaa+|buenas|buen\s*d[ií]a|buenos|hey|hi|hello|saludos|ola|buenas tardes|buenas noches)\W*$/i;
 
-/** Solo saludo, sin datos utiles (tolera typos comunes tipo "hoal"). */
+/** Mensaje que incluye un saludo (puro o compuesto: "hola buenos dias"). */
+export function isGreetingMessage(text: string): boolean {
+  const t = normalizeGreetingText(text);
+  if (!t) return false;
+  if (GREETINGS.test(t)) return true;
+  if (TIME_GREETING.test(t)) return true;
+  if (/^(hola|buenas|hey|hi|hello|saludos|ola)\s+/.test(t)) {
+    const rest = t.replace(/^(hola|buenas|hey|hi|hello|saludos|ola)\s+/, '');
+    if (GREETINGS.test(rest) || TIME_GREETING.test(rest)) return true;
+  }
+  return false;
+}
+
+/** Solo saludo sin datos utiles (tolera "hola buenos dias", typos tipo "hoal"). */
 export function isPureGreeting(text: string): boolean {
-  let t = String(text ?? '').trim();
-  t = t
-    .replace(/^[¿¡\s]+/g, '')
-    .replace(/[!?.…]+\s*$/gu, '')
+  if (!isGreetingMessage(text)) return false;
+  const t = normalizeGreetingText(text);
+  if (GREETING_INTENT.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  return words.length <= 5;
+}
+
+/** Mensajes del cliente desde el ultimo turno del bot (rafaga actual). */
+export function getUserBurstSinceLastBot(
+  history: Array<{ sender: 'user' | 'assistant'; content: string }>,
+): string[] {
+  const burst: string[] = [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    if (!msg) continue;
+    if (msg.sender === 'assistant') break;
+    if (msg.sender === 'user') burst.unshift(msg.content);
+  }
+  return burst;
+}
+
+export function burstContainsGreeting(messages: string[]): boolean {
+  return messages.some((m) => isGreetingMessage(m));
+}
+
+export function burstHasOnlyGreeting(messages: string[]): boolean {
+  return messages.length > 0 && messages.every((m) => isGreetingMessage(m));
+}
+
+/** Evita duplicar el saludo horario si el LLM ya lo incluyo. */
+export function replyAlreadyOpensWithTimeGreeting(reply: string): boolean {
+  const head = reply.slice(0, 160).toLowerCase();
+  return (
+    /buenos\s*d[ií]as|buenas\s*tardes|buenas\s*noches/.test(head) ||
+    /^hola,?\s+señor/.test(head)
+  );
+}
+
+/** Quita un "Hola Don/Doña X" generado por el LLM para no duplicar. */
+export function stripRedundantHolaPrefix(reply: string): string {
+  return reply
+    .replace(/^¡?\s*hola\s+(don|doña|señor|señora)\s+[^!.\n]+!?\s*/i, '')
+    .replace(/^¡?\s*hola!?\s*/i, '')
     .trim();
-  t = t.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
-  return GREETINGS.test(t);
+}
+
+/**
+ * Antepone el saludo oficial con franja horaria si el cliente saludo en la rafaga.
+ */
+export function prependGreetingIfNeeded(
+  reply: string,
+  contactName?: string | null,
+  userBurst: string[] = [],
+  now: Date = new Date(),
+): string {
+  if (!burstContainsGreeting(userBurst)) return reply;
+  if (replyAlreadyOpensWithTimeGreeting(reply)) {
+    return stripRedundantHolaPrefix(reply);
+  }
+  const opener = buildGreetingOpener(contactName, undefined, now);
+  const body = stripRedundantHolaPrefix(reply);
+  return body ? `${opener}\n\n${body}` : opener;
 }

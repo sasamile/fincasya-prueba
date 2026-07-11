@@ -110,7 +110,7 @@ export default defineSchema(
       ),
       createdAt: v.number(),
       attended: v.optional(v.boolean()),
-      /** Convex `user._id` del asesor asignado (inbox). */
+      /** Convex `user._id` del Experto asignado (inbox). */
       assignedUserId: v.optional(v.string()),
       /**
        * Etiquetas de negocio (inbox): varias por conversación; strings libres
@@ -122,10 +122,10 @@ export default defineSchema(
        * cada mensaje `user`; se pone a 0 al abrir/marcar leído).
        */
       inboxUnreadCount: v.optional(v.number()),
-      /** Última vez que un asesor abrió/marcó leída la conversación en inbox. */
+      /** Última vez que un Experto abrió/marcó leída la conversación en inbox. */
       inboxLastReadAt: v.optional(v.number()),
       /**
-       * true = un asesor activo el bot manualmente en el panel; el bot responde
+       * true = un Experto activo el bot manualmente en el panel; el bot responde
        * aunque ya haya catalogo/proceso. false/undefined = solo auto en chats nuevos.
        */
       aiManualOverride: v.optional(v.boolean()),
@@ -162,7 +162,7 @@ export default defineSchema(
       /** Metadatos del mensaje (ej: para catálogos, datos de finca) */
       metadata: v.optional(v.any()),
       createdAt: v.number(),
-      /** Convex user._id del asesor que envió el mensaje manualmente (trazabilidad). */
+      /** Convex user._id del Experto que envió el mensaje manualmente (trazabilidad). */
       sentByUserId: v.optional(v.string()),
       /** wamid de WhatsApp (mensajes salientes) para actualizar estado vía webhook. */
       wamid: v.optional(v.string()),
@@ -903,7 +903,7 @@ export default defineSchema(
       quality: v.string(),
       /** Origen: 'historico' | 'playbook' | 'auto' (cron nocturno). */
       source: v.string(),
-      /** Respuesta escrita por un asesor humano (mejor senal de calidad). */
+      /** Respuesta escrita por un Experto humano (mejor senal de calidad). */
       humanAuthored: v.boolean(),
       /** _id (string) de la conversacion de origen, si aplica. */
       sourceConversationId: v.optional(v.string()),
