@@ -1,5 +1,5 @@
 import { Lock } from 'lucide-react';
-import { StartChatIllustration } from '@/components/chat/StartChatIllustration';
+import { StartChatIllustration } from '@/features/inbox/components/StartChatIllustration';
 
 /** Pantalla vacía estilo WhatsApp Web (sin chat seleccionado). */
 export function ChatHomeScreen() {

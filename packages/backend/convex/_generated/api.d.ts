@@ -18,6 +18,7 @@ import type * as http from "../http.js";
 import type * as inbound from "../inbound.js";
 import type * as inbox from "../inbox.js";
 import type * as labels from "../labels.js";
+import type * as landing from "../landing.js";
 import type * as lib_agentEligibility from "../lib/agentEligibility.js";
 import type * as lib_agentEscalation from "../lib/agentEscalation.js";
 import type * as lib_catalogSend from "../lib/catalogSend.js";
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   inbound: typeof inbound;
   inbox: typeof inbox;
   labels: typeof labels;
+  landing: typeof landing;
   "lib/agentEligibility": typeof lib_agentEligibility;
   "lib/agentEscalation": typeof lib_agentEscalation;
   "lib/catalogSend": typeof lib_catalogSend;

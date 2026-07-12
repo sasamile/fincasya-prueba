@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
-import App from './App';
+import { Root } from './Root';
 import './index.css';
 
 const convexUrl =
@@ -17,7 +17,7 @@ const root = (globals.__fincasyaRoot ??= createRoot(document.getElementById('roo
 root.render(
   <StrictMode>
     <ConvexProvider client={convex}>
-      <App />
+      <Root />
     </ConvexProvider>
   </StrictMode>,
 );

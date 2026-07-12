@@ -67,6 +67,32 @@
   --color-ring: var(--ring);
   --color-bubble-in: var(--bubble-in);
   --color-bubble-out: var(--bubble-out);
+  /* Paleta de la landing pública (Tailwind v4 no trae los defaults aquí). */
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-green-500: #22c55e;
+  --color-green-600: #16a34a;
+  --color-green-700: #15803d;
+  --color-neutral-50: #fafafa;
+  --color-neutral-100: #f5f5f5;
+  --color-neutral-200: #e5e5e5;
+  --color-neutral-300: #d4d4d4;
+  --color-neutral-400: #a3a3a3;
+  --color-neutral-500: #737373;
+  --color-neutral-600: #525252;
+  --color-neutral-700: #404040;
+  --color-neutral-800: #262626;
+  --color-neutral-900: #171717;
+  --color-orange-400: #fb923c;
+  --color-orange-500: #f97316;
+  --color-yellow-500: #eab308;
+  --color-blue-600: #2563eb;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-gray-200: #e5e7eb;
+  --color-gray-400: #9ca3af;
+  --color-popover: var(--popover, var(--card));
+  --color-popover-foreground: var(--popover-foreground, var(--foreground));
   /* Stack tipográfico de WhatsApp Web */
   --font-sans: "Helvetica Neue", "Segoe UI", Helvetica, "Lucida Grande", Arial,
     Ubuntu, Cantarell, "Fira Sans", sans-serif;
@@ -271,4 +297,41 @@ body {
 .wa-composer-send:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * Landing pública (réplica fincasya.com): tema CLARO + Poppins,
+ * aislado del inbox (que fuerza .dark). Tokens copiados de
+ * FincasYaWeb/app/globals.css (:root light).
+ * ───────────────────────────────────────────────────────────── */
+.landing {
+  font-family: 'Poppins', 'Poppins Fallback', sans-serif;
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: #fe4a19;
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Calendario del hero (react-day-picker) al estilo shadcn/FincasYa. */
+.landing .rdp-root {
+  --rdp-accent-color: #fe4a19;
+  --rdp-accent-background-color: #fe4a1922;
+  font-size: 14px;
 }

@@ -26,7 +26,16 @@ export function MessageMenu({
   const react = useAction(api.inbox.reactToClientMessage);
   const [open, setOpen] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  function toggle() {
+    // Si la burbuja está cerca del fondo, el menú se abre hacia arriba.
+    const rect = ref.current?.getBoundingClientRect();
+    setDropUp(!!rect && rect.bottom > window.innerHeight - 200);
+    setOpen((o) => !o);
+    setShowEmojis(false);
+  }
 
   // Solo se puede reaccionar a mensajes del cliente (recibidos) con wamid.
   const canReact = message.sender === 'user' && !!message.wamid;
@@ -64,7 +73,7 @@ export function MessageMenu({
     <div ref={ref} className="absolute right-1 top-1 z-10">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         className={cn(
           'flex h-6 w-6 items-center justify-center rounded-full bg-black/25 text-foreground/80 opacity-0 shadow transition-opacity hover:bg-black/40 group-hover:opacity-100',
           open && 'opacity-100',
@@ -77,7 +86,8 @@ export function MessageMenu({
       {open && (
         <div
           className={cn(
-            'absolute top-7 z-50 w-48 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-2xl',
+            'absolute z-50 w-48 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-2xl',
+            dropUp ? 'bottom-7' : 'top-7',
             align === 'left' ? 'left-0' : 'right-0',
           )}
         >

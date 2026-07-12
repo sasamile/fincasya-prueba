@@ -1,291 +1,42 @@
-/**
- * FincasYa · Chats — inbox operadores (referencia CRM WhatsApp).
- */
+/** Panel de conversación: burbujas, reproductor de audio, compositor. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { useAction, useMutation, useQuery } from 'convex/react';
-import type { FunctionReturnType } from 'convex/server';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import {
   Bot,
-  Check,
-  CheckCheck,
-  CircleAlert,
-  CircleDashed,
   FileText,
   Image,
-  MessageCircle,
   Mic,
   MoreVertical,
   Paperclip,
   Pause,
-  Pin,
   Play,
   Plus,
-  Radio,
   Search,
   Send,
-  Settings,
   Smile,
-  Store,
   UserRound,
-  Users,
-  Video,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LoadingArea, Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
-import { avatarColorFor } from '@/lib/avatarColor';
 import { messagesCache, withCache } from '@/lib/queryCache';
-import { AttachMenu } from '@/components/chat/AttachMenu';
-import { AudioRecorder } from '@/components/chat/AudioRecorder';
-import { CatalogModal } from '@/components/chat/CatalogModal';
-import { ChatHomeScreen } from '@/components/chat/ChatHomeScreen';
-import { ContactInfo } from '@/components/chat/ContactInfo';
-import { ConversationContextMenu } from '@/components/chat/ConversationContextMenu';
-import type { CtxTarget } from '@/components/chat/ConversationContextMenu';
-import { EmojiPicker } from '@/components/chat/EmojiPicker';
-import { MessageMenu } from '@/components/chat/MessageMenu';
-import { LabelPicker } from '@/components/chat/LabelPicker';
-import { QuickReplyManager } from '@/components/chat/QuickReplyManager';
-import { SharedMedia } from '@/components/chat/SharedMedia';
-import { SidebarFilters } from '@/components/chat/SidebarFilters';
-import profileAvatar from '@/assets/image.png';
-
-type ConversationRow = FunctionReturnType<typeof api.inbox.listConversations>[number];
-type Filter = 'todas' | 'human' | 'ai' | 'unread' | 'whatsapp' | 'web' | 'nuevas';
-
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatListTime(ms: number): string {
-  const d = new Date(ms);
-  const today = new Date();
-  if (d.toDateString() === today.toDateString()) return formatTime(ms);
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return 'Ayer';
-  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
-}
-
-function formatDay(ms: number): string {
-  const d = new Date(ms);
-  const today = new Date();
-  if (d.toDateString() === today.toDateString()) return 'Hoy';
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return 'Ayer';
-  return d.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
-}
-
-function formatCop(n: number): string {
-  return `$ ${Math.round(n).toLocaleString('es-CO')}`;
-}
-
-function BotToggle({
-  enabled,
-  disabled,
-  onChange,
-  title,
-}: {
-  enabled: boolean;
-  disabled?: boolean;
-  onChange: (on: boolean) => void;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      disabled={disabled}
-      onClick={() => !disabled && onChange(!enabled)}
-      className={cn(
-        'toggle-track relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
-        disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer',
-      )}
-      data-on={enabled}
-      title={title ?? (enabled ? 'Bot activo' : 'Bot apagado')}
-    >
-      <span className="toggle-thumb absolute left-0.5 h-3.5 w-3.5 rounded-full transition-transform" />
-    </button>
-  );
-}
-
-/**
- * Avatar por defecto de WhatsApp (default-contact-refreshed de Meta):
- * círculo gris con la silueta oficial. SVG exacto del cliente de WhatsApp.
- */
-export function DefaultContactSvg({ fill = '#8a9399', className }: { fill?: string; className?: string }) {
-  return (
-    <svg viewBox="0 0 48 48" className={className} preserveAspectRatio="xMidYMid meet" aria-hidden>
-      <path
-        fill={fill}
-        d="M24 23q-1.86 0-3.18-1.32T19.5 18.5t1.32-3.18T24 14t3.18 1.32q1.32 1.32 1.32 3.18t-1.32 3.18T24 23m-6.75 10q-.93 0-1.59-.66T15 30.75v-.9q0-.96.5-1.76a3.3 3.3 0 0 1 1.3-1.22 16.7 16.7 0 0 1 3.54-1.3q1.8-.44 3.66-.44t3.66.43 3.54 1.31q.82.42 1.3 1.22t.5 1.76v.9q0 .93-.66 1.59t-1.59.66z"
-      />
-    </svg>
-  );
-}
-
-function Avatar({
-  name,
-  size = 'md',
-  className,
-}: {
-  name: string;
-  size?: 'xs' | 'sm' | 'md';
-  className?: string;
-}) {
-  const dim = size === 'xs' ? 'h-7 w-7' : size === 'sm' ? 'h-9 w-9' : 'h-11 w-11';
-  const { bg, fg } = avatarColorFor(name);
-  return (
-    <div
-      title={name}
-      className={cn('shrink-0 overflow-hidden rounded-full', dim, className)}
-      style={{ backgroundColor: bg }}
-    >
-      <DefaultContactSvg fill={fg} className="h-full w-full" />
-    </div>
-  );
-}
-
-function DeliveryTick({ status }: { status: string | null }) {
-  if (!status) return null;
-  const cls = 'h-3.5 w-3.5 shrink-0';
-  const stroke = 2.25;
-  if (status === 'failed') {
-    return <CircleAlert className={cn(cls, 'text-destructive')} strokeWidth={stroke} />;
-  }
-  if (status === 'read') {
-    return <CheckCheck className={cn(cls, 'text-[#53bdeb]')} strokeWidth={stroke} />;
-  }
-  if (status === 'delivered') {
-    return <CheckCheck className={cn(cls, 'text-[#8696a0]')} strokeWidth={stroke} />;
-  }
-  return <Check className={cn(cls, 'text-[#8696a0]')} strokeWidth={stroke} />;
-}
-
-function ConversationItem({
-  conv,
-  active,
-  onClick,
-  onContextMenu,
-}: {
-  conv: ConversationRow;
-  active: boolean;
-  onClick: () => void;
-  onContextMenu?: (e: ReactMouseEvent) => void;
-}) {
-  const p = conv.preview;
-  const isProduct = p?.type === 'product';
-  // Ícono + etiqueta corta para media (estilo WhatsApp), en vez del placeholder.
-  const PreviewIcon =
-    p?.type === 'audio'
-      ? Mic
-      : p?.type === 'image'
-        ? Image
-        : p?.type === 'video'
-          ? Video
-          : p?.type === 'document'
-            ? Paperclip
-            : isProduct
-              ? Store
-              : null;
-  const previewText = p
-    ? p.type === 'audio'
-      ? 'Nota de voz'
-      : p.type === 'image'
-        ? 'Foto'
-        : p.type === 'video'
-          ? 'Video'
-          : p.type === 'document'
-            ? 'Documento'
-            : isProduct
-              ? p.content.replace(/^🏡\s*Ficha de catálogo:\s*/i, '')
-              : p.content
-    : 'Sin mensajes';
-
-  return (
-    <button
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      className={cn(
-        'flex w-full items-start gap-3 border-b border-border/40 px-4 py-3 text-left transition-colors hover:bg-muted',
-        active && 'bg-accent',
-        conv.pinned && 'bg-muted/30',
-      )}
-    >
-      <Avatar name={conv.name} size="md" />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1">
-          <span
-            className={cn('truncate text-[14px]', conv.unread > 0 ? 'font-semibold' : 'font-medium')}
-          >
-            {conv.name}
-          </span>
-          {conv.labels.length > 0 ? (
-            <span className="flex shrink-0 -space-x-1">
-              {conv.labels.slice(0, 3).map((l) => (
-                <span
-                  key={l.id}
-                  className={cn(
-                    'h-2.5 w-2.5 rounded-full ring-2',
-                    active ? 'ring-accent' : 'ring-card',
-                  )}
-                  style={{ backgroundColor: l.color }}
-                  title={(l.emoji ? `${l.emoji} ` : '') + l.name}
-                />
-              ))}
-            </span>
-          ) : null}
-        </div>
-        <div className="mt-0.5 flex items-center gap-1 text-[12.5px] text-muted-foreground">
-          {p?.outbound && <DeliveryTick status={p.whatsappStatus} />}
-          {PreviewIcon && <PreviewIcon className="h-3.5 w-3.5 shrink-0" />}
-          <span className="truncate">{previewText}</span>
-        </div>
-      </div>
-
-      {/* Columna derecha: hora arriba, badges (bot / no leídos) abajo. */}
-      <div className="flex shrink-0 flex-col items-end gap-1.5 self-start pt-0.5">
-        <span
-          className={cn(
-            'text-[11px]',
-            conv.unread > 0 ? 'font-medium text-primary' : 'text-muted-foreground',
-          )}
-        >
-          {formatListTime(conv.lastMessageAt)}
-        </span>
-        <div className="flex items-center gap-1.5">
-          {conv.pinned && (
-            <span title="Fijado" className="flex">
-              <Pin className="h-3.5 w-3.5 text-muted-foreground" />
-            </span>
-          )}
-          {conv.status === 'ai' && (
-            <span
-              className="flex h-5 w-5 items-center justify-center rounded-full bg-[#f0a040] text-white"
-              title="Bot activo en este chat"
-            >
-              <Bot className="h-3 w-3" />
-            </span>
-          )}
-          {conv.unread > 0 && (
-            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-white">
-              {conv.unread}
-            </span>
-          )}
-        </div>
-      </div>
-    </button>
-  );
-}
-
-type Message = NonNullable<FunctionReturnType<typeof api.inbox.getMessages>>[number];
+import { formatCop, formatDay, formatTime } from '@/lib/format';
+import { Avatar, BotToggle, DeliveryTick } from '@/features/inbox/components/primitives';
+import { AttachMenu } from '@/features/inbox/components/AttachMenu';
+import { AudioRecorder } from '@/features/inbox/components/AudioRecorder';
+import { CatalogModal } from '@/features/inbox/components/CatalogModal';
+import { ContactInfo } from '@/features/inbox/components/ContactInfo';
+import { EmojiPicker } from '@/features/inbox/components/EmojiPicker';
+import { MessageMenu } from '@/features/inbox/components/MessageMenu';
+import { LabelPicker } from '@/features/inbox/components/LabelPicker';
+import { QuickReplyManager } from '@/features/inbox/components/QuickReplyManager';
+import { SharedMedia } from '@/features/inbox/components/SharedMedia';
+import type { ConversationRow, Message } from '@/features/inbox/types';
 
 /** Tarjeta de ficha de catálogo (imagen + precio + Ver), réplica de WhatsApp. */
 function ProductCard({
@@ -674,7 +425,7 @@ function MessageBubble({
   );
 }
 
-function ChatPanel({ conv }: { conv: ConversationRow }) {
+export function ChatPanel({ conv }: { conv: ConversationRow }) {
   const liveMessages = useQuery(api.inbox.getMessages, {
     conversationId: conv.conversationId,
   });
@@ -1118,213 +869,6 @@ function ChatPanel({ conv }: { conv: ConversationRow }) {
           }}
         />
       ) : null}
-    </div>
-  );
-}
-
-/** Icono del rail de navegación (columna extrema izquierda de WhatsApp). */
-function RailIcon({
-  icon: Icon,
-  label,
-  active,
-  dot,
-}: {
-  icon: typeof MessageCircle;
-  label: string;
-  active?: boolean;
-  dot?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      className={cn(
-        'relative flex h-11 w-11 items-center justify-center rounded-full transition-colors',
-        active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-muted',
-      )}
-    >
-      <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 2.3 : 1.9} />
-      {dot && (
-        <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
-      )}
-    </button>
-  );
-}
-
-/** Rail de navegación vertical estilo WhatsApp Web. */
-function IconRail() {
-  return (
-    <nav className="flex w-[68px] shrink-0 flex-col items-center justify-between border-r border-border bg-background py-4">
-      <div className="flex flex-col items-center gap-2">
-        <RailIcon icon={MessageCircle} label="Chats" active />
-        <RailIcon icon={CircleDashed} label="Estados" dot />
-        <RailIcon icon={Radio} label="Canales" />
-        <RailIcon icon={Users} label="Comunidades" />
-        <RailIcon icon={Store} label="Catálogo" />
-      </div>
-      <div className="flex flex-col items-center gap-3">
-        <RailIcon icon={Settings} label="Ajustes" />
-        <img
-          src={profileAvatar}
-          alt="FincasYa"
-          title="FincasYa"
-          className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-border/40"
-          draggable={false}
-        />
-      </div>
-    </nav>
-  );
-}
-
-export default function App() {
-  const conversations = useQuery(api.inbox.listConversations);
-  const agentSettings = useQuery(api.agentSettings.getAgentSettings);
-  const setGlobalAi = useMutation(api.agentSettings.setGlobalAiEnabled);
-  const markRead = useMutation(api.inbox.markConversationRead);
-  const [selectedId, setSelectedId] = useState<ConversationRow['conversationId'] | null>(null);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<Filter>('todas');
-  const [labelFilter, setLabelFilter] = useState<string | null>(null);
-  const [ctxMenu, setCtxMenu] = useState<CtxTarget | null>(null);
-  const labels = useQuery(api.labels.listLabels);
-
-  const filtered = useMemo(() => {
-    if (!conversations) return [];
-    const q = search.trim().toLowerCase();
-    return conversations.filter((c) => {
-      // Las archivadas no aparecen en el listado principal.
-      if (c.archived) return false;
-      if (q && !c.name.toLowerCase().includes(q) && !c.phone.includes(q)) return false;
-      if (labelFilter && !c.labels.some((l) => String(l.id) === labelFilter)) return false;
-      if (filter === 'ai') return c.status === 'ai';
-      if (filter === 'human') return c.status === 'human';
-      if (filter === 'unread') return c.unread > 0;
-      if (filter === 'nuevas') return c.aiEligible;
-      if (filter === 'whatsapp') return c.channel === 'whatsapp';
-      if (filter === 'web') return c.channel === 'web';
-      return true;
-    });
-  }, [conversations, search, filter, labelFilter]);
-
-  const selected = conversations?.find((c) => c.conversationId === selectedId) ?? null;
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== 'Escape') return;
-      setSelectedId(null);
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  function openConversation(conv: ConversationRow) {
-    setSelectedId(conv.conversationId);
-    if (conv.unread > 0) void markRead({ conversationId: conv.conversationId });
-  }
-
-  const globalBotHint = agentSettings?.globalAiEnabled
-    ? 'Chats nuevos con bot. No se activa en chats con catálogo o proceso.'
-    : 'Chats nuevos en humano. Actívalos desde cada conversación.';
-
-  return (
-    <div className="flex h-full bg-background">
-      {/* Rail de navegación (columna extrema izquierda) */}
-      <IconRail />
-
-      {/* Lista de chats */}
-      <aside className="flex w-[380px] shrink-0 flex-col border-r border-border bg-card">
-        {/* Cabecera con título y acciones */}
-        <header className="flex items-center justify-between px-4 py-3">
-          <h1 className="text-[22px] font-semibold tracking-tight">Chats</h1>
-          <div className="flex items-center gap-1">
-            <div
-              title={globalBotHint}
-              className="mr-1 flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1"
-            >
-              <Bot
-                className={cn(
-                  'h-3.5 w-3.5',
-                  agentSettings?.globalAiEnabled ? 'text-primary' : 'text-muted-foreground',
-                )}
-              />
-              <BotToggle
-                enabled={agentSettings?.globalAiEnabled ?? false}
-                onChange={(on) => void setGlobalAi({ enabled: on })}
-                title={globalBotHint}
-              />
-            </div>
-            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground">
-              <Plus className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground">
-              <MoreVertical className="h-5 w-5" />
-            </Button>
-          </div>
-        </header>
-
-        {/* Buscador */}
-        <div className="px-3 pb-1.5">
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar un chat o iniciar uno nuevo"
-              className="h-9 rounded-full border-transparent bg-input pl-11 text-[13px]"
-            />
-          </div>
-        </div>
-
-        {/* Filtros: chips principales + dropdown de listas (sin scroll en x) */}
-        <SidebarFilters
-          filter={filter}
-          setFilter={setFilter}
-          labelFilter={labelFilter}
-          setLabelFilter={setLabelFilter}
-          labels={labels}
-        />
-
-        <div className="flex-1 overflow-y-auto border-t border-border">
-          {conversations === undefined ? (
-            <LoadingArea className="py-16" />
-          ) : filtered.length === 0 ? (
-            <p className="p-4 text-center text-xs text-muted-foreground">Sin chats</p>
-          ) : (
-            filtered.map((c) => (
-              <ConversationItem
-                key={c.conversationId}
-                conv={c}
-                active={c.conversationId === selectedId}
-                onClick={() => openConversation(c)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setCtxMenu({
-                    conversationId: c.conversationId,
-                    pinned: c.pinned,
-                    archived: c.archived,
-                    labelIds: c.labels.map((l) => String(l.id)),
-                    x: e.clientX,
-                    y: e.clientY,
-                  });
-                }}
-              />
-            ))
-          )}
-        </div>
-      </aside>
-
-      {/* Panel principal */}
-      {selected ? (
-        <ChatPanel key={selected.conversationId} conv={selected} />
-      ) : (
-        <ChatHomeScreen />
-      )}
-
-      {/* Menú de clic derecho sobre una conversación */}
-      {ctxMenu && (
-        <ConversationContextMenu target={ctxMenu} onClose={() => setCtxMenu(null)} />
-      )}
     </div>
   );
 }
