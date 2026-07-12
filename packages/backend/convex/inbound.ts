@@ -14,6 +14,40 @@ import {
 const AGENT_DEBOUNCE_MS = 7000;
 const SETTINGS_KEY = 'default';
 
+/** Clave de teléfono para comparar propietario vs contacto: últimos 10 dígitos
+ *  (celular colombiano), ignorando indicativo/país y separadores. */
+function ownerPhoneKey(raw?: string | null): string {
+  return (raw ?? '').replace(/\D+/g, '').slice(-10);
+}
+
+/** "ALBA LUCIA HERRERA" -> "Alba Lucia Herrera". */
+function titleCase(s: string): string {
+  return s
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/** Normaliza el tratamiento registrado ("Sr", "sra", "señora"...) a señor/señora. */
+function normalizeTratamiento(raw?: string): string {
+  const t = (raw ?? '').trim().toLowerCase().replace(/\./g, '');
+  if (t === 'sr' || t === 'señor' || t === 'senor') return 'señor';
+  if (t === 'sra' || t === 'señora' || t === 'senora') return 'señora';
+  return '';
+}
+
+/** Saludo especial para un propietario registrado (cordial + tuteo). Solo
+ *  saluda; el Experto humano continúa la atención. */
+function buildOwnerGreeting(name?: string, tratamiento?: string): string {
+  const n = titleCase((name ?? '').trim());
+  const t = normalizeTratamiento(tratamiento);
+  const nombreMostrado = n ? `${t ? `${t} ` : ''}${n}` : '';
+  const saludo = nombreMostrado ? `¡Hola, ${nombreMostrado}!` : '¡Hola!';
+  return `${saludo} 🏡✨ Te saluda el equipo de FincasYa.com. En un momentito uno de nuestros Expertos se comunica contigo para atenderte personalmente 🤝`;
+}
+
 /** Orden de estados de WhatsApp: solo se avanza hacia adelante, nunca atrás. */
 const STATUS_RANK: Record<string, number> = {
   failed: 0,
@@ -114,6 +148,32 @@ export const ingestInboundMessage = internalMutation({
     }
     if (!contact) return { duplicate: false };
 
+    // Detección de propietario UNA sola vez por contacto: si el teléfono
+    // coincide con un propietario registrado, se cachea en el contacto para no
+    // volver a escanear en cada mensaje.
+    if (contact.ownerChecked !== true) {
+      const key = ownerPhoneKey(args.phone);
+      let match: { propietarioNombre?: string; propietarioTratamiento?: string } | null = null;
+      if (key.length === 10) {
+        const owners = await ctx.db.query('propertyOwnerInfo').collect();
+        match =
+          owners.find((o) => ownerPhoneKey(o.propietarioTelefono) === key) ?? null;
+      }
+      await ctx.db.patch(contact._id, {
+        ownerChecked: true,
+        isOwner: !!match,
+        ownerName: match?.propietarioNombre,
+        ownerTratamiento: match?.propietarioTratamiento,
+      });
+      contact = {
+        ...contact,
+        ownerChecked: true,
+        isOwner: !!match,
+        ownerName: match?.propietarioNombre,
+        ownerTratamiento: match?.propietarioTratamiento,
+      };
+    }
+
     const conversations = await ctx.db
       .query('conversations')
       .withIndex('by_contact', (q) => q.eq('contactId', contact._id))
@@ -152,6 +212,34 @@ export const ingestInboundMessage = internalMutation({
       lastMessageAt: now,
       inboxUnreadCount: (conversation.inboxUnreadCount ?? 0) + 1,
     });
+
+    // PROPIETARIO: si el contacto es un propietario registrado y aún no lo
+    // hemos saludado en esta conversación, se le manda un saludo especial y se
+    // escala DIRECTO a un Experto (el bot no lo atiende como cliente).
+    if (contact.isOwner === true && conversation.ownerGreeted !== true) {
+      await ctx.db.patch(conversation._id, {
+        status: 'human',
+        priority: 'urgent',
+        operationalState: 'requires_advisor',
+        isOwner: true,
+        ownerGreeted: true,
+        aiManualOverride: false,
+        lastMessageAt: now,
+      });
+      await ctx.db.insert('messages', {
+        conversationId: conversation._id,
+        sender: 'system',
+        content: `🏠 Propietario detectado${contact.ownerName ? `: ${contact.ownerName}` : ''}. Escalado a un Experto.`,
+        type: 'text',
+        createdAt: now + 1,
+      });
+      await ctx.scheduler.runAfter(0, internal.agent.sendOwnerGreeting, {
+        conversationId: conversation._id,
+        to: args.phone,
+        text: buildOwnerGreeting(contact.ownerName, contact.ownerTratamiento),
+      });
+      return { duplicate: false, owner: true };
+    }
 
     if (conversation.status === 'ai') {
       const isManual = conversation.aiManualOverride === true;

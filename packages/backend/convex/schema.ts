@@ -64,6 +64,16 @@ export default defineSchema(
       notes: v.optional(v.string()),
       /** Foto de perfil del cliente asignada desde el inbox. */
       photoUrl: v.optional(v.string()),
+      /**
+       * Detección de propietario (se calcula UNA sola vez, la primera vez que
+       * el contacto escribe). Si el teléfono coincide con el de un propietario
+       * registrado (`propertyOwnerInfo.propietarioTelefono`), se atiende
+       * distinto: saludo especial + escalado directo a un Experto.
+       */
+      ownerChecked: v.optional(v.boolean()),
+      isOwner: v.optional(v.boolean()),
+      ownerName: v.optional(v.string()),
+      ownerTratamiento: v.optional(v.string()),
       createdAt: v.number(),
       updatedAt: v.optional(v.number()),
     })
@@ -135,6 +145,14 @@ export default defineSchema(
       aiManualOverride: v.optional(v.boolean()),
       /** Listas/etiquetas asignadas a la conversación (estilo WhatsApp Business). */
       labelIds: v.optional(v.array(v.id('labels'))),
+      /** El contacto es un propietario registrado (no cliente). */
+      isOwner: v.optional(v.boolean()),
+      /** Ya se envió el saludo de propietario + escalado en esta conversación. */
+      ownerGreeted: v.optional(v.boolean()),
+      /** Fijada arriba en el inbox (clic derecho → Fijar). */
+      pinned: v.optional(v.boolean()),
+      /** Archivada: oculta del listado principal (clic derecho → Archivar). */
+      archived: v.optional(v.boolean()),
     })
       .index('by_contact', ['contactId'])
       .index('by_status', ['status'])

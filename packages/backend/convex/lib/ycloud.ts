@@ -25,6 +25,8 @@ function wamidFromResponse(parsed: unknown): string | undefined {
 export async function sendWhatsappText(args: {
   to: string;
   text: string;
+  /** wamid del mensaje al que se responde (cita, estilo WhatsApp). */
+  contextWamid?: string;
 }): Promise<{ wamid?: string }> {
   const { apiKey, wabaNumber } = requireYcloudEnv();
   const res = await fetch('https://api.ycloud.com/v2/whatsapp/messages/sendDirectly', {
@@ -38,11 +40,50 @@ export async function sendWhatsappText(args: {
       to: args.to,
       type: 'text',
       text: { body: args.text },
+      ...(args.contextWamid
+        ? { context: { message_id: args.contextWamid } }
+        : {}),
     }),
   });
   const bodyText = await res.text();
   if (!res.ok) {
     throw new Error(`YCloud send ${res.status}: ${bodyText.slice(0, 400)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    parsed = undefined;
+  }
+  return { wamid: wamidFromResponse(parsed) };
+}
+
+/**
+ * Envía una reacción (emoji) sobre un mensaje del cliente. `emoji` vacío quita
+ * la reacción. `wamid` es el id del mensaje del cliente al que se reacciona.
+ */
+export async function sendWhatsappReaction(args: {
+  to: string;
+  wamid: string;
+  emoji: string;
+}): Promise<{ wamid?: string }> {
+  const { apiKey, wabaNumber } = requireYcloudEnv();
+  const res = await fetch('https://api.ycloud.com/v2/whatsapp/messages/sendDirectly', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiKey,
+    },
+    body: JSON.stringify({
+      from: wabaNumber,
+      to: args.to,
+      type: 'reaction',
+      reaction: { message_id: args.wamid, emoji: args.emoji },
+    }),
+  });
+  const bodyText = await res.text();
+  if (!res.ok) {
+    throw new Error(`YCloud reaction ${res.status}: ${bodyText.slice(0, 400)}`);
   }
   let parsed: unknown;
   try {

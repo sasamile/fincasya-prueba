@@ -20,10 +20,10 @@ import {
   MoreVertical,
   Paperclip,
   Pause,
+  Pin,
   Play,
   Plus,
   Radio,
-  RefreshCw,
   Search,
   Send,
   Settings,
@@ -34,7 +34,6 @@ import {
   Video,
   X,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LoadingArea, Spinner } from '@/components/ui/spinner';
@@ -46,7 +45,10 @@ import { AudioRecorder } from '@/components/chat/AudioRecorder';
 import { CatalogModal } from '@/components/chat/CatalogModal';
 import { ChatHomeScreen } from '@/components/chat/ChatHomeScreen';
 import { ContactInfo } from '@/components/chat/ContactInfo';
+import { ConversationContextMenu } from '@/components/chat/ConversationContextMenu';
+import type { CtxTarget } from '@/components/chat/ConversationContextMenu';
 import { EmojiPicker } from '@/components/chat/EmojiPicker';
+import { MessageMenu } from '@/components/chat/MessageMenu';
 import { LabelPicker } from '@/components/chat/LabelPicker';
 import { QuickReplyManager } from '@/components/chat/QuickReplyManager';
 import { SharedMedia } from '@/components/chat/SharedMedia';
@@ -55,14 +57,6 @@ import profileAvatar from '@/assets/image.png';
 
 type ConversationRow = FunctionReturnType<typeof api.inbox.listConversations>[number];
 type Filter = 'todas' | 'human' | 'ai' | 'unread' | 'whatsapp' | 'web' | 'nuevas';
-
-const OPERATIONAL_LABELS: Record<string, string> = {
-  pending_data: 'Pendiente datos',
-  requires_advisor: 'Requiere Experto',
-  validate_availability: 'Validar disponibilidad',
-  ready_to_book: 'Listo reservar',
-  pending_payment: 'Pendiente pago',
-};
 
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
@@ -90,12 +84,6 @@ function formatDay(ms: number): string {
 
 function formatCop(n: number): string {
   return `$ ${Math.round(n).toLocaleString('es-CO')}`;
-}
-
-function OperationalBadge({ state }: { state: string | null }) {
-  if (!state) return null;
-  const label = OPERATIONAL_LABELS[state] ?? state;
-  return <Badge variant="state">{label}</Badge>;
 }
 
 function BotToggle({
@@ -185,10 +173,12 @@ function ConversationItem({
   conv,
   active,
   onClick,
+  onContextMenu,
 }: {
   conv: ConversationRow;
   active: boolean;
   onClick: () => void;
+  onContextMenu?: (e: ReactMouseEvent) => void;
 }) {
   const p = conv.preview;
   const isProduct = p?.type === 'product';
@@ -222,9 +212,11 @@ function ConversationItem({
   return (
     <button
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={cn(
         'flex w-full items-start gap-3 border-b border-border/40 px-4 py-3 text-left transition-colors hover:bg-muted',
         active && 'bg-accent',
+        conv.pinned && 'bg-muted/30',
       )}
     >
       <Avatar name={conv.name} size="md" />
@@ -269,6 +261,11 @@ function ConversationItem({
           {formatListTime(conv.lastMessageAt)}
         </span>
         <div className="flex items-center gap-1.5">
+          {conv.pinned && (
+            <span title="Fijado" className="flex">
+              <Pin className="h-3.5 w-3.5 text-muted-foreground" />
+            </span>
+          )}
           {conv.status === 'ai' && (
             <span
               className="flex h-5 w-5 items-center justify-center rounded-full bg-[#f0a040] text-white"
@@ -533,10 +530,14 @@ function MessageBubble({
   message,
   highlight,
   contactName,
+  conversationId,
+  onReply,
 }: {
   message: Message;
   highlight?: string;
   contactName: string;
+  conversationId: Id<'conversations'>;
+  onReply?: (m: Message) => void;
 }) {
   const isUser = message.sender === 'user';
   const isBot = !isUser && !message.byAdvisor;
@@ -559,11 +560,19 @@ function MessageBubble({
     <div className={cn('flex flex-col', message.reaction ? 'mb-5' : 'mb-1', isUser ? 'items-start' : 'items-end')}>
       <div
         className={cn(
-          'relative max-w-[min(75%,26rem)]',
+          'group relative max-w-[min(75%,26rem)]',
           hasProduct || isMedia ? 'p-1.5' : 'px-2 py-1.5',
           isUser ? 'bubble-in' : 'bubble-out',
         )}
       >
+        {onReply && (
+          <MessageMenu
+            conversationId={conversationId}
+            message={{ id: message.id, wamid: message.wamid, content: message.content, sender: message.sender }}
+            align={isUser ? 'left' : 'right'}
+            onReply={() => onReply(message)}
+          />
+        )}
         {!isUser && (
           <div
             className={cn(
@@ -678,6 +687,7 @@ function ChatPanel({ conv }: { conv: ConversationRow }) {
   const setStatus = useMutation(api.inbox.setConversationStatus);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [botError, setBotError] = useState<string | null>(null);
   const [showAttach, setShowAttach] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
@@ -761,11 +771,21 @@ function ChatPanel({ conv }: { conv: ConversationRow }) {
     if (!text || sending) return;
     setSending(true);
     try {
-      await sendMessage({ conversationId: conv.conversationId, content: text });
+      await sendMessage({
+        conversationId: conv.conversationId,
+        content: text,
+        replyToWamid: replyingTo?.wamid ?? undefined,
+      });
       setDraft('');
+      setReplyingTo(null);
     } finally {
       setSending(false);
     }
+  }
+
+  function startReply(m: Message) {
+    setReplyingTo(m);
+    draftRef.current?.focus();
   }
 
   async function handleBotToggle(on: boolean) {
@@ -808,10 +828,7 @@ function ChatPanel({ conv }: { conv: ConversationRow }) {
           >
             <Avatar name={conv.name} size="sm" />
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="truncate text-[15px] font-medium">{conv.name}</h2>
-                <OperationalBadge state={conv.operationalState} />
-              </div>
+              <h2 className="truncate text-[15px] font-medium">{conv.name}</h2>
               <p className="text-[12px] text-muted-foreground">+{conv.phone}</p>
             </div>
           </button>
@@ -842,9 +859,6 @@ function ChatPanel({ conv }: { conv: ConversationRow }) {
             <LabelPicker conversationId={conv.conversationId} assigned={conv.labels} />
 
             <div className="flex items-center gap-0.5">
-              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full">
-                <RefreshCw className="h-4 w-4" />
-              </Button>
               <Button
                 variant="ghost"
                 size="icon"
@@ -921,7 +935,14 @@ function ChatPanel({ conv }: { conv: ConversationRow }) {
                     </span>
                   </div>
                   {group.items.map((m) => (
-                    <MessageBubble key={m.id} message={m} highlight={searchTerm} contactName={conv.name} />
+                    <MessageBubble
+                      key={m.id}
+                      message={m}
+                      highlight={searchTerm}
+                      contactName={conv.name}
+                      conversationId={conv.conversationId}
+                      onReply={startReply}
+                    />
                   ))}
                 </div>
               ))
@@ -939,6 +960,31 @@ function ChatPanel({ conv }: { conv: ConversationRow }) {
           {attachNotice && (
             <div className="absolute -top-11 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-muted px-3 py-1.5 text-[12px] text-foreground shadow-lg">
               {attachNotice}
+            </div>
+          )}
+          {/* Barra de "Responder" (cita) sobre el compositor. */}
+          {replyingTo && (
+            <div className="mb-1.5 flex items-center gap-2 rounded-lg border-l-[3px] border-primary bg-muted/60 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-medium text-primary">
+                  {replyingTo.sender === 'user' ? conv.name : replyingTo.byAdvisor ? 'Experto' : 'Bot'}
+                </div>
+                <div className="truncate text-[12.5px] text-muted-foreground">
+                  {replyingTo.type === 'audio'
+                    ? '🎙️ Nota de voz'
+                    : replyingTo.type === 'image'
+                      ? '📷 Foto'
+                      : replyingTo.content}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyingTo(null)}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+                aria-label="Cancelar respuesta"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
           )}
           {recording ? (
@@ -1065,6 +1111,11 @@ function ChatPanel({ conv }: { conv: ConversationRow }) {
             setShowShared(false);
           }}
           onOpenShared={() => setShowShared(true)}
+          onOpenSearch={() => {
+            setShowInfo(false);
+            setShowShared(false);
+            setShowSearch(true);
+          }}
         />
       ) : null}
     </div>
@@ -1135,12 +1186,15 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('todas');
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<CtxTarget | null>(null);
   const labels = useQuery(api.labels.listLabels);
 
   const filtered = useMemo(() => {
     if (!conversations) return [];
     const q = search.trim().toLowerCase();
     return conversations.filter((c) => {
+      // Las archivadas no aparecen en el listado principal.
+      if (c.archived) return false;
       if (q && !c.name.toLowerCase().includes(q) && !c.phone.includes(q)) return false;
       if (labelFilter && !c.labels.some((l) => String(l.id) === labelFilter)) return false;
       if (filter === 'ai') return c.status === 'ai';
@@ -1243,6 +1297,17 @@ export default function App() {
                 conv={c}
                 active={c.conversationId === selectedId}
                 onClick={() => openConversation(c)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setCtxMenu({
+                    conversationId: c.conversationId,
+                    pinned: c.pinned,
+                    archived: c.archived,
+                    labelIds: c.labels.map((l) => String(l.id)),
+                    x: e.clientX,
+                    y: e.clientY,
+                  });
+                }}
               />
             ))
           )}
@@ -1254,6 +1319,11 @@ export default function App() {
         <ChatPanel key={selected.conversationId} conv={selected} />
       ) : (
         <ChatHomeScreen />
+      )}
+
+      {/* Menú de clic derecho sobre una conversación */}
+      {ctxMenu && (
+        <ConversationContextMenu target={ctxMenu} onClose={() => setCtxMenu(null)} />
       )}
     </div>
   );

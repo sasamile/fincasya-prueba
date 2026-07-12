@@ -16,10 +16,12 @@ export function ContactInfo({
   conversationId,
   onClose,
   onOpenShared,
+  onOpenSearch,
 }: {
   conversationId: Id<'conversations'>;
   onClose: () => void;
   onOpenShared: () => void;
+  onOpenSearch?: () => void;
 }) {
   const info = useQuery(api.inbox.getContactInfo, { conversationId });
   const updateName = useMutation(api.inbox.updateContactName);
@@ -256,7 +258,30 @@ export function ContactInfo({
         </div>
       </div>
 
-      {/* Búsqueda escondida: campo de búsqueda del cliente */}
+      <footer className="shrink-0 border-t border-border/70 px-6 py-5">
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          className="mx-auto mb-4 flex flex-col items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-muted">
+            <Search className="h-5 w-5" />
+          </span>
+          <span className="text-[13px]">Busca</span>
+        </button>
+
+        {info.labels.length > 0 ? (
+          <div className="flex flex-wrap justify-center gap-x-5 gap-y-2">
+            {info.labels.map((l) => (
+              <span key={l.id} className="inline-flex items-center gap-1.5 text-[13px] text-foreground">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: l.color }} />
+                {l.emoji ? `${l.emoji} ` : ''}
+                {l.name}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </footer>
     </aside>
   );
 }

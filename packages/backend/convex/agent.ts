@@ -538,6 +538,33 @@ export const toolEscalar = internalMutation({
   },
 });
 
+/**
+ * Envía el saludo especial a un PROPIETARIO y lo guarda como mensaje del
+ * asistente. La conversación ya quedó escalada a humano en el ingest; esto
+ * solo manda el "hola" cordial antes de que el Experto tome el chat.
+ */
+export const sendOwnerGreeting = internalAction({
+  args: {
+    conversationId: v.id('conversations'),
+    to: v.string(),
+    text: v.string(),
+  },
+  handler: async (ctx, { conversationId, to, text }): Promise<void> => {
+    let wamid: string | undefined;
+    try {
+      const sent = await sendWhatsappText({ to, text });
+      wamid = sent.wamid;
+    } catch (err) {
+      console.error('[agent] fallo el saludo de propietario', err);
+    }
+    await ctx.runMutation(internal.agent.saveAssistantMessage, {
+      conversationId,
+      content: text,
+      wamid,
+    });
+  },
+});
+
 const TOOL_DEFS: ToolDef[] = [
   {
     type: 'function',
@@ -1046,5 +1073,68 @@ export const runAgentTurn = internalAction({
     if (escalated) {
       console.log('[agent] conversacion escalada a humano', { conversationId });
     }
+  },
+});
+
+/**
+ * PRUEBA DE TONO (solo dev): genera una respuesta con el MISMO prompt + RAG que
+ * produccion, pero SIN enviar nada por WhatsApp ni escribir en la base. Sirve
+ * para verificar el tuteo/emojis sin tocar clientes reales. Sin tools: el
+ * modelo responde texto directo (no consulta catalogo ni escala).
+ */
+export const testTone = internalAction({
+  args: {
+    clientMessage: v.string(),
+    contactName: v.optional(v.string()),
+    firstTurn: v.optional(v.boolean()),
+    history: v.optional(
+      v.array(v.object({ sender: v.union(v.literal('user'), v.literal('assistant')), content: v.string() })),
+    ),
+  },
+  handler: async (ctx, args): Promise<{ response: string | null }> => {
+    // CAPA 2 — mismos ejemplares curados que produccion.
+    let exemplars: Array<{ clientMessage: string; response: string }> = [];
+    try {
+      const [queryEmbedding] = await embedTexts([args.clientMessage]);
+      if (queryEmbedding) {
+        const hits = await ctx.vectorSearch('exemplars', 'by_embedding', {
+          vector: queryEmbedding,
+          limit: 4,
+          filter: (q) => q.eq('enabled', true),
+        });
+        exemplars = await ctx.runQuery(internal.exemplars.getByIds, {
+          ids: hits.map((h) => h._id),
+        });
+      }
+    } catch (err) {
+      console.error('[agent:testTone] RAG fallo, sigo sin ejemplos', err);
+    }
+
+    const todayIso = new Date().toLocaleDateString('es-CO', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'long',
+    });
+    const messages: ChatMessage[] = [
+      {
+        role: 'system',
+        content: buildSystemPrompt({
+          exemplars,
+          contactName: args.contactName,
+          todayIso,
+          firstTurn: args.firstTurn ?? false,
+        }),
+      },
+      ...(args.history ?? []).map((m): ChatMessage =>
+        m.sender === 'user'
+          ? { role: 'user', content: m.content }
+          : { role: 'assistant', content: m.content },
+      ),
+      { role: 'user', content: args.clientMessage },
+    ];
+    const { content } = await chatCompletion({ messages });
+    return { response: content };
   },
 });

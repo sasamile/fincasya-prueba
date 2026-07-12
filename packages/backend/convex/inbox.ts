@@ -21,7 +21,7 @@ import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { v } from 'convex/values';
-import { sendWhatsappText } from './lib/ycloud';
+import { sendWhatsappReaction, sendWhatsappText } from './lib/ycloud';
 import { sendCatalogCard, BETWEEN_CATALOG_SENDS_MS, MAX_CATALOG_CARDS, formatCop } from './lib/catalogSend';
 import {
   buildWebFichaCaption,
@@ -80,6 +80,9 @@ export const listConversations = query({
         lastMessageAt: c.lastMessageAt ?? c.createdAt,
         aiEligible: isQuickEligibleForAi(c).eligible,
         aiManualOverride: c.aiManualOverride ?? false,
+        pinned: c.pinned ?? false,
+        archived: c.archived ?? false,
+        isOwner: c.isOwner ?? false,
         labels,
         preview: lastMsg
           ? {
@@ -94,6 +97,8 @@ export const listConversations = query({
           : null,
       });
     }
+    // Fijadas primero; dentro de cada grupo se respeta el orden por último mensaje.
+    out.sort((a, b) => Number(b.pinned) - Number(a.pinned));
     return out;
   },
 });
@@ -182,6 +187,8 @@ export const getMessages = query({
         byAdvisor: Boolean(m.sentByUserId),
         reaction: m.reaction ?? null,
         transcription: m.transcription ?? null,
+        // wamid: necesario para citar (Responder) y reaccionar por WhatsApp.
+        wamid: m.wamid ?? null,
         product,
         replyTo,
       });
@@ -204,12 +211,19 @@ export const getContactInfo = query({
       .withIndex('by_conversation', (q) => q.eq('conversationId', conversationId))
       .collect();
     const sharedCount = msgs.filter((m) => m.mediaUrl || m.type === 'product').length;
+    const allLabels = await ctx.db.query('labels').collect();
+    const labelById = new Map(allLabels.map((l) => [String(l._id), l]));
+    const labels = (conv.labelIds ?? [])
+      .map((id) => labelById.get(String(id)))
+      .filter((l): l is NonNullable<typeof l> => !!l)
+      .map((l) => ({ id: l._id, name: l.name, color: l.color, emoji: l.emoji ?? null }));
     return {
       name: c.name,
       phone: c.phone,
       notes: c.notes ?? '',
       photoUrl: c.photoUrl ?? null,
       sharedCount,
+      labels,
     };
   },
 });
@@ -337,8 +351,13 @@ export const setContactPhoto = mutation({
 });
 
 export const sendAdvisorMessage = mutation({
-  args: { conversationId: v.id('conversations'), content: v.string() },
-  handler: async (ctx, { conversationId, content }) => {
+  args: {
+    conversationId: v.id('conversations'),
+    content: v.string(),
+    /** wamid del mensaje citado (Responder). */
+    replyToWamid: v.optional(v.string()),
+  },
+  handler: async (ctx, { conversationId, content, replyToWamid }) => {
     const text = content.trim();
     if (!text) return;
     const conversation = await ctx.db.get(conversationId);
@@ -350,6 +369,7 @@ export const sendAdvisorMessage = mutation({
       content: text,
       type: 'text',
       sentByUserId: ADVISOR_SENDER_ID,
+      replyToWamid,
       createdAt: now,
     });
     // El Experto toma el control: el agente IA deja de responder este chat.
@@ -460,13 +480,13 @@ export const getDeliveryInfo = internalMutation({
   handler: async (
     ctx,
     { messageId, conversationId },
-  ): Promise<{ phone: string; content: string } | null> => {
+  ): Promise<{ phone: string; content: string; replyToWamid?: string } | null> => {
     const message = await ctx.db.get(messageId);
     const conversation = await ctx.db.get(conversationId);
     if (!message || !conversation) return null;
     const contact = await ctx.db.get(conversation.contactId);
     if (!contact?.phone) return null;
-    return { phone: contact.phone, content: message.content };
+    return { phone: contact.phone, content: message.content, replyToWamid: message.replyToWamid };
   },
 });
 
@@ -487,21 +507,96 @@ export const markDelivery = internalMutation({
 export const deliverAdvisorMessage = internalAction({
   args: { messageId: v.id('messages'), conversationId: v.id('conversations') },
   handler: async (ctx, { messageId, conversationId }): Promise<void> => {
-    const info: { phone: string; content: string } | null = await ctx.runMutation(
-      internal.inbox.getDeliveryInfo,
-      { messageId, conversationId },
-    );
+    const info: { phone: string; content: string; replyToWamid?: string } | null =
+      await ctx.runMutation(internal.inbox.getDeliveryInfo, { messageId, conversationId });
     if (!info) return;
     let wamid: string | undefined;
     let failed = false;
     try {
-      const sent = await sendWhatsappText({ to: info.phone, text: info.content });
+      const sent = await sendWhatsappText({
+        to: info.phone,
+        text: info.content,
+        contextWamid: info.replyToWamid,
+      });
       wamid = sent.wamid;
     } catch (err) {
       failed = true;
       console.error('[inbox] fallo el envio del mensaje del Experto', err);
     }
     await ctx.runMutation(internal.inbox.markDelivery, { messageId, wamid, failed });
+  },
+});
+
+/* ─────────────────────────────────────────────────────────────
+ * Menú por burbuja: reaccionar a un mensaje del cliente.
+ * ───────────────────────────────────────────────────────────── */
+
+export const getReactionTarget = internalQuery({
+  args: { conversationId: v.id('conversations'), messageId: v.id('messages') },
+  handler: async (ctx, { conversationId, messageId }): Promise<{ phone: string; wamid: string } | null> => {
+    const message = await ctx.db.get(messageId);
+    const conversation = await ctx.db.get(conversationId);
+    if (!message || !conversation || !message.wamid) return null;
+    const contact = await ctx.db.get(conversation.contactId);
+    if (!contact?.phone) return null;
+    return { phone: contact.phone, wamid: message.wamid };
+  },
+});
+
+export const setMessageReactionLocal = internalMutation({
+  args: { messageId: v.id('messages'), emoji: v.string() },
+  handler: async (ctx, { messageId, emoji }) => {
+    await ctx.db.patch(messageId, { reaction: emoji || undefined });
+  },
+});
+
+/** Reacciona (emoji) a un mensaje del cliente vía WhatsApp. Emoji vacío la quita. */
+export const reactToClientMessage = action({
+  args: {
+    conversationId: v.id('conversations'),
+    messageId: v.id('messages'),
+    emoji: v.string(),
+  },
+  handler: async (ctx, { conversationId, messageId, emoji }): Promise<{ ok: boolean; motivo?: string }> => {
+    const target = await ctx.runQuery(internal.inbox.getReactionTarget, { conversationId, messageId });
+    if (!target) return { ok: false, motivo: 'No se puede reaccionar a este mensaje' };
+    try {
+      await sendWhatsappReaction({ to: target.phone, wamid: target.wamid, emoji });
+    } catch (err) {
+      console.error('[inbox] fallo la reacción', err);
+      return { ok: false, motivo: err instanceof Error ? err.message : 'Error al reaccionar' };
+    }
+    await ctx.runMutation(internal.inbox.setMessageReactionLocal, { messageId, emoji });
+    return { ok: true };
+  },
+});
+
+/* ─────────────────────────────────────────────────────────────
+ * Menú del sidebar (clic derecho): fijar, archivar, marcar no leído.
+ * ───────────────────────────────────────────────────────────── */
+
+export const setConversationPinned = mutation({
+  args: { conversationId: v.id('conversations'), pinned: v.boolean() },
+  handler: async (ctx, { conversationId, pinned }) => {
+    await ctx.db.patch(conversationId, { pinned });
+  },
+});
+
+export const setConversationArchived = mutation({
+  args: { conversationId: v.id('conversations'), archived: v.boolean() },
+  handler: async (ctx, { conversationId, archived }) => {
+    await ctx.db.patch(conversationId, { archived });
+  },
+});
+
+export const markConversationUnread = mutation({
+  args: { conversationId: v.id('conversations') },
+  handler: async (ctx, { conversationId }) => {
+    const conv = await ctx.db.get(conversationId);
+    await ctx.db.patch(conversationId, {
+      inboxUnreadCount: Math.max(1, conv?.inboxUnreadCount ?? 0),
+      inboxLastReadAt: undefined,
+    });
   },
 });
 
