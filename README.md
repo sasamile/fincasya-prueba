@@ -7,7 +7,7 @@ bun install
 ```
 
 To run:
-
+headroom wrap claude
 ```bash
 bun run index.ts
 ```

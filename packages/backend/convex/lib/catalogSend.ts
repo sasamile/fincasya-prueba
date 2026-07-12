@@ -8,7 +8,7 @@
 
 const SEND_DIRECTLY = 'https://api.ycloud.com/v2/whatsapp/messages/sendDirectly';
 /** Pausa entre fichas — evita que Meta las agrupe en "Catalogo enviado". */
-const BETWEEN_SENDS_MS = 1500;
+export const BETWEEN_CATALOG_SENDS_MS = 1000;
 /**
  * Maximo de fichas EXITOSAS por envio (regla del equipo: se mandan hartas,
  * 16-20 fincas por lote; WhatsApp permite hasta 30).
@@ -54,6 +54,53 @@ function wamidFrom(parsed: unknown): string | undefined {
   return undefined;
 }
 
+export async function sendCatalogCard(args: {
+  to: string;
+  catalogId: string;
+  card: CatalogCard;
+}): Promise<CatalogSendRow> {
+  const { apiKey, wabaNumber } = requireYcloudEnv();
+  const res = await fetch(SEND_DIRECTLY, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-API-Key': apiKey,
+    },
+    body: JSON.stringify({
+      from: wabaNumber,
+      to: args.to,
+      type: 'interactive',
+      interactive: {
+        type: 'product',
+        body: { text: args.card.bodyText },
+        footer: { text: 'FincasYa' },
+        action: {
+          catalog_id: args.catalogId,
+          product_retailer_id: args.card.productRetailerId,
+        },
+      },
+    }),
+  });
+  const text = await res.text();
+  if (res.ok) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = undefined;
+    }
+    return {
+      productRetailerId: args.card.productRetailerId,
+      wamid: wamidFrom(parsed),
+      ok: true,
+    };
+  }
+  console.error(
+    `[catalog] ficha ${args.card.productRetailerId} fallo — se omite: ${res.status} ${text.slice(0, 220)}`,
+  );
+  return { productRetailerId: args.card.productRetailerId, ok: false };
+}
+
 export async function sendCatalogCards(args: {
   to: string;
   catalogId: string;
@@ -61,7 +108,6 @@ export async function sendCatalogCards(args: {
   /** Corta cuando este numero de fichas SALIO bien (default 12). */
   maxOk?: number;
 }): Promise<CatalogSendRow[]> {
-  const { apiKey, wabaNumber } = requireYcloudEnv();
   const rows: CatalogSendRow[] = [];
   const maxOk = args.maxOk ?? MAX_CATALOG_CARDS;
   let okCount = 0;
@@ -70,50 +116,11 @@ export async function sendCatalogCards(args: {
   for (let i = 0; i < cards.length; i++) {
     if (okCount >= maxOk) break;
     const card = cards[i];
-    if (sentAny) await new Promise((r) => setTimeout(r, BETWEEN_SENDS_MS));
-    const res = await fetch(SEND_DIRECTLY, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'X-API-Key': apiKey,
-      },
-      body: JSON.stringify({
-        from: wabaNumber,
-        to: args.to,
-        type: 'interactive',
-        interactive: {
-          type: 'product',
-          body: { text: card.bodyText },
-          footer: { text: 'FincasYa' },
-          action: {
-            catalog_id: args.catalogId,
-            product_retailer_id: card.productRetailerId,
-          },
-        },
-      }),
-    });
-    const text = await res.text();
+    if (sentAny) await new Promise((r) => setTimeout(r, BETWEEN_CATALOG_SENDS_MS));
     sentAny = true;
-    if (res.ok) {
-      okCount++;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = undefined;
-      }
-      rows.push({
-        productRetailerId: card.productRetailerId,
-        wamid: wamidFrom(parsed),
-        ok: true,
-      });
-    } else {
-      // Ficha mala NO aborta el resto (regla del sistema anterior).
-      console.error(
-        `[catalog] ficha ${card.productRetailerId} fallo — se omite: ${res.status} ${text.slice(0, 220)}`,
-      );
-      rows.push({ productRetailerId: card.productRetailerId, ok: false });
-    }
+    const row = await sendCatalogCard({ to: args.to, catalogId: args.catalogId, card });
+    rows.push(row);
+    if (row.ok) okCount++;
   }
   return rows;
 }

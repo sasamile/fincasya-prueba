@@ -38,9 +38,40 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
       audio?: { link?: string };
       video?: { link?: string; caption?: string };
       document?: { link?: string; caption?: string; filename?: string };
+      reaction?: { messageId?: string; message_id?: string; emoji?: string };
+      context?: { id?: string; messageId?: string; message_id?: string };
+    };
+    whatsappMessage?: {
+      id?: string;
+      wamid?: string;
+      status?: string;
     };
   };
 
+  // ── 1) Actualización de estado de un saliente (entregado / leído / falló) ──
+  if (parsed.type === 'whatsapp.message.updated' && parsed.whatsappMessage) {
+    const wm = parsed.whatsappMessage;
+    const wamid = wm.wamid ?? wm.id;
+    const raw = (wm.status ?? '').toLowerCase();
+    const status =
+      raw === 'read'
+        ? 'read'
+        : raw === 'delivered'
+          ? 'delivered'
+          : raw === 'sent'
+            ? 'sent'
+            : raw === 'failed' || raw === 'undeliverable'
+              ? 'failed'
+              : raw === 'accepted'
+                ? 'accepted'
+                : null;
+    if (wamid && status) {
+      await ctx.runMutation(internal.inbound.updateMessageStatusByWamid, { wamid, status });
+    }
+    return json200();
+  }
+
+  // ── 2) Mensaje entrante (incluye reacciones y respuestas citadas) ──
   if (
     parsed.type === 'whatsapp.inbound_message.received' &&
     parsed.whatsappInboundMessage
@@ -50,6 +81,18 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
     const name = (evt.customerProfile?.name ?? '').trim();
     const wamid = evt.wamid ?? evt.id;
     const eventId = parsed.id ?? wamid ?? `evt_${Date.now()}`;
+
+    // 2a) Reacción sobre uno de NUESTROS mensajes → se guarda como emoji.
+    if (evt.type === 'reaction' && evt.reaction) {
+      const targetWamid = evt.reaction.messageId ?? evt.reaction.message_id;
+      if (targetWamid) {
+        await ctx.runMutation(internal.inbound.setMessageReaction, {
+          wamid: targetWamid,
+          emoji: (evt.reaction.emoji ?? '').trim(),
+        });
+      }
+      return json200();
+    }
 
     let content = '';
     let msgType: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text';
@@ -74,6 +117,9 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
       content = evt.document.filename?.trim() || '[documento]';
     }
 
+    // Respuesta citada: wamid del mensaje al que responde el cliente.
+    const replyToWamid = evt.context?.id ?? evt.context?.messageId ?? evt.context?.message_id;
+
     if (phone && content) {
       await ctx.runMutation(internal.inbound.ingestInboundMessage, {
         eventId,
@@ -83,15 +129,20 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
         msgType,
         mediaUrl,
         wamid,
+        replyToWamid,
       });
     }
   }
 
+  return json200();
+});
+
+function json200(): Response {
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
-});
+}
 
 for (const path of ['/ycloud/webhook', '/webhooks/ycloud']) {
   http.route({ path, method: 'POST', handler: ycloudWebhookHandler });

@@ -60,6 +60,10 @@ export default defineSchema(
       fechaNacimiento: v.optional(v.string()),
       /** Fotos de cédula subidas desde el link de contrato (frente/reverso). */
       cedulaPhotoUrls: v.optional(v.array(v.string())),
+      /** Notas libres del Experto sobre el cliente (panel "Info. del contacto"). */
+      notes: v.optional(v.string()),
+      /** Foto de perfil del cliente asignada desde el inbox. */
+      photoUrl: v.optional(v.string()),
       createdAt: v.number(),
       updatedAt: v.optional(v.number()),
     })
@@ -129,6 +133,8 @@ export default defineSchema(
        * aunque ya haya catalogo/proceso. false/undefined = solo auto en chats nuevos.
        */
       aiManualOverride: v.optional(v.boolean()),
+      /** Listas/etiquetas asignadas a la conversación (estilo WhatsApp Business). */
+      labelIds: v.optional(v.array(v.id('labels'))),
     })
       .index('by_contact', ['contactId'])
       .index('by_status', ['status'])
@@ -136,6 +142,27 @@ export default defineSchema(
       .index('by_last_message', ['lastMessageAt'])
       .index('by_operational_state', ['operationalState'])
       .index('by_assigned_user', ['assignedUserId']),
+
+    /** Listas/etiquetas del inbox (nombre + color + emoji), estilo WhatsApp Business. */
+    labels: defineTable({
+      name: v.string(),
+      /** Color hex (ej. "#21c063"). */
+      color: v.string(),
+      /** Emoji opcional para la lista. */
+      emoji: v.optional(v.string()),
+      order: v.optional(v.number()),
+      createdAt: v.number(),
+    }),
+
+    /** Respuestas rápidas del Experto (atajos "/gracias", "/horario", …). */
+    quickReplies: defineTable({
+      /** Atajo sin la barra (ej. "gracias"). Único. */
+      shortcut: v.string(),
+      /** Texto que se inserta al elegir la respuesta. */
+      message: v.string(),
+      createdAt: v.number(),
+      updatedAt: v.optional(v.number()),
+    }).index('by_shortcut', ['shortcut']),
 
     messages: defineTable({
       conversationId: v.id('conversations'),
@@ -183,6 +210,12 @@ export default defineSchema(
       deletedAt: v.optional(v.number()),
       /** Última edición del contenido. */
       editedAt: v.optional(v.number()),
+      /** Emoji de reacción sobre ESTE mensaje (última reacción; vacío = sin reacción). */
+      reaction: v.optional(v.string()),
+      /** wamid del mensaje citado (cuando este mensaje es respuesta a otro). */
+      replyToWamid: v.optional(v.string()),
+      /** Transcripción de la nota de voz (bajo demanda desde el inbox). */
+      transcription: v.optional(v.string()),
     })
       .index('by_conversation', ['conversationId', 'createdAt'])
       .index('by_wamid', ['wamid']),
@@ -349,6 +382,61 @@ export default defineSchema(
       url: v.string(),
       order: v.optional(v.number()),
     }).index('by_property', ['propertyId']),
+
+    /**
+     * Características/amenidades de cada finca (portado de fincasya-new).
+     * `iconId`/`zoneTemplateSourceId` se guardan como texto: en `prueba` no
+     * existe la tabla `iconography` ni las plantillas de zona.
+     */
+    propertyFeatures: defineTable({
+      propertyId: v.id('properties'),
+      name: v.string(),
+      iconId: v.optional(v.string()),
+      featureId: v.optional(v.string()),
+      quantity: v.optional(v.number()),
+      zone: v.optional(v.string()),
+      zoneTemplateSourceId: v.optional(v.string()),
+    }).index('by_property', ['propertyId']),
+
+    /** Datos del propietario, cuentas bancarias y check-in (portado de fincasya-new). */
+    propertyOwnerInfo: defineTable({
+      propertyId: v.id('properties'),
+      ownerUserId: v.string(),
+      rutNumber: v.string(),
+      bankName: v.string(),
+      accountNumber: v.string(),
+      bankAccounts: v.optional(
+        v.array(
+          v.object({
+            id: v.string(),
+            bankName: v.string(),
+            accountNumber: v.string(),
+            accountType: v.optional(v.string()),
+            accountHolderName: v.optional(v.string()),
+          }),
+        ),
+      ),
+      rntNumber: v.string(),
+      propietarioNombre: v.optional(v.string()),
+      propietarioTratamiento: v.optional(v.string()),
+      propietarioTelefono: v.optional(v.string()),
+      propietarioCedula: v.optional(v.string()),
+      propietarioCorreo: v.optional(v.string()),
+      checkinUbicacionUrl: v.optional(v.string()),
+      checkinWazeUrl: v.optional(v.string()),
+      checkinIndicacionesLlegada: v.optional(v.string()),
+      checkinRecomendaciones: v.optional(v.string()),
+      checkinUbicacionImageUrl: v.optional(v.string()),
+      checkinUbicacionImageUrls: v.optional(v.array(v.string())),
+      bankCertificationUrl: v.optional(v.string()),
+      idCopyUrl: v.optional(v.string()),
+      rntPdfUrl: v.optional(v.string()),
+      chamberOfCommerceUrl: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index('by_property', ['propertyId'])
+      .index('by_owner', ['ownerUserId']),
 
 
     propertyPricing: defineTable({

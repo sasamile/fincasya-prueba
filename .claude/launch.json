@@ -6,6 +6,12 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "server.ts"],
       "port": 3789
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--filter", "@fincasya/web", "dev"],
+      "port": 3789
     }
   ]
 }

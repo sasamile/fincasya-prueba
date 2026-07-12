@@ -14,6 +14,57 @@ import {
 const AGENT_DEBOUNCE_MS = 7000;
 const SETTINGS_KEY = 'default';
 
+/** Orden de estados de WhatsApp: solo se avanza hacia adelante, nunca atrás. */
+const STATUS_RANK: Record<string, number> = {
+  failed: 0,
+  accepted: 1,
+  sent: 2,
+  delivered: 3,
+  read: 4,
+};
+
+/** Actualiza el estado de entrega/lectura de un saliente por su wamid (webhook). */
+export const updateMessageStatusByWamid = internalMutation({
+  args: {
+    wamid: v.string(),
+    status: v.union(
+      v.literal('failed'),
+      v.literal('accepted'),
+      v.literal('sent'),
+      v.literal('delivered'),
+      v.literal('read'),
+    ),
+  },
+  handler: async (ctx, { wamid, status }) => {
+    const msg = await ctx.db
+      .query('messages')
+      .withIndex('by_wamid', (q) => q.eq('wamid', wamid))
+      .first();
+    if (!msg) return { found: false };
+    const current = msg.whatsappStatus ?? 'accepted';
+    // 'failed' siempre se aplica; el resto solo avanza.
+    if (status !== 'failed' && (STATUS_RANK[status] ?? 0) <= (STATUS_RANK[current] ?? 0)) {
+      return { found: true, skipped: true };
+    }
+    await ctx.db.patch(msg._id, { whatsappStatus: status });
+    return { found: true };
+  },
+});
+
+/** Registra/limpia una reacción (emoji) sobre un mensaje por su wamid (webhook). */
+export const setMessageReaction = internalMutation({
+  args: { wamid: v.string(), emoji: v.string() },
+  handler: async (ctx, { wamid, emoji }) => {
+    const msg = await ctx.db
+      .query('messages')
+      .withIndex('by_wamid', (q) => q.eq('wamid', wamid))
+      .first();
+    if (!msg) return { found: false };
+    await ctx.db.patch(msg._id, { reaction: emoji || undefined });
+    return { found: true };
+  },
+});
+
 export const ingestInboundMessage = internalMutation({
   args: {
     eventId: v.string(),
@@ -29,6 +80,7 @@ export const ingestInboundMessage = internalMutation({
     ),
     mediaUrl: v.optional(v.string()),
     wamid: v.optional(v.string()),
+    replyToWamid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const seen = await ctx.db
@@ -92,6 +144,7 @@ export const ingestInboundMessage = internalMutation({
       type: args.msgType,
       mediaUrl: args.mediaUrl,
       wamid: args.wamid,
+      replyToWamid: args.replyToWamid,
       metadata: { source: 'ycloud_inbound_webhook' },
       createdAt: now,
     });

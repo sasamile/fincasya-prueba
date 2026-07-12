@@ -5,7 +5,12 @@
   "scripts": {
     "dev": "convex dev",
     "deploy": "convex deploy",
-    "typecheck": "tsc --noEmit -p convex"
+    "typecheck": "tsc --noEmit -p convex",
+    "catalog:audit": "convex run admin:auditCatalogMappings",
+    "catalog:fix": "convex run admin:fixCatalogMappingsFromProperties",
+    "catalog:fix:dry": "convex run admin:fixCatalogMappingsFromProperties '{\"dryRun\": true}'",
+    "catalog:sync": "convex run admin:syncCatalogFromMeta",
+    "catalog:sync:dry": "convex run admin:syncCatalogFromMeta '{\"dryRun\": true}'"
   },
   "exports": {
     "./convex/_generated/api": {

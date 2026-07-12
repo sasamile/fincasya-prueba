@@ -33,6 +33,8 @@ import {
   prependGreetingIfNeeded,
 } from './lib/copys';
 import { detectPriceLoopEscalation, isPriceDeflection, isPriceQuestion } from './lib/agentEscalation';
+import { detectPuenteFestivo, humanHolidayEs } from './lib/colombiaPublicHolidays';
+import { propertyMatchesZone, resolveZoneKeywords } from './lib/zoneProximity';
 import { sendWhatsappText } from './lib/ycloud';
 import {
   formatCop,
@@ -147,15 +149,10 @@ export const toolBuscarFincas = internalQuery({
   },
   handler: async (ctx, { personas, zona }): Promise<FincaResult[]> => {
     const all = await ctx.db.query('properties').collect();
-    const zonaLower = zona?.toLowerCase();
+    const zoneKw = zona ? resolveZoneKeywords(zona).keywords : [];
     const matches = all
       .filter((p) => (personas ? (p.eventCapacity ?? p.capacity) >= personas : true))
-      .filter((p) =>
-        zonaLower
-          ? p.location.toLowerCase().includes(zonaLower) ||
-            (p.departamentos ?? []).some((d) => d.toLowerCase().includes(zonaLower))
-          : true,
-      )
+      .filter((p) => propertyMatchesZone(p.location, p.departamentos, zoneKw))
       .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
       .slice(0, 8);
     return matches.map((p) => ({
@@ -261,17 +258,15 @@ export const toolCatalogPick = internalQuery({
     if (!catalog) return { ok: false, motivo: 'no hay catalogo WhatsApp configurado' };
 
     const all = await ctx.db.query('properties').collect();
-    const zonaLower = zona?.trim().toLowerCase() || undefined;
+    const zonaTrim = zona?.trim() || undefined;
+    const zoneKw = zonaTrim ? resolveZoneKeywords(zonaTrim).keywords : [];
+    // Palabra clave "principal" (para el tier de coincidencia exacta del orden).
+    const zonaLower = zonaTrim?.toLowerCase();
 
     const base = all
       .filter((p) => !exclude.has(String(p._id)))
       .filter((p) => p.visible !== false && p.visibleInWhatsAppCatalog !== false)
-      .filter((p) =>
-        zonaLower
-          ? p.location.toLowerCase().includes(zonaLower) ||
-            (p.departamentos ?? []).some((d) => d.toLowerCase().includes(zonaLower))
-          : true,
-      )
+      .filter((p) => propertyMatchesZone(p.location, p.departamentos, zoneKw))
       .filter((p) => (mascotas ? p.allowsPets === true : true));
 
     // Pasadas de capacidad: estricta → relajada → solo minimo.
@@ -479,22 +474,45 @@ export const toolConsultarTemporada = internalQuery({
       .map((t) => ({
         temporada: t,
         minimoNoches: REGLAS_NOCHES[t].min,
-        maximoNoches: REGLAS_NOCHES[t].max,
+        maximoNoches: REGLAS_NOCHES[t].max as number | undefined,
         cumple:
           noches >= REGLAS_NOCHES[t].min &&
           (REGLAS_NOCHES[t].max === undefined || noches <= REGLAS_NOCHES[t].max!),
       }));
 
+    // Puente festivo (calendario real de Colombia): mínimo 2 noches. Se calcula
+    // aunque no haya una regla de temporada de precios que coincida.
+    const puente = detectPuenteFestivo(fechaEntrada, fechaSalida);
+    let puenteNota = '';
+    if (puente.puente) {
+      const yaEsta = reglasOut.some((r) => r.temporada === 'Puente festivo');
+      if (!yaEsta) {
+        reglasOut.push({
+          temporada: 'Puente festivo',
+          minimoNoches: 2,
+          maximoNoches: undefined,
+          cumple: noches >= 2,
+        });
+      }
+      const dia = puente.holidayYmd ? humanHolidayEs(puente.holidayYmd) : 'un día festivo';
+      puenteNota =
+        noches < 2
+          ? `Estas fechas caen en PUENTE FESTIVO (${dia} es festivo en Colombia): la estancia mínima es de 2 noches. Avisa al cliente y pide ajustar la fecha de salida ANTES de enviar catálogo.`
+          : `Estas fechas son puente festivo (${dia}); cumplen el mínimo de 2 noches.`;
+    }
+
+    const baseNota =
+      reglasOut.length > 0
+        ? 'si alguna regla no se cumple, avisa al cliente el minimo/maximo y pide ajustar fechas ANTES de enviar catalogo'
+        : temporadas.length > 0
+          ? `fechas en ${temporadas.join(', ')}: los precios varian segun temporada`
+          : 'fechas en temporada normal (fin de semana sin festivo: minimo 1 noche; con puente festivo: minimo 2)';
+
     return {
       noches,
       temporadas,
       reglas: reglasOut,
-      nota:
-        reglasOut.length > 0
-          ? 'si alguna regla no se cumple, avisa al cliente el minimo/maximo y pide ajustar fechas ANTES de enviar catalogo'
-          : temporadas.length > 0
-            ? `fechas en ${temporadas.join(', ')}: los precios varian segun temporada`
-            : 'fechas en temporada normal (fin de semana sin festivo: minimo 1 noche; con puente festivo: minimo 2)',
+      nota: puenteNota ? `${puenteNota} ${baseNota}` : baseNota,
     };
   },
 });

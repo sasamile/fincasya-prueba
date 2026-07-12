@@ -9,7 +9,7 @@
  * Si el analisis falla, se conserva el placeholder y el agente responde
  * igual (sabra que llego un audio/imagen que no pudo procesar).
  */
-import { internalAction, internalMutation, internalQuery } from './_generated/server';
+import { action, internalAction, internalMutation, internalQuery } from './_generated/server';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
 
@@ -33,6 +33,41 @@ export const patchMessageContent = internalMutation({
   args: { messageId: v.id('messages'), content: v.string() },
   handler: async (ctx, { messageId, content }) => {
     await ctx.db.patch(messageId, { content });
+  },
+});
+
+/** Guarda la transcripción de una nota de voz en el mensaje. */
+export const patchMessageTranscription = internalMutation({
+  args: { messageId: v.id('messages'), transcription: v.string() },
+  handler: async (ctx, { messageId, transcription }) => {
+    await ctx.db.patch(messageId, { transcription });
+  },
+});
+
+/**
+ * Transcribe la nota de voz de un mensaje BAJO DEMANDA (botón "Transcribir"
+ * del inbox) y la guarda en `transcription`. Idempotente: si ya está, la
+ * devuelve sin re-transcribir.
+ */
+export const transcribeMessageAudio = action({
+  args: { messageId: v.id('messages') },
+  handler: async (ctx, { messageId }): Promise<{ ok: boolean; text?: string; motivo?: string }> => {
+    const msg = await ctx.runQuery(internal.media.getMessageForMedia, { messageId });
+    if (!msg) return { ok: false, motivo: 'Mensaje no existe' };
+    if (msg.type !== 'audio' || !msg.mediaUrl) return { ok: false, motivo: 'No es una nota de voz' };
+    try {
+      const text = await transcribeAudio(msg.mediaUrl);
+      const clean = text.trim();
+      if (!clean) return { ok: false, motivo: 'No se pudo transcribir (audio vacío)' };
+      await ctx.runMutation(internal.media.patchMessageTranscription, {
+        messageId,
+        transcription: clean,
+      });
+      return { ok: true, text: clean };
+    } catch (err) {
+      console.error('[media] transcripción bajo demanda falló', err);
+      return { ok: false, motivo: err instanceof Error ? err.message : 'Error al transcribir' };
+    }
   },
 });
 

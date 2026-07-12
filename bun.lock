@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "fincasya-v2",
+      "dependencies": {
+        "@types/node": "^26.1.1",
+      },
       "devDependencies": {
         "turbo": "^2",
       },
