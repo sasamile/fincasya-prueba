@@ -159,7 +159,7 @@ export function BlogPostsTable({
             </div>
 
             {/* Desktop ID */}
-            <div className="w-12 h-10 rounded-xl overflow-hidden bg-muted shrink-0 hidden md:block flex items-center justify-center text-sm font-semibold text-muted-foreground/50">
+            <div className="w-12 h-10 rounded-xl overflow-hidden bg-muted shrink-0 hidden md:block items-center justify-center text-sm font-semibold text-muted-foreground/50">
               #{post.id}
             </div>
 
