@@ -1,0 +1,116 @@
+$ tsc --noEmit
+src/app/admin/(dashboard)/reservations/page.tsx(63,3): error TS2305: Module '"@/components/ui/dialog"' has no exported member 'DialogFooter'.
+src/app/api/bookings/[id]/receipts/[receiptId]/approve/route.ts(18,7): error TS2353: Object literal may only specify known properties, and 'amount' does not exist in type '{ reviewedBy?: string | undefined; reviewedAmount?: number | undefined; rejectReason?: string | undefined; status: "approved" | "rejected"; bookingId: Id<"bookings">; receiptId: string; }'.
+src/app/api/bookings/[id]/receipts/[receiptId]/reject/route.ts(17,7): error TS2353: Object literal may only specify known properties, and 'motivo' does not exist in type '{ reviewedBy?: string | undefined; reviewedAmount?: number | undefined; rejectReason?: string | undefined; status: "approved" | "rejected"; bookingId: Id<"bookings">; receiptId: string; }'.
+src/app/api/bookings/payment-receipts/pending/route.ts(15,52): error TS2339: Property 'length' does not exist on type '{ items: Record<string, unknown>[]; total: number; }'.
+src/features/admin/actions/contract-actions.ts(3,24): error TS2307: Cannot find module 'html-to-docx' or its corresponding type declarations.
+src/features/admin/components/admin-guest-list-editor.tsx(7,23): error TS2307: Cannot find module 'xlsx' or its corresponding type declarations.
+src/features/admin/components/admin-guest-list-editor.tsx(52,17): error TS7006: Parameter 'row' implicitly has an 'any' type.
+src/features/admin/components/admin-guest-list-editor.tsx(58,20): error TS7006: Parameter 'g' implicitly has an 'any' type.
+src/features/admin/components/bank-account-dialog.tsx(7,3): error TS2305: Module '"@/components/ui/dialog"' has no exported member 'DialogFooter'.
+src/features/admin/components/bank-account-dialog.tsx(16,37): error TS2307: Cannot find module '@/features/admin/api/payment-images.api' or its corresponding type declarations.
+src/features/admin/components/booking-payments-section.tsx(18,10): error TS2305: Module '"@/features/auth/api/auth.api"' has no exported member 'getCurrentUser'.
+src/features/admin/components/booking-payments-section.tsx(133,14): error TS7006: Parameter 'u' implicitly has an 'any' type.
+src/features/admin/components/category-zone-templates-admin.tsx(23,3): error TS2305: Module '"@/components/ui/dialog"' has no exported member 'DialogFooter'.
+src/features/admin/components/category-zone-templates-admin.tsx(512,15): error TS2322: Type '"primary"' is not assignable to type '"default" | "link" | "outline" | "ghost" | "secondary" | "destructive" | null | undefined'.
+src/features/admin/components/contract-firmantes-section.tsx(11,37): error TS2307: Cannot find module '@/features/admin/api/payment-images.api' or its corresponding type declarations.
+src/features/admin/components/contract-global-setup-sections.tsx(9,32): error TS2307: Cannot find module '@/components/ui/rich-text-editor' or its corresponding type declarations.
+src/features/admin/components/contract-global-setup-sections.tsx(25,3): error TS2305: Module '"@/components/ui/dialog"' has no exported member 'DialogFooter'.
+src/features/admin/components/contracts-reservation-section.tsx(31,3): error TS2305: Module '"@/features/fincas/queries/fincas.queries"' has no exported member 'useCalculateStayPrice'.
+src/features/admin/components/contracts-reservation-section.tsx(35,3): error TS2724: '"@/features/fincas/queries/fincas.queries"' has no exported member named 'usePropietarios'. Did you mean 'useProperties'?
+src/features/admin/components/contracts-reservation-section.tsx(55,30): error TS2307: Cannot find module '@/features/inbox/api/inbox.api' or its corresponding type declarations.
+src/features/admin/components/contracts-reservation-section.tsx(78,43): error TS2307: Cannot find module '@/features/admin/components/shared/guest-capacity-warning-alert' or its corresponding type declarations.
+src/features/admin/components/contracts-reservation-section.tsx(830,10): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/features/admin/components/contracts-reservation-section.tsx(1869,10): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/features/admin/components/deposit-return-section.tsx(25,10): error TS2305: Module '"@/features/auth/api/auth.api"' has no exported member 'getCurrentUser'.
+src/features/admin/components/deposit-return-section.tsx(95,14): error TS7006: Parameter 'u' implicitly has an 'any' type.
+src/features/admin/components/manual-reservation-modal.tsx(9,3): error TS2305: Module '"@/components/ui/dialog"' has no exported member 'DialogFooter'.
+src/features/admin/components/manual-reservation-modal.tsx(56,14): error TS2305: Module '"@/lib/utils"' has no exported member 'formatCOP'.
+src/features/admin/components/manual-reservation-modal.tsx(64,43): error TS2307: Cannot find module '@/features/admin/components/shared/guest-capacity-warning-alert' or its corresponding type declarations.
+src/features/admin/components/manual-reservation-modal.tsx(65,32): error TS2307: Cannot find module '@/lib/pet-fees' or its corresponding type declarations.
+src/features/admin/components/manual-reservation-modal.tsx(3297,17): error TS2322: Type '"primary"' is not assignable to type '"default" | "link" | "outline" | "ghost" | "secondary" | "destructive" | null | undefined'.
+src/features/admin/components/manual-reservation-modal.tsx(3306,17): error TS2322: Type '"primary"' is not assignable to type '"default" | "link" | "outline" | "ghost" | "secondary" | "destructive" | null | undefined'.
+src/features/admin/components/owner-payout-section.tsx(32,10): error TS2305: Module '"@/features/auth/api/auth.api"' has no exported member 'getCurrentUser'.
+src/features/admin/components/owner-payout-section.tsx(177,14): error TS7006: Parameter 'u' implicitly has an 'any' type.
+src/features/admin/components/pricing-rules-management.tsx(39,3): error TS2305: Module '"@/components/ui/dialog"' has no exported member 'DialogFooter'.
+src/features/admin/components/property-reorder.tsx(268,65): error TS2345: Argument of type 'import("/Volumes/SSK/Factory/Fincasya/fincasya-prueba/apps/web/src/features/fincas/types/fincas.types").PropertyResponse' is not assignable to parameter of type 'import("/Volumes/SSK/Factory/Fincasya/fincasya-prueba/apps/web/src/features/landing/types").PropertyResponse'.
+  Types of property 'priceBase' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+src/features/admin/components/property-reorder.tsx(270,66): error TS2345: Argument of type 'import("/Volumes/SSK/Factory/Fincasya/fincasya-prueba/apps/web/src/features/fincas/types/fincas.types").PropertyResponse' is not assignable to parameter of type 'import("/Volumes/SSK/Factory/Fincasya/fincasya-prueba/apps/web/src/features/landing/types").PropertyResponse'.
+  Types of property 'priceBase' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+src/features/admin/components/property-reorder.tsx(276,11): error TS2345: Argument of type 'import("/Volumes/SSK/Factory/Fincasya/fincasya-prueba/apps/web/src/features/fincas/types/fincas.types").PropertyResponse' is not assignable to parameter of type 'import("/Volumes/SSK/Factory/Fincasya/fincasya-prueba/apps/web/src/features/landing/types").PropertyResponse'.
+  Types of property 'priceBase' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+src/features/admin/components/property-reorder.tsx(282,35): error TS2345: Argument of type 'import("/Volumes/SSK/Factory/Fincasya/fincasya-prueba/apps/web/src/features/fincas/types/fincas.types").PropertyResponse' is not assignable to parameter of type 'import("/Volumes/SSK/Factory/Fincasya/fincasya-prueba/apps/web/src/features/landing/types").PropertyResponse'.
+  Types of property 'priceBase' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+src/features/admin/components/property-reorder.tsx(312,36): error TS2345: Argument of type 'string' is not assignable to parameter of type 'Id<"properties">'.
+  Type 'string' is not assignable to type '{ __tableName: "properties"; }'.
+src/features/admin/components/reservation-payment-methods-section.tsx(14,8): error TS2307: Cannot find module '@/components/ui/accordion' or its corresponding type declarations.
+src/features/admin/components/reservation-payment-methods-section.tsx(61,8): error TS2307: Cannot find module '@/features/fincas/api/fincas.api' or its corresponding type declarations.
+src/features/admin/queries/features.queries.ts(92,12): error TS2352: Conversion of type '{ _id: string & { __tableName: "iconography"; }; }' to type 'IconographyItem' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'name' is missing in type '{ _id: string & { __tableName: "iconography"; }; }' but required in type 'IconographyItem'.
+src/features/admin/utils/daily-reservations-excel.ts(1,21): error TS2307: Cannot find module 'exceljs' or its corresponding type declarations.
+src/features/admin/utils/daily-reservations-excel.ts(132,17): error TS7006: Parameter 'cell' implicitly has an 'any' type.
+src/features/admin/utils/daily-reservations-excel.ts(147,17): error TS7006: Parameter 'cell' implicitly has an 'any' type.
+src/features/admin/utils/daily-reservations-excel.ts(147,23): error TS7006: Parameter 'colNumber' implicitly has an 'any' type.
+src/features/admin/utils/report-csv.ts(441,29): error TS2307: Cannot find module 'xlsx' or its corresponding type declarations.
+src/features/ventas/components/create-sale-link-modal.tsx(4,25): error TS2307: Cannot find module 'react-hook-form' or its corresponding type declarations.
+src/features/ventas/components/create-sale-link-modal.tsx(5,29): error TS2307: Cannot find module '@hookform/resolvers/zod' or its corresponding type declarations.
+src/features/ventas/components/create-sale-link-modal.tsx(6,19): error TS2307: Cannot find module 'zod' or its corresponding type declarations.
+src/features/ventas/components/create-sale-link-modal.tsx(17,3): error TS2305: Module '"@/components/ui/dialog"' has no exported member 'DialogFooter'.
+src/features/ventas/components/create-sale-link-modal.tsx(26,8): error TS2307: Cannot find module '@/components/ui/form' or its corresponding type declarations.
+src/features/ventas/components/create-sale-link-modal.tsx(28,26): error TS2307: Cannot find module '@/components/ui/textarea' or its corresponding type declarations.
+src/features/ventas/components/create-sale-link-modal.tsx(35,8): error TS2307: Cannot find module '@/components/ui/accordion' or its corresponding type declarations.
+src/features/ventas/components/create-sale-link-modal.tsx(51,3): error TS2305: Module '"@/features/fincas/queries/fincas.queries"' has no exported member 'useCalculateStayPrice'.
+src/features/ventas/components/create-sale-link-modal.tsx(103,17): error TS7006: Parameter 'data' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(103,23): error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(696,23): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(713,27): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(878,26): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(988,26): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(1016,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(1061,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(1111,30): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(1130,30): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(1151,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(1208,30): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(1243,32): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(1276,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/create-sale-link-modal.tsx(1426,26): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/edit-sale-link-modal.tsx(4,25): error TS2307: Cannot find module 'react-hook-form' or its corresponding type declarations.
+src/features/ventas/components/edit-sale-link-modal.tsx(5,29): error TS2307: Cannot find module '@hookform/resolvers/zod' or its corresponding type declarations.
+src/features/ventas/components/edit-sale-link-modal.tsx(6,19): error TS2307: Cannot find module 'zod' or its corresponding type declarations.
+src/features/ventas/components/edit-sale-link-modal.tsx(15,3): error TS2305: Module '"@/components/ui/dialog"' has no exported member 'DialogFooter'.
+src/features/ventas/components/edit-sale-link-modal.tsx(24,8): error TS2307: Cannot find module '@/components/ui/form' or its corresponding type declarations.
+src/features/ventas/components/edit-sale-link-modal.tsx(26,26): error TS2307: Cannot find module '@/components/ui/textarea' or its corresponding type declarations.
+src/features/ventas/components/edit-sale-link-modal.tsx(101,63): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/features/ventas/components/edit-sale-link-modal.tsx(132,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/edit-sale-link-modal.tsx(145,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/edit-sale-link-modal.tsx(180,30): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/edit-sale-link-modal.tsx(233,26): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/sale-link-document-viewer.tsx(12,39): error TS2307: Cannot find module '@/lib/proof-file-utils' or its corresponding type declarations.
+src/features/ventas/components/step-checkin.tsx(6,36): error TS2307: Cannot find module '@/features/checkin/components/checkin-page-content' or its corresponding type declarations.
+src/features/ventas/components/step-datos-contrato.tsx(4,25): error TS2307: Cannot find module 'react-hook-form' or its corresponding type declarations.
+src/features/ventas/components/step-datos-contrato.tsx(5,29): error TS2307: Cannot find module '@hookform/resolvers/zod' or its corresponding type declarations.
+src/features/ventas/components/step-datos-contrato.tsx(6,19): error TS2307: Cannot find module 'zod' or its corresponding type declarations.
+src/features/ventas/components/step-datos-contrato.tsx(26,8): error TS2307: Cannot find module '@/components/ui/form' or its corresponding type declarations.
+src/features/ventas/components/step-datos-contrato.tsx(46,59): error TS2307: Cannot find module '@/lib/proof-file-utils' or its corresponding type declarations.
+src/features/ventas/components/step-datos-contrato.tsx(60,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/features/ventas/components/step-datos-contrato.tsx(314,38): error TS7006: Parameter 'values' implicitly has an 'any' type.
+src/features/ventas/components/step-datos-contrato.tsx(903,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/step-datos-contrato.tsx(920,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/step-datos-contrato.tsx(1001,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/step-datos-contrato.tsx(1018,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/step-datos-contrato.tsx(1036,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/step-datos-contrato.tsx(1053,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/step-datos-contrato.tsx(1069,28): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/step-datos-contrato.tsx(1155,24): error TS7031: Binding element 'field' implicitly has an 'any' type.
+src/features/ventas/components/venta-bank-accounts.tsx(7,35): error TS2307: Cannot find module '@/features/inbox/lib/proxied-media' or its corresponding type declarations.
+src/features/ventas/components/venta-property-banner.tsx(4,35): error TS2307: Cannot find module '@/features/inbox/lib/proxied-media' or its corresponding type declarations.
+src/features/ventas/utils/venta-draft-storage.ts(1,36): error TS2307: Cannot find module '@/lib/proof-file-utils' or its corresponding type declarations.

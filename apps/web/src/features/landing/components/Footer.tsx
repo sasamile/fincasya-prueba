@@ -121,7 +121,7 @@ export function Footer() {
           <div className="relative z-10 flex flex-wrap items-center justify-center gap-10 md:gap-16">
             <div className="relative h-10 w-24 transition-all duration-500">
               <img
-                src="/Marca_país_Colombia_logo.svg.png"
+                src="/marca-pais-colombia.png"
                 alt="Marca Colombia"
                 className="absolute inset-0 h-full w-full object-contain"
               />

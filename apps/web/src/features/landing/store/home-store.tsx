@@ -3,7 +3,7 @@
  * FincasYaWeb, con React Context — misma API que consumen los componentes).
  */
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import type { DateRange } from '../types';
+import type { DateRange } from 'react-day-picker';
 
 type HomeStore = {
   category: string;

@@ -1,0 +1,1518 @@
+import { v } from 'convex/values';
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
+import { internal } from './_generated/api';
+import type { Doc, Id } from './_generated/dataModel';
+import {
+  normalizeContractCode,
+  resolveSaleLinkReference,
+} from './lib/saleLinkReference';
+
+type ProvisionFromSaleLinkResult =
+  | { ok: true; bookingId: Id<'bookings'>; reference: string }
+  | { ok: false; reason: string };
+
+type SetCrUrlResult =
+  | { ok: true; bookingId?: Id<'bookings'> }
+  | { ok: false; reason: 'not_found' };
+
+type SubmitSignedContractResult =
+  | { ok: true; bookingId?: Id<'bookings'> }
+  | { ok: false; reason: string };
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function generateToken(): string {
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) {
+    bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function normalizeBirthdate(value: string | undefined): string | undefined {
+  const t = value?.trim();
+  if (!t) return undefined;
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : undefined;
+}
+
+async function upsertCrmContactFromSaleClient(
+  ctx: MutationCtx,
+  client: {
+    nombre: string;
+    cedula: string;
+    email: string;
+    telefono: string;
+    direccion: string;
+    ciudad?: string;
+    fechaNacimiento?: string;
+  },
+) {
+  const now = Date.now();
+  const phone = client.telefono.trim();
+  if (!phone) return;
+
+  const fechaNacimiento = normalizeBirthdate(client.fechaNacimiento);
+  let contactId: Id<'contacts'> | undefined;
+
+  const byPhone = await ctx.db
+    .query('contacts')
+    .withIndex('by_phone', (q) => q.eq('phone', phone))
+    .first();
+  if (byPhone) contactId = byPhone._id;
+
+  const cedula = client.cedula.trim();
+  if (!contactId && cedula) {
+    const byCedula = await ctx.db
+      .query('contacts')
+      .withIndex('by_cedula', (q) => q.eq('cedula', cedula))
+      .first();
+    if (byCedula) contactId = byCedula._id;
+  }
+
+  if (contactId) {
+    const existing = await ctx.db.get(contactId);
+    if (!existing) return;
+    await ctx.db.patch(contactId, {
+      name: client.nombre || existing.name,
+      email: client.email || existing.email,
+      cedula: cedula || existing.cedula,
+      city: client.ciudad || existing.city,
+      address: client.direccion || existing.address,
+      ...(fechaNacimiento ? { fechaNacimiento } : {}),
+      crmType: existing.crmType ?? 'lead',
+      updatedAt: now,
+    });
+    return;
+  }
+
+  await ctx.db.insert('contacts', {
+    phone,
+    name: client.nombre,
+    email: client.email,
+    cedula: cedula || undefined,
+    city: client.ciudad,
+    address: client.direccion,
+    fechaNacimiento,
+    crmType: 'lead',
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+async function assertContractCodeAvailable(
+  ctx: MutationCtx,
+  rawCode: string,
+  excludeId?: Id<'saleLinks'>,
+) {
+  const code = normalizeContractCode(rawCode);
+  if (!code || code.length < 2) {
+    throw new Error('La codificación debe tener al menos 2 caracteres');
+  }
+
+  const existingLink = await ctx.db
+    .query('saleLinks')
+    .withIndex('by_contract_code', (q) => q.eq('contractCode', code))
+    .first();
+  if (existingLink && existingLink._id !== excludeId) {
+    throw new Error(`Ya existe un link con la codificación ${code}`);
+  }
+
+  const existingBooking = await ctx.db
+    .query('bookings')
+    .withIndex('by_reference', (q) => q.eq('reference', code))
+    .first();
+  if (existingBooking) {
+    throw new Error(`Ya existe una reserva con la codificación ${code}`);
+  }
+
+  return code;
+}
+
+async function resolveBookingReference(
+  ctx: { db: QueryCtx['db'] },
+  link: Doc<'saleLinks'>,
+): Promise<string | undefined> {
+  if (!link.bookingId) return undefined;
+  const booking = await ctx.db.get(link.bookingId);
+  if (!booking) return undefined;
+  return booking.reference ?? String(booking._id);
+}
+
+type PaymentProofRecord = {
+  url: string;
+  fileName?: string;
+  mimeType?: string;
+  amount?: number;
+  submittedAt: number;
+};
+
+function resolvePaymentProofs(link: {
+  paymentProofs?: PaymentProofRecord[];
+  paymentProofUrl?: string;
+  paymentProofFileName?: string;
+  paymentProofMimeType?: string;
+  paymentProofAmount?: number;
+  paymentProofSubmittedAt?: number;
+}): PaymentProofRecord[] {
+  if (link.paymentProofs?.length) return link.paymentProofs;
+  if (link.paymentProofUrl) {
+    return [
+      {
+        url: link.paymentProofUrl,
+        fileName: link.paymentProofFileName,
+        mimeType: link.paymentProofMimeType,
+        amount: link.paymentProofAmount,
+        submittedAt: link.paymentProofSubmittedAt ?? Date.now(),
+      },
+    ];
+  }
+  return [];
+}
+
+function mapPaymentProofsForPortal(link: Parameters<typeof resolvePaymentProofs>[0]) {
+  return resolvePaymentProofs(link).map((proof) => ({
+    fileName: proof.fileName,
+    mimeType: proof.mimeType,
+    amount: proof.amount,
+    submittedAt: proof.submittedAt,
+  }));
+}
+
+const OWNER_ACCOUNT_PREFIX = 'owner:';
+
+type BankAccount = {
+  id: string;
+  bankName: string;
+  accountType: string;
+  accountNumber: string;
+  ownerName: string;
+  ownerCedula?: string;
+  imageUrls?: string[];
+  qrOnly?: boolean;
+  brebKey?: boolean;
+};
+
+/** Mapea cuentas del propietario seleccionadas (ids con prefijo owner:). */
+function mapOwnerBankAccounts(
+  ownerInfo: Doc<'propertyOwnerInfo'>,
+  selectedIds: string[],
+): BankAccount[] {
+  const ownerIds = selectedIds.filter((id) => id.startsWith(OWNER_ACCOUNT_PREFIX));
+  if (ownerIds.length === 0) return [];
+
+  const propietarioNombre = ownerInfo.propietarioNombre?.trim() ?? '';
+  const propietarioCedula = ownerInfo.propietarioCedula?.trim() ?? '';
+
+  type OwnerRow = {
+    id: string;
+    bankName: string;
+    accountNumber: string;
+    accountType?: string;
+    accountHolderName?: string;
+  };
+
+  let rows: OwnerRow[] = [];
+  if (ownerInfo.bankAccounts?.length) {
+    rows = ownerInfo.bankAccounts.map((account) => ({
+      id: account.id,
+      bankName: account.bankName,
+      accountNumber: account.accountNumber,
+      accountType: account.accountType,
+      accountHolderName: account.accountHolderName,
+    }));
+  } else if (ownerInfo.bankName || ownerInfo.accountNumber) {
+    rows = [
+      {
+        id: 'primary',
+        bankName: ownerInfo.bankName,
+        accountNumber: ownerInfo.accountNumber,
+        accountType: '',
+        accountHolderName: propietarioNombre,
+      },
+    ];
+  }
+
+  return rows
+    .filter((row) => ownerIds.includes(`${OWNER_ACCOUNT_PREFIX}${row.id}`))
+    .map((row) => ({
+      id: `${OWNER_ACCOUNT_PREFIX}${row.id}`,
+      bankName: row.bankName,
+      accountType: row.accountType?.trim() || 'Ahorros',
+      accountNumber: row.accountNumber,
+      ownerName: row.accountHolderName?.trim() || propietarioNombre,
+      ownerCedula: propietarioCedula,
+      imageUrls: [] as string[],
+    }));
+}
+
+/** URLs de imágenes de la finca (tabla propertyImages). */
+async function getPropertyImageUrls(
+  ctx: any,
+  propertyId: Id<'properties'>,
+): Promise<string[]> {
+  const images = await ctx.db
+    .query('propertyImages')
+    .withIndex('by_property', (q: any) => q.eq('propertyId', propertyId))
+    .collect();
+
+  return images
+    .sort((a: Doc<'propertyImages'>, b: Doc<'propertyImages'>) =>
+      (a.order ?? 0) - (b.order ?? 0),
+    )
+    .map((img: Doc<'propertyImages'>) => img.url?.trim())
+    .filter((url: string | undefined): url is string => !!url);
+}
+
+/** Resuelve los datos de la propiedad para mostrar al cliente. */
+async function resolveProperty(ctx: any, propertyId: Id<'properties'>) {
+  const prop = await ctx.db.get(propertyId);
+  if (!prop) return null;
+  const images = await getPropertyImageUrls(ctx, propertyId);
+  return {
+    id: prop._id,
+    title: prop.title ?? '',
+    location: prop.location ?? '',
+    code: prop.code ?? '',
+    slug: prop.slug ?? '',
+    images,
+    maxGuests: prop.capacity ?? 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Admin mutations (llamados desde NestJS con API key)
+// ---------------------------------------------------------------------------
+
+export const create = mutation({
+  args: {
+    propertyId: v.id('properties'),
+    contractCode: v.string(),
+    createdBy: v.string(),
+    createdByName: v.optional(v.string()),
+    checkIn: v.number(),
+    checkOut: v.number(),
+    nights: v.number(),
+    guests: v.number(),
+    checkInTime: v.optional(v.string()),
+    checkOutTime: v.optional(v.string()),
+    totalValue: v.number(),
+    rentalValue: v.number(),
+    depositAmount: v.number(),
+    cleaningFee: v.number(),
+    petDeposit: v.optional(v.number()),
+    petSurcharge: v.optional(v.number()),
+    petCount: v.optional(v.number()),
+    selectedBankAccountIds: v.array(v.string()),
+    notes: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { contractCode: rawContractCode, ...rest } = args;
+    const contractCode = await assertContractCodeAvailable(ctx, rawContractCode);
+    const token = generateToken();
+    const now = Date.now();
+    const id = await ctx.db.insert('saleLinks', {
+      token,
+      contractCode,
+      ...rest,
+      clientStep: 1,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { id, token, contractCode };
+  },
+});
+
+export const update = mutation({
+  args: {
+    id: v.id('saleLinks'),
+    propertyId: v.optional(v.id('properties')),
+    checkIn: v.optional(v.number()),
+    checkOut: v.optional(v.number()),
+    nights: v.optional(v.number()),
+    guests: v.optional(v.number()),
+    checkInTime: v.optional(v.string()),
+    checkOutTime: v.optional(v.string()),
+    totalValue: v.optional(v.number()),
+    rentalValue: v.optional(v.number()),
+    depositAmount: v.optional(v.number()),
+    cleaningFee: v.optional(v.number()),
+    petDeposit: v.optional(v.number()),
+    petSurcharge: v.optional(v.number()),
+    petCount: v.optional(v.number()),
+    selectedBankAccountIds: v.optional(v.array(v.string())),
+    notes: v.optional(v.string()),
+    status: v.optional(v.union(v.literal('active'), v.literal('completed'), v.literal('cancelled'))),
+  },
+  handler: async (ctx, { id, ...patch }) => {
+    const existing = await ctx.db.get(id);
+    if (!existing) throw new Error('Sale link not found');
+    await ctx.db.patch(id, { ...patch, updatedAt: Date.now() });
+    return { ok: true };
+  },
+});
+
+export const remove = mutation({
+  args: { id: v.id('saleLinks') },
+  handler: async (ctx, { id }) => {
+    await ctx.db.delete(id);
+    return { ok: true };
+  },
+});
+
+export const setContractUrl = internalMutation({
+  args: {
+    id: v.id('saleLinks'),
+    contractUrl: v.string(),
+  },
+  handler: async (ctx, { id, contractUrl }) => {
+    await ctx.db.patch(id, {
+      contractUrl,
+      contractGeneratedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const setCrUrl = internalMutation({
+  args: {
+    id: v.id('saleLinks'),
+    crUrl: v.string(),
+    bookingId: v.optional(v.id('bookings')),
+  },
+  handler: async (ctx, { id, crUrl, bookingId }): Promise<SetCrUrlResult> => {
+    const link = await ctx.db.get(id);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+
+    let resolvedBookingId = bookingId ?? link.bookingId;
+    if (!resolvedBookingId && link.clientData) {
+      const provisioned: ProvisionFromSaleLinkResult = await ctx.runMutation(
+        internal.bookings.provisionFromSaleLink,
+        { saleLinkId: id },
+      );
+      if (provisioned.ok) {
+        resolvedBookingId = provisioned.bookingId;
+      }
+    }
+
+    const patch: Record<string, unknown> = {
+      crUrl,
+      crGeneratedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    if (resolvedBookingId) patch.bookingId = resolvedBookingId;
+    await ctx.db.patch(id, patch);
+    return {
+      ok: true as const,
+      bookingId: resolvedBookingId,
+    };
+  },
+});
+
+export const validatePayment = internalMutation({
+  args: {
+    token: v.string(),
+    validatedBy: v.string(),
+    validationKey: v.string(),
+  },
+  handler: async (ctx, { token, validatedBy, validationKey }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.paymentValidationKey !== validationKey) {
+      return { ok: false, reason: 'invalid_key' };
+    }
+    if (link.paymentValidated) return { ok: true, alreadyValidated: true };
+    await ctx.db.patch(link._id, {
+      paymentValidated: true,
+      paymentValidatedAt: Date.now(),
+      paymentValidatedBy: validatedBy,
+      clientStep: 4,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+/** Valida el pago desde el panel admin (sin clave del correo). */
+export const validatePaymentAdmin = mutation({
+  args: {
+    token: v.string(),
+    validatedBy: v.string(),
+  },
+  handler: async (ctx, { token, validatedBy }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (!link.paymentProofUrl?.trim()) {
+      return { ok: false, reason: 'no_proof' };
+    }
+    if (link.paymentValidated) return { ok: true, alreadyValidated: true };
+    const by = String(validatedBy ?? '').trim() || 'admin';
+    await ctx.db.patch(link._id, {
+      paymentValidated: true,
+      paymentValidatedAt: Date.now(),
+      paymentValidatedBy: by,
+      clientStep: 4,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Admin queries
+// ---------------------------------------------------------------------------
+
+export const list = internalQuery({
+  args: {
+    createdBy: v.optional(v.string()),
+    status: v.optional(v.string()),
+  },
+  handler: async (ctx, { createdBy, status }) => {
+    let docs: Doc<'saleLinks'>[];
+    if (createdBy) {
+      docs = await ctx.db
+        .query('saleLinks')
+        .withIndex('by_created_by', (q) => q.eq('createdBy', createdBy))
+        .order('desc')
+        .collect();
+    } else {
+      docs = await ctx.db.query('saleLinks').order('desc').collect();
+    }
+    if (status) {
+      docs = docs.filter((d) => d.status === status);
+    }
+    return docs;
+  },
+});
+
+export const getById = internalQuery({
+  args: { id: v.id('saleLinks') },
+  handler: async (ctx, { id }) => {
+    return ctx.db.get(id);
+  },
+});
+
+export const getByToken = internalQuery({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    return ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Public mutations (llamados desde el portal cliente, sin auth)
+// ---------------------------------------------------------------------------
+
+/** Guarda borrador del portal (paso 2) sin avanzar clientStep — sincroniza entre dispositivos. */
+export const saveClientPortalDraft = internalMutation({
+  args: {
+    token: v.string(),
+    clientPortalUiStep: v.optional(v.number()),
+    clientDraftPhase: v.optional(
+      v.union(v.literal('datos'), v.literal('pago')),
+    ),
+    nombre: v.optional(v.string()),
+    cedula: v.optional(v.string()),
+    email: v.optional(v.string()),
+    telefono: v.optional(v.string()),
+    direccion: v.optional(v.string()),
+    ciudad: v.optional(v.string()),
+    fechaNacimiento: v.optional(v.string()),
+    paymentAmount: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', args.token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.status !== 'active') return { ok: false, reason: 'inactive' };
+    if (link.paymentValidated) return { ok: false, reason: 'already_validated' };
+    if (link.clientStep >= 4) return { ok: false, reason: 'past_payment_step' };
+
+    const now = Date.now();
+    const patch: Record<string, unknown> = { updatedAt: now };
+
+    if (args.clientPortalUiStep !== undefined) {
+      patch.clientPortalUiStep = Math.max(1, Math.min(6, args.clientPortalUiStep));
+    }
+    if (args.clientDraftPhase) {
+      patch.clientDraftPhase = args.clientDraftPhase;
+    }
+    if (args.paymentAmount !== undefined && args.paymentAmount > 0) {
+      patch.clientDraftPaymentAmount = args.paymentAmount;
+    }
+
+    const nombre = args.nombre?.trim();
+    const cedula = args.cedula?.trim();
+    const email = args.email?.trim();
+    const telefono = args.telefono?.trim();
+    const direccion = args.direccion?.trim();
+    const ciudad = args.ciudad?.trim();
+    const fechaNacimiento = normalizeBirthdate(args.fechaNacimiento);
+    const hasAnyField = !!(
+      nombre ||
+      cedula ||
+      email ||
+      telefono ||
+      direccion ||
+      ciudad ||
+      fechaNacimiento
+    );
+
+    if (hasAnyField) {
+      const prev = link.clientData;
+      patch.clientData = {
+        nombre: nombre || prev?.nombre || '',
+        cedula: cedula || prev?.cedula || '',
+        email: email || prev?.email || '',
+        telefono: telefono || prev?.telefono || '',
+        direccion: direccion || prev?.direccion || '',
+        ciudad: ciudad || prev?.ciudad,
+        fechaNacimiento: fechaNacimiento ?? prev?.fechaNacimiento,
+        filledAt: prev?.filledAt ?? now,
+      };
+    }
+
+    await ctx.db.patch(link._id, patch);
+    return { ok: true };
+  },
+});
+
+/** Guarda los datos del cliente + soporte de pago (paso 2 → 3). */
+export const submitClientData = mutation({
+  args: {
+    token: v.string(),
+    nombre: v.string(),
+    cedula: v.string(),
+    email: v.string(),
+    telefono: v.string(),
+    direccion: v.string(),
+    ciudad: v.optional(v.string()),
+    fechaNacimiento: v.optional(v.string()),
+    paymentProofUrl: v.string(),
+    paymentProofFileName: v.optional(v.string()),
+    paymentProofMimeType: v.optional(v.string()),
+    paymentProofAmount: v.optional(v.number()),
+    paymentValidationKey: v.string(),
+    cedulaPhotoUrl: v.optional(v.string()),
+    cedulaPhotoFileName: v.optional(v.string()),
+    cedulaPhotoMimeType: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', args.token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.status !== 'active') return { ok: false, reason: 'inactive' };
+    if (link.paymentValidated) return { ok: false, reason: 'already_validated' };
+    if (link.clientStep >= 4) return { ok: false, reason: 'past_payment_step' };
+
+    const now = Date.now();
+    const fechaNacimiento = normalizeBirthdate(args.fechaNacimiento);
+    const newProof: PaymentProofRecord = {
+      url: args.paymentProofUrl,
+      fileName: args.paymentProofFileName,
+      mimeType: args.paymentProofMimeType,
+      amount: args.paymentProofAmount,
+      submittedAt: now,
+    };
+    const paymentProofs = [...resolvePaymentProofs(link), newProof];
+    const isFirstSubmission = link.clientStep < 3;
+
+    const patch: Record<string, unknown> = {
+      clientData: {
+        nombre: args.nombre,
+        cedula: args.cedula,
+        email: args.email,
+        telefono: args.telefono,
+        direccion: args.direccion,
+        ciudad: args.ciudad,
+        fechaNacimiento,
+        cedulaPhotoUrl: args.cedulaPhotoUrl,
+        cedulaPhotoFileName: args.cedulaPhotoFileName,
+        cedulaPhotoMimeType: args.cedulaPhotoMimeType,
+        filledAt: link.clientData?.filledAt ?? now,
+      },
+      paymentProofUrl: args.paymentProofUrl,
+      paymentProofFileName: args.paymentProofFileName,
+      paymentProofMimeType: args.paymentProofMimeType,
+      paymentProofAmount: args.paymentProofAmount,
+      paymentProofSubmittedAt: now,
+      paymentProofs,
+      paymentValidationKey: args.paymentValidationKey,
+      updatedAt: now,
+    };
+
+    if (isFirstSubmission) {
+      patch.clientStep = 3;
+      patch.clientPortalUiStep = undefined;
+      patch.clientDraftPhase = undefined;
+      patch.clientDraftPaymentAmount = undefined;
+    }
+
+    await ctx.db.patch(link._id, patch);
+
+    await upsertCrmContactFromSaleClient(ctx, {
+      nombre: args.nombre,
+      cedula: args.cedula,
+      email: args.email,
+      telefono: args.telefono,
+      direccion: args.direccion,
+      ciudad: args.ciudad,
+      fechaNacimiento,
+    });
+
+    return { ok: true, appended: !isFirstSubmission };
+  },
+});
+
+/** Admin: reinicia comprobante y datos de cliente para volver a probar el flujo. */
+export const resetPaymentSubmission = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.paymentValidated) return { ok: false, reason: 'already_validated' };
+    if (!link.paymentProofUrl && link.clientStep < 3) {
+      return { ok: false, reason: 'nothing_to_reset' };
+    }
+
+    await ctx.db.patch(link._id, {
+      clientStep: 1,
+      clientPortalUiStep: undefined,
+      clientDraftPhase: undefined,
+      clientDraftPaymentAmount: undefined,
+      clientData: undefined,
+      paymentProofUrl: undefined,
+      paymentProofFileName: undefined,
+      paymentProofMimeType: undefined,
+      paymentProofAmount: undefined,
+      paymentProofSubmittedAt: undefined,
+      paymentProofs: undefined,
+      paymentValidationKey: undefined,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+/** El cliente sube el contrato firmado (paso 4 → 5). */
+export const submitSignedContract = mutation({
+  args: {
+    token: v.string(),
+    signedContractUrl: v.string(),
+    signedContractFileName: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<SubmitSignedContractResult> => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', args.token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.clientStep < 4) return { ok: false, reason: 'not_ready' };
+
+    const now = Date.now();
+    let bookingId = link.bookingId;
+    if (!bookingId && link.clientData) {
+      const provisioned: ProvisionFromSaleLinkResult = await ctx.runMutation(
+        internal.bookings.provisionFromSaleLink,
+        { saleLinkId: link._id },
+      );
+      if (provisioned.ok) {
+        bookingId = provisioned.bookingId;
+      }
+    }
+
+    await ctx.db.patch(link._id, {
+      signedContractUrl: args.signedContractUrl,
+      signedContractFileName: args.signedContractFileName,
+      signedContractSubmittedAt: now,
+      clientStep: 5,
+      ...(bookingId ? { bookingId } : {}),
+      updatedAt: now,
+    });
+    return { ok: true, bookingId };
+  },
+});
+
+/** El cliente confirma haber descargado/visto el CR (paso 5 → 6). */
+export const confirmCr = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.clientStep < 5) return { ok: false, reason: 'not_ready' };
+
+    await ctx.db.patch(link._id, {
+      clientStep: 6,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+type SaleLinkCheckinResult =
+  | { ok: true; bookingId: Id<'bookings'> }
+  | { ok: false; reason: string; index?: number };
+
+type CreateFromSaleLinkResult =
+  | { ok: true; bookingId: Id<'bookings'> }
+  | { ok: false; reason: 'not_found' | 'no_client' | 'unavailable' };
+
+async function finalizeSaleLinkCheckin(
+  ctx: MutationCtx,
+  link: Doc<'saleLinks'>,
+  args: {
+    guests: Array<{
+      nombreCompleto: string;
+      cedula?: string;
+      tipoDocumento?: string;
+      esMenor?: boolean;
+    }>;
+    placas?: string;
+    observaciones?: string;
+  },
+): Promise<SaleLinkCheckinResult> {
+  if (args.guests.length < 1) {
+    return { ok: false as const, reason: 'missing_guests' as const };
+  }
+  for (let i = 0; i < args.guests.length; i++) {
+    const g = args.guests[i];
+    if (!g.nombreCompleto.trim()) {
+      return { ok: false as const, reason: 'missing_name' as const, index: i };
+    }
+    if (!g.esMenor && !g.cedula?.trim()) {
+      return { ok: false as const, reason: 'missing_document' as const, index: i };
+    }
+  }
+
+  const menoresDe2 = args.guests.filter((g) => g.esMenor).length;
+  const guestDisplayName =
+    args.guests
+      .map((g) => g.nombreCompleto.trim())
+      .filter(Boolean)
+      .join(' · ') ||
+    link.clientData?.nombre ||
+    'Cliente';
+
+  const bookingResult = (await ctx.runMutation(internal.bookings.createFromSaleLink, {
+    saleLinkId: link._id,
+    guestDisplayName,
+    guests: args.guests,
+    menoresDe2: menoresDe2 || undefined,
+    mascotas: link.petCount ?? undefined,
+    placas: args.placas,
+    observaciones: args.observaciones,
+  })) as CreateFromSaleLinkResult;
+
+  if (!bookingResult.ok) {
+    return bookingResult;
+  }
+
+  const now = Date.now();
+  await ctx.db.patch(link._id, {
+    checkinGuests: args.guests,
+    checkinMenoresDe2: menoresDe2 || undefined,
+    checkinMascotas: link.petCount ?? undefined,
+    checkinPlacas: args.placas,
+    checkinObservaciones: args.observaciones,
+    checkinCompleted: true,
+    checkinCompletedAt: now,
+    bookingId: bookingResult.bookingId,
+    clientStep: 7,
+    updatedAt: now,
+  });
+
+  return { ok: true as const, bookingId: bookingResult.bookingId };
+}
+
+/** El cliente envía el check-in (paso 6 → completado). */
+export const submitCheckin = mutation({
+  args: {
+    token: v.string(),
+    guests: v.array(
+      v.object({
+        nombreCompleto: v.string(),
+        cedula: v.optional(v.string()),
+        tipoDocumento: v.optional(v.string()),
+        esMenor: v.optional(v.boolean()),
+      }),
+    ),
+    menoresDe2: v.optional(v.number()),
+    mascotas: v.optional(v.number()),
+    placas: v.optional(v.string()),
+    observaciones: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', args.token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.clientStep < 6) return { ok: false, reason: 'not_ready' };
+
+    return finalizeSaleLinkCheckin(ctx, link, {
+      guests: args.guests,
+      placas: args.placas,
+      observaciones: args.observaciones,
+    });
+  },
+});
+
+/** Lista enriquecida para el panel admin de links de venta. */
+export const listForAdmin = query({
+  args: {
+    createdBy: v.optional(v.string()),
+    status: v.optional(v.string()),
+  },
+  handler: async (ctx, { createdBy, status }) => {
+    let docs: Doc<'saleLinks'>[];
+    if (createdBy) {
+      docs = await ctx.db
+        .query('saleLinks')
+        .withIndex('by_created_by', (q) => q.eq('createdBy', createdBy))
+        .order('desc')
+        .collect();
+    } else {
+      docs = await ctx.db.query('saleLinks').order('desc').collect();
+    }
+    if (status) {
+      docs = docs.filter((d) => d.status === status);
+    }
+
+    const rows = await Promise.all(
+      docs.map(async (link) => {
+        const property = await ctx.db.get(link.propertyId);
+        const ownerInfo = await ctx.db
+          .query('propertyOwnerInfo')
+          .withIndex('by_property', (q) => q.eq('propertyId', link.propertyId))
+          .unique();
+        let bookingReference = resolveSaleLinkReference(link);
+        let ownerOfferAcceptedAt: number | undefined;
+        let ownerOfferRejectedAt: number | undefined;
+        let ownerOfferRejectedReason: string | undefined;
+        let ownerOfferComment: string | undefined;
+        let ownerOfferCommentAt: number | undefined;
+        let checkinNeedsEmpleada: boolean | undefined;
+        let checkinNeedsTeam: boolean | undefined;
+        let checkinServiciosNota: string | undefined;
+        let horaEntrada: string | undefined;
+        let ownerPayoutAbono: number | undefined;
+        if (link.bookingId) {
+          const booking = await ctx.db.get(link.bookingId);
+          if (booking) {
+            bookingReference = booking.reference ?? bookingReference;
+            ownerOfferAcceptedAt =
+              link.ownerOfferAcceptedAt ?? booking.ownerOfferAcceptedAt;
+            ownerOfferRejectedAt =
+              link.ownerOfferRejectedAt ?? booking.ownerOfferRejectedAt;
+            ownerOfferRejectedReason =
+              link.ownerOfferRejectedReason ?? booking.ownerOfferRejectedReason;
+            ownerOfferComment =
+              link.ownerOfferComment ?? booking.ownerOfferComment;
+            ownerOfferCommentAt =
+              link.ownerOfferCommentAt ?? booking.ownerOfferCommentAt;
+            checkinNeedsEmpleada = booking.checkinNeedsEmpleada === true;
+            checkinNeedsTeam = booking.checkinNeedsTeam === true;
+            checkinServiciosNota = booking.checkinServiciosNota ?? undefined;
+            horaEntrada = booking.horaEntrada ?? link.checkInTime ?? undefined;
+            const op = booking.ownerPayout as { abono?: number } | undefined;
+            ownerPayoutAbono =
+              typeof op?.abono === 'number' ? op.abono : undefined;
+          }
+        }
+        return {
+          ...link,
+          propertyTitle: property?.title ?? null,
+          propertyLocation: property?.location ?? null,
+          propietarioNombre: ownerInfo?.propietarioNombre ?? null,
+          propietarioTelefono: ownerInfo?.propietarioTelefono ?? null,
+          propietarioTratamiento: ownerInfo?.propietarioTratamiento ?? null,
+          bookingReference,
+          ownerOfferAcceptedAt,
+          ownerOfferRejectedAt,
+          ownerOfferRejectedReason,
+          ownerOfferComment,
+          ownerOfferCommentAt,
+          checkinNeedsEmpleada,
+          checkinNeedsTeam,
+          checkinServiciosNota,
+          horaEntrada,
+          ownerPayoutAbono,
+        };
+      }),
+    );
+    return rows;
+  },
+});
+
+async function resolveOwnerAbonoFromSaleLink(
+  link: Doc<'saleLinks'>,
+): Promise<number> {
+  const proofs = link.paymentProofs ?? [];
+  const fromProofs = proofs.reduce(
+    (sum, p) => sum + Math.max(0, Math.floor(Number(p.amount) || 0)),
+    0,
+  );
+  if (fromProofs > 0) return fromProofs;
+  const single = Math.max(0, Math.floor(Number(link.paymentProofAmount) || 0));
+  if (single > 0) return single;
+  if (link.paymentValidated) {
+    return Math.max(0, Math.round(Number(link.totalValue) / 2));
+  }
+  return 0;
+}
+
+/** Guarda el valor ofrecido al propietario y lo refleja en la reserva. */
+export const setOwnerOfferInternal = internalMutation({
+  args: {
+    id: v.id('saleLinks'),
+    ownerOfferAmount: v.number(),
+  },
+  handler: async (ctx, { id, ownerOfferAmount }) => {
+    const link = await ctx.db.get(id);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+
+    const amount = Math.max(0, Math.floor(Number(ownerOfferAmount) || 0));
+    const now = Date.now();
+    await ctx.db.patch(id, {
+      ownerOfferAmount: amount,
+      updatedAt: now,
+    });
+
+    if (link.bookingId) {
+      const booking = await ctx.db.get(link.bookingId);
+      if (booking) {
+        const prev = (booking.ownerPayout ?? {}) as Record<string, unknown>;
+        const abonoFromPayments = await (async () => {
+          const payments = await ctx.db
+            .query('payments')
+            .withIndex('by_booking', (q) => q.eq('bookingId', link.bookingId!))
+            .collect();
+          return payments
+            .filter((p) => String(p.status ?? '').toUpperCase() === 'PAID')
+            .reduce(
+              (sum, p) => sum + Math.max(0, Math.floor(Number(p.amount) || 0)),
+              0,
+            );
+        })();
+        const abono =
+          abonoFromPayments > 0
+            ? abonoFromPayments
+            : await resolveOwnerAbonoFromSaleLink(link);
+        await ctx.db.patch(link.bookingId, {
+          ownerPayout: {
+            ...prev,
+            valorAcordado: amount,
+            abono: abono > 0 ? abono : undefined,
+            updatedAt: now,
+          },
+          updatedAt: now,
+        });
+      }
+    }
+
+    return { ok: true as const, ownerOfferAmount: amount };
+  },
+});
+
+export const markOwnerOfferSentInternal = internalMutation({
+  args: { id: v.id('saleLinks') },
+  handler: async (ctx, { id }) => {
+    const link = await ctx.db.get(id);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    await ctx.db.patch(id, {
+      ownerOfferSentAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { ok: true as const };
+  },
+});
+
+/** Expuesto al panel admin (antes vía `/api/sale-links/:id` PATCH). */
+export const setOwnerOffer = mutation({
+  args: {
+    id: v.id('saleLinks'),
+    ownerOfferAmount: v.number(),
+  },
+  handler: async (ctx, args): Promise<
+    | { ok: true; ownerOfferAmount: number }
+    | { ok: false; reason: 'not_found' }
+  > => {
+    return await ctx.runMutation(internal.saleLinks.setOwnerOfferInternal, args);
+  },
+});
+
+/** Expuesto al panel admin (antes vía `/api/sale-links/:id` PATCH). */
+export const markOwnerOfferSent = mutation({
+  args: { id: v.id('saleLinks') },
+  handler: async (
+    ctx,
+    { id },
+  ): Promise<{ ok: true } | { ok: false; reason: 'not_found' }> => {
+    return await ctx.runMutation(internal.saleLinks.markOwnerOfferSentInternal, {
+      id,
+    });
+  },
+});
+
+/** El propietario aceptó la oferta — avanza al paso 8. */
+export const onOwnerOfferAcceptedInternal = internalMutation({
+  args: { saleLinkId: v.id('saleLinks') },
+  handler: async (ctx, { saleLinkId }) => {
+    const link = await ctx.db.get(saleLinkId);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    const now = Date.now();
+    await ctx.db.patch(saleLinkId, {
+      ownerOfferAcceptedAt: now,
+      clientStep: 8,
+      status: 'completed',
+      updatedAt: now,
+    });
+    return { ok: true as const };
+  },
+});
+
+export const onOwnerOfferRejectedInternal = internalMutation({
+  args: { saleLinkId: v.id('saleLinks'), reason: v.string() },
+  handler: async (ctx, { saleLinkId, reason }) => {
+    const link = await ctx.db.get(saleLinkId);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    const now = Date.now();
+    await ctx.db.patch(saleLinkId, {
+      ownerOfferRejectedAt: now,
+      ownerOfferRejectedReason: reason.trim(),
+      updatedAt: now,
+    });
+    return { ok: true as const };
+  },
+});
+
+export const onOwnerOfferCommentInternal = internalMutation({
+  args: { saleLinkId: v.id('saleLinks'), comment: v.string() },
+  handler: async (ctx, { saleLinkId, comment }) => {
+    const link = await ctx.db.get(saleLinkId);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    const now = Date.now();
+    await ctx.db.patch(saleLinkId, {
+      ownerOfferComment: comment.trim(),
+      ownerOfferCommentAt: now,
+      updatedAt: now,
+    });
+    return { ok: true as const };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Public query (portal del cliente)
+// ---------------------------------------------------------------------------
+
+type ConfirmCrResult =
+  | { ok: true; bookingReference: string }
+  | { ok: false; reason: string };
+
+type EnsureBookingForCheckinResult =
+  | { ok: true; bookingReference: string }
+  | { ok: false; reason: string };
+
+/** InternalMutation: confirmar CR desde HTTP route */
+export const confirmCrInternal = internalMutation({
+  args: { token: v.string() },
+  handler: async (ctx, { token }): Promise<ConfirmCrResult> => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.clientStep < 5) return { ok: false, reason: 'not_ready' };
+
+    const provisioned: ProvisionFromSaleLinkResult = await ctx.runMutation(
+      internal.bookings.provisionFromSaleLink,
+      {
+        saleLinkId: link._id,
+      },
+    );
+    if (!provisioned.ok) {
+      return { ok: false, reason: provisioned.reason };
+    }
+
+    await ctx.db.patch(link._id, {
+      clientStep: 6,
+      bookingId: provisioned.bookingId,
+      updatedAt: Date.now(),
+    });
+    return {
+      ok: true,
+      bookingReference: provisioned.reference,
+    };
+  },
+});
+
+/** Sincroniza el link de venta cuando el check-in se guarda vía portal estándar. */
+export const syncCheckinFromBooking = internalMutation({
+  args: {
+    bookingId: v.id('bookings'),
+    completed: v.boolean(),
+    guests: v.optional(
+      v.array(
+        v.object({
+          nombreCompleto: v.string(),
+          cedula: v.optional(v.string()),
+          tipoDocumento: v.optional(v.string()),
+          esMenor: v.optional(v.boolean()),
+        }),
+      ),
+    ),
+    menoresDe2: v.optional(v.number()),
+    placas: v.optional(v.string()),
+    mascotas: v.optional(v.number()),
+    observaciones: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_booking', (q) => q.eq('bookingId', args.bookingId))
+      .first();
+    if (!link) return { ok: false as const, reason: 'no_link' as const };
+
+    const now = Date.now();
+    const patch: Record<string, unknown> = {
+      checkinGuests: args.guests,
+      checkinMenoresDe2: args.menoresDe2,
+      checkinMascotas: args.mascotas,
+      checkinPlacas: args.placas,
+      checkinObservaciones: args.observaciones,
+      updatedAt: now,
+    };
+    if (args.completed) {
+      patch.checkinCompleted = true;
+      patch.checkinCompletedAt = now;
+      patch.clientStep = 7;
+    }
+    await ctx.db.patch(link._id, patch);
+    return { ok: true as const };
+  },
+});
+
+/** Asegura que exista reserva para el check-in (paso 6). */
+export const ensureBookingForCheckinInternal = internalMutation({
+  args: { token: v.string() },
+  handler: async (ctx, { token }): Promise<EnsureBookingForCheckinResult> => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.clientStep < 6) return { ok: false, reason: 'not_ready' };
+
+    const provisioned: ProvisionFromSaleLinkResult = await ctx.runMutation(
+      internal.bookings.provisionFromSaleLink,
+      {
+        saleLinkId: link._id,
+      },
+    );
+    if (!provisioned.ok) {
+      return { ok: false, reason: provisioned.reason };
+    }
+
+    if (!link.bookingId) {
+      await ctx.db.patch(link._id, {
+        bookingId: provisioned.bookingId,
+        updatedAt: Date.now(),
+      });
+    }
+
+    return {
+      ok: true,
+      bookingReference: provisioned.reference,
+    };
+  },
+});
+
+/** InternalMutation: check-in desde HTTP route */
+export const submitCheckinInternal = internalMutation({
+  args: {
+    token: v.string(),
+    guests: v.array(
+      v.object({
+        nombreCompleto: v.string(),
+        cedula: v.optional(v.string()),
+        tipoDocumento: v.optional(v.string()),
+        esMenor: v.optional(v.boolean()),
+      }),
+    ),
+    menoresDe2: v.optional(v.number()),
+    mascotas: v.optional(v.number()),
+    placas: v.optional(v.string()),
+    observaciones: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', args.token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.clientStep < 6) return { ok: false, reason: 'not_ready' };
+
+    return finalizeSaleLinkCheckin(ctx, link, {
+      guests: args.guests,
+      placas: args.placas,
+      observaciones: args.observaciones,
+    });
+  },
+});
+
+/** Query pública para el portal del cliente (React hooks). */
+export const getPublicByToken = query({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return null;
+
+    const property = await resolveProperty(ctx, link.propertyId);
+    const settings = await ctx.db
+      .query('adminContractSettings')
+      .withIndex('by_scope', (q) => q.eq('scope', 'global'))
+      .unique();
+
+    let bankAccounts: BankAccount[] = [];
+    if (settings?.payload?.bankAccounts && link.selectedBankAccountIds.length > 0) {
+      const allAccounts = settings.payload.bankAccounts as BankAccount[];
+      const globalIds = link.selectedBankAccountIds.filter(
+        (id) => !id.startsWith(OWNER_ACCOUNT_PREFIX),
+      );
+      bankAccounts = allAccounts.filter((a) => globalIds.includes(a.id));
+    }
+    if (
+      link.selectedBankAccountIds.some((id) => id.startsWith(OWNER_ACCOUNT_PREFIX))
+    ) {
+      const ownerInfo = await ctx.db
+        .query('propertyOwnerInfo')
+        .withIndex('by_property', (q) => q.eq('propertyId', link.propertyId))
+        .unique();
+      if (ownerInfo) {
+        bankAccounts = [
+          ...bankAccounts,
+          ...mapOwnerBankAccounts(ownerInfo, link.selectedBankAccountIds),
+        ];
+      }
+    }
+
+    const bookingReference =
+      (await resolveBookingReference(ctx, link)) ?? resolveSaleLinkReference(link);
+
+    return {
+      token: link.token,
+      contractCode: link.contractCode ?? resolveSaleLinkReference(link),
+      status: link.status,
+      clientStep: link.clientStep,
+      clientPortalUiStep: link.clientPortalUiStep,
+      clientDraftPhase: link.clientDraftPhase,
+      clientDraftPaymentAmount: link.clientDraftPaymentAmount,
+      property,
+      checkIn: link.checkIn,
+      checkOut: link.checkOut,
+      nights: link.nights,
+      guests: link.guests,
+      checkInTime: link.checkInTime,
+      checkOutTime: link.checkOutTime,
+      totalValue: link.totalValue,
+      rentalValue: link.rentalValue,
+      depositAmount: link.depositAmount,
+      cleaningFee: link.cleaningFee,
+      petDeposit: link.petDeposit,
+      petSurcharge: link.petSurcharge,
+      petCount: link.petCount,
+      bankAccounts,
+      clientDataFilled: !!link.clientData,
+      clientName: link.clientData?.nombre,
+      clientData: link.clientData
+        ? {
+            nombre: link.clientData.nombre,
+            cedula: link.clientData.cedula,
+            email: link.clientData.email,
+            telefono: link.clientData.telefono,
+            direccion: link.clientData.direccion,
+            ciudad: link.clientData.ciudad,
+            fechaNacimiento: link.clientData.fechaNacimiento,
+            cedulaPhotoUrl: link.clientData.cedulaPhotoUrl,
+            cedulaPhotoFileName: link.clientData.cedulaPhotoFileName,
+          }
+        : undefined,
+      paymentProofSubmitted: !!link.paymentProofUrl,
+      paymentProofFileName: link.paymentProofFileName,
+      paymentProofSubmittedAt: link.paymentProofSubmittedAt,
+      paymentProofAmount: link.paymentProofAmount,
+      paymentProofs: mapPaymentProofsForPortal(link),
+      paymentValidated: !!link.paymentValidated,
+      contractUrl: link.contractUrl,
+      signedContractSubmitted: !!link.signedContractUrl,
+      crUrl: link.crUrl,
+      bookingReference,
+      checkinCompleted: link.checkinCompleted,
+      checkinGuests: link.checkinGuests,
+    };
+  },
+});
+
+/** Metadatos del comprobante si la clave del correo admin es válida. */
+export const getPaymentProofForValidationKey = internalQuery({
+  args: { token: v.string(), validationKey: v.string() },
+  handler: async (ctx, { token, validationKey }) => {
+    const trimmedToken = token.trim();
+    const trimmedKey = validationKey.trim();
+    if (!trimmedToken) return { ok: false as const, reason: 'not_found' as const };
+    if (!trimmedKey) return { ok: false as const, reason: 'key_required' as const };
+
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', trimmedToken))
+      .unique();
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    if (link.paymentValidationKey?.trim() !== trimmedKey) {
+      return { ok: false as const, reason: 'invalid_key' as const };
+    }
+    if (!link.paymentProofUrl?.trim()) {
+      return { ok: false as const, reason: 'no_proof' as const };
+    }
+
+    const fileName = link.paymentProofFileName?.trim() || 'comprobante';
+    return {
+      ok: true as const,
+      paymentProofUrl: link.paymentProofUrl.trim(),
+      paymentProofFileName: fileName,
+      paymentProofMimeType: link.paymentProofMimeType,
+      clientName: link.clientData?.nombre ?? 'Cliente',
+      totalValue: link.totalValue ?? 0,
+    };
+  },
+});
+
+/** InternalQuery equivalente para HTTP routes (mismo output que getPublicByToken). */
+export const getForPortal = internalQuery({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return null;
+
+    const property = await resolveProperty(ctx, link.propertyId);
+    const settings = await ctx.db
+      .query('adminContractSettings')
+      .withIndex('by_scope', (q) => q.eq('scope', 'global'))
+      .unique();
+
+    let bankAccounts: BankAccount[] = [];
+    if (settings?.payload?.bankAccounts && link.selectedBankAccountIds.length > 0) {
+      const allAccounts = settings.payload.bankAccounts as BankAccount[];
+      const globalIds = link.selectedBankAccountIds.filter(
+        (id) => !id.startsWith(OWNER_ACCOUNT_PREFIX),
+      );
+      bankAccounts = allAccounts.filter((a) => globalIds.includes(a.id));
+    }
+    if (
+      link.selectedBankAccountIds.some((id) => id.startsWith(OWNER_ACCOUNT_PREFIX))
+    ) {
+      const ownerInfo = await ctx.db
+        .query('propertyOwnerInfo')
+        .withIndex('by_property', (q) => q.eq('propertyId', link.propertyId))
+        .unique();
+      if (ownerInfo) {
+        bankAccounts = [
+          ...bankAccounts,
+          ...mapOwnerBankAccounts(ownerInfo, link.selectedBankAccountIds),
+        ];
+      }
+    }
+
+    const bookingReference =
+      (await resolveBookingReference(ctx, link)) ?? resolveSaleLinkReference(link);
+
+    return {
+      token: link.token,
+      contractCode: link.contractCode ?? resolveSaleLinkReference(link),
+      status: link.status,
+      clientStep: link.clientStep,
+      clientPortalUiStep: link.clientPortalUiStep,
+      clientDraftPhase: link.clientDraftPhase,
+      clientDraftPaymentAmount: link.clientDraftPaymentAmount,
+      property,
+      checkIn: link.checkIn,
+      checkOut: link.checkOut,
+      nights: link.nights,
+      guests: link.guests,
+      checkInTime: link.checkInTime,
+      checkOutTime: link.checkOutTime,
+      totalValue: link.totalValue,
+      rentalValue: link.rentalValue,
+      depositAmount: link.depositAmount,
+      cleaningFee: link.cleaningFee,
+      petDeposit: link.petDeposit,
+      petSurcharge: link.petSurcharge,
+      petCount: link.petCount,
+      bankAccounts,
+      clientDataFilled: !!link.clientData,
+      clientName: link.clientData?.nombre,
+      clientData: link.clientData
+        ? {
+            nombre: link.clientData.nombre,
+            cedula: link.clientData.cedula,
+            email: link.clientData.email,
+            telefono: link.clientData.telefono,
+            direccion: link.clientData.direccion,
+            ciudad: link.clientData.ciudad,
+            fechaNacimiento: link.clientData.fechaNacimiento,
+            cedulaPhotoUrl: link.clientData.cedulaPhotoUrl,
+            cedulaPhotoFileName: link.clientData.cedulaPhotoFileName,
+          }
+        : undefined,
+      paymentProofSubmitted: !!link.paymentProofUrl,
+      paymentProofFileName: link.paymentProofFileName,
+      paymentProofSubmittedAt: link.paymentProofSubmittedAt,
+      paymentProofAmount: link.paymentProofAmount,
+      paymentProofs: mapPaymentProofsForPortal(link),
+      paymentValidated: !!link.paymentValidated,
+      contractUrl: link.contractUrl,
+      signedContractSubmitted: !!link.signedContractUrl,
+      crUrl: link.crUrl,
+      bookingReference,
+      checkinCompleted: link.checkinCompleted,
+      checkinGuests: link.checkinGuests,
+    };
+  },
+});

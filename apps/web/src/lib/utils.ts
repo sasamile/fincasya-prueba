@@ -30,3 +30,72 @@ export const slugify = (text: string) => {
     .replace(/[^\w-]+/g, '')
     .replace(/--+/g, '-');
 };
+
+export const formatCOP = (value: number | string) => {
+  const num = typeof value === 'string' ? parseFloat(value.replace(/\D/g, '')) : value;
+  if (isNaN(num)) return '$0';
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  }).format(num);
+};
+
+export const formatPriceInput = (value: number | string) => {
+  const num =
+    typeof value === "string" ? parseFloat(value.replace(/\D/g, "")) : value;
+  if (isNaN(num) || num === 0) return "";
+  return new Intl.NumberFormat("es-CO", {
+    maximumFractionDigits: 0,
+  }).format(num);
+};
+
+export const parseCOP = (value: string) => {
+  const cleanValue =
+    typeof value === "string" ? value.replace(/\D/g, "") : String(value);
+  return cleanValue ? parseInt(cleanValue, 10) : 0;
+};
+
+export const tidyDescriptionText = (text: string) => {
+  if (!text) return "";
+
+  let normalized = text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/g, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  // Keep punctuation flow, but only add a break before emoji-led clauses.
+  // Never split "emoji + text" into separate lines.
+  normalized = normalized
+    .replace(
+      /([.!?])\s+(?=\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*\s+\p{L})/gu,
+      "$1\n",
+    )
+    .replace(
+      /(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)(?=\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*\s+\p{L})/gu,
+      "$1\n",
+    );
+
+  normalized = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line, index, arr) => line.length > 0 || arr[index - 1] !== "")
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (normalized.includes("\n")) return normalized;
+
+  const sentences = normalized.split(/(?<=[.!?])\s+/u).filter(Boolean);
+  if (sentences.length <= 1) return normalized;
+
+  const grouped: string[] = [];
+  for (let i = 0; i < sentences.length; i += 2) {
+    grouped.push(sentences.slice(i, i + 2).join(" "));
+  }
+
+  return grouped.join("\n\n");
+};

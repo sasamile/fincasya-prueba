@@ -1,0 +1,21 @@
+import type { NextConfig } from 'next';
+
+const nextConfig: NextConfig = {
+  /** El backend Convex del workspace se importa como TS/JS generado. */
+  transpilePackages: ['@fincasya/backend'],
+  images: {
+    formats: ['image/webp'],
+    remotePatterns: [
+      // Imágenes históricas de fincas (migradas de fincasya-new).
+      { protocol: 'https', hostname: 'fincasya.s3.us-east-1.amazonaws.com' },
+      { protocol: 'https', hostname: '*.s3.us-east-1.amazonaws.com' },
+      { protocol: 'https', hostname: '*.s3.amazonaws.com' },
+      // Archivos subidos desde el panel admin (Convex storage).
+      { protocol: 'https', hostname: '*.convex.cloud' },
+      // Markers de Leaflet (map-picker).
+      { protocol: 'https', hostname: 'unpkg.com' },
+    ],
+  },
+};
+
+export default nextConfig;

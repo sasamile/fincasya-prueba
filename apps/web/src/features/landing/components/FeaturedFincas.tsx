@@ -87,7 +87,7 @@ export function FeaturedFincas({ fincas, title = 'Favorita entre huéspedes' }: 
             onClick={handleLoadMore}
             className="group relative h-14 px-12 rounded-full bg-foreground text-background hover:bg-foreground/90 font-black transition-all duration-500 shadow-2xl hover:shadow-primary/20 active:scale-95 flex items-center gap-4 overflow-hidden border-0"
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-white/10 to-primary/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+            <div className="absolute inset-0 bg-linear-to-r from-primary/0 via-white/10 to-primary/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
 
             <span className="relative z-10 uppercase tracking-[0.2em] text-[10px]">
               Mostrar más fincas

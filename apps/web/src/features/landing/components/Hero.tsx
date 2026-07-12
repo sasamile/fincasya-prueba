@@ -1,6 +1,5 @@
-/** Hero del home — port de FincasYaWeb hero-section.tsx.
- *  Calendario: react-day-picker en popover propio (sin radix). */
-import { useMemo, useRef, useState, useEffect } from 'react';
+/** Hero del home — port de FincasYaWeb hero-section.tsx. */
+import { useMemo } from 'react';
 import {
   Search,
   Calendar as CalendarIcon,
@@ -8,13 +7,13 @@ import {
   MapPin,
   ArrowRight,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, startOfToday } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { DayPicker, type DateRange as RdpDateRange } from 'react-day-picker';
-import 'react-day-picker/style.css';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { StatsSection } from './StatsSection';
 import { SearchAutocompleteInput } from './SearchAutocompleteInput';
 import { useHomeStore } from '../store/home-store';
@@ -35,20 +34,6 @@ export function Hero({ fincas, onOpenChat }: { fincas: PropertyResponse[]; onOpe
     propertyName,
     setPropertyName,
   } = useHomeStore();
-
-  const [calendarOpen, setCalendarOpen] = useState(false);
-  const calendarRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!calendarOpen) return;
-    const close = (e: MouseEvent) => {
-      if (calendarRef.current && !calendarRef.current.contains(e.target as Node)) {
-        setCalendarOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [calendarOpen]);
 
   const propertyNameSuggestions = useMemo(
     () => buildPropertyTitleSuggestions(fincas, propertyName),
@@ -133,43 +118,40 @@ export function Hero({ fincas, onOpenChat }: { fincas: PropertyResponse[]; onOpe
             <div className="bg-accent md:bg-transparent p-2 md:p-0 rounded-full md:rounded-none shrink-0">
               <CalendarIcon className="w-4 h-4 text-muted-foreground md:hidden" />
             </div>
-            <div className="text-left w-full overflow-visible" ref={calendarRef}>
+            <div className="text-left w-full overflow-visible">
               <label className="text-[10px] md:text-[11px] font-bold text-muted-foreground uppercase tracking-widest block mb-0.5 md:mb-1">
                 Fechas
               </label>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setCalendarOpen((o) => !o)}
-                  className="flex items-center gap-2 text-muted-foreground cursor-pointer w-full hover:bg-accent/50 md:hover:bg-transparent -ml-2 px-2 py-1 rounded-lg transition-colors"
-                >
-                  <CalendarIcon className="w-5 h-5 text-muted-foreground hidden md:block" />
-                  <span
-                    className={cn(
-                      'text-xs font-medium whitespace-nowrap',
-                      dateRange?.from ? 'text-foreground' : 'text-muted-foreground',
-                    )}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 text-muted-foreground cursor-pointer w-full hover:bg-accent/50 md:hover:bg-transparent -ml-2 px-2 py-1 rounded-lg transition-colors"
                   >
-                    {formattedDateRange}
-                  </span>
-                </button>
-                {calendarOpen && (
-                  <div className="absolute left-1/2 top-[calc(100%+10px)] z-[120] -translate-x-1/2 rounded-2xl border border-border bg-popover p-3 shadow-2xl">
-                    <DayPicker
-                      mode="range"
-                      numberOfMonths={2}
-                      locale={es}
-                      defaultMonth={dateRange?.from}
-                      selected={dateRange as RdpDateRange | undefined}
-                      disabled={{ before: new Date() }}
-                      onSelect={(range) => {
-                        setDateRange(range as { from?: Date; to?: Date } | undefined);
-                        if (range?.from && range?.to) setCalendarOpen(false);
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
+                    <CalendarIcon className="w-5 h-5 text-muted-foreground hidden md:block" />
+                    <span
+                      className={cn(
+                        'text-xs font-medium',
+                        dateRange?.from ? 'text-foreground' : 'text-muted-foreground',
+                      )}
+                    >
+                      {formattedDateRange}
+                    </span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="landing w-auto p-0 z-[100]" align="center">
+                  <Calendar
+                    initialFocus
+                    mode="range"
+                    defaultMonth={dateRange?.from}
+                    selected={dateRange}
+                    onSelect={setDateRange}
+                    numberOfMonths={2}
+                    disabled={{ before: startOfToday() }}
+                    locale={es}
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
           {/* Huéspedes */}

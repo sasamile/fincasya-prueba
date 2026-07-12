@@ -2,7 +2,7 @@
 export function WhatsappFab() {
   return (
     <a
-      href="https://wa.me/573000000000"
+      href="https://wa.me/573157773937?text=Hola!%20Quiero%20ayuda%20para%20encontrar%20una%20finca"
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Escríbenos por WhatsApp"

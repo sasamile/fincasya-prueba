@@ -137,12 +137,18 @@ function CarouselPrevious({
   size = 'icon',
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { scrollPrev, canScrollPrev } = useCarousel();
+  const { orientation, scrollPrev, canScrollPrev } = useCarousel();
   return (
     <Button
       variant={variant}
       size={size}
-      className={cn('rounded-full', className)}
+      className={cn(
+        'absolute size-8 rounded-full',
+        orientation === 'horizontal'
+          ? 'top-1/2 -left-12 -translate-y-1/2'
+          : '-top-12 left-1/2 -translate-x-1/2 rotate-90',
+        className,
+      )}
       disabled={!canScrollPrev}
       onClick={(e) => {
         e.preventDefault();
@@ -162,12 +168,18 @@ function CarouselNext({
   size = 'icon',
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { scrollNext, canScrollNext } = useCarousel();
+  const { orientation, scrollNext, canScrollNext } = useCarousel();
   return (
     <Button
       variant={variant}
       size={size}
-      className={cn('rounded-full', className)}
+      className={cn(
+        'absolute size-8 rounded-full',
+        orientation === 'horizontal'
+          ? 'top-1/2 -right-12 -translate-y-1/2'
+          : '-bottom-12 left-1/2 -translate-x-1/2 rotate-90',
+        className,
+      )}
       disabled={!canScrollNext}
       onClick={(e) => {
         e.preventDefault();

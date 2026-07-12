@@ -5,6 +5,9 @@ import { v } from 'convex/values';
  * FincasYa v2 — schema.
  * Tablas heredadas del sistema anterior (datos importados el 2026-07-10) +
  * tablas nuevas del agente (exemplars curados, etiquetas de curacion, dedup YCloud).
+ * Nota: las tablas de Better Auth (user/session/account/verification/jwks) NO
+ * viven aqui — son del storage aislado del componente `betterAuth` (ver
+ * convex/betterAuth/schema.ts), accesibles solo vía `authComponent`/`components.betterAuth`.
  * Las tablas importadas que no aparecen aqui (contracts, payments, reviews, etc.)
  * siguen en la base sin validacion de schema; se declaran cuando el codigo las use.
  */
@@ -402,9 +405,23 @@ export default defineSchema(
     }).index('by_property', ['propertyId']),
 
     /**
+     * Catálogo global de iconografía (amenidades): nombre, SVG en S3 (`iconUrl`)
+     * y/o `emoji`. Fue migrada desde fincasya-new; `propertyFeatures.iconId`
+     * apunta a estos documentos.
+     */
+    iconography: defineTable({
+      name: v.optional(v.string()),
+      iconUrl: v.optional(v.string()),
+      emoji: v.optional(v.string()),
+      createdAt: v.optional(v.number()),
+      updatedAt: v.optional(v.number()),
+    }).index('by_name', ['name']),
+
+    /**
      * Características/amenidades de cada finca (portado de fincasya-new).
-     * `iconId`/`zoneTemplateSourceId` se guardan como texto: en `prueba` no
-     * existe la tabla `iconography` ni las plantillas de zona.
+     * `iconId` referencia el catálogo global `iconography` (guardado como texto:
+     * puede venir vacío en features sin icono). `zoneTemplateSourceId` se guarda
+     * como texto: en `prueba` no existen las plantillas de zona.
      */
     propertyFeatures: defineTable({
       propertyId: v.id('properties'),
@@ -414,9 +431,234 @@ export default defineSchema(
       quantity: v.optional(v.number()),
       zone: v.optional(v.string()),
       zoneTemplateSourceId: v.optional(v.string()),
-    }).index('by_property', ['propertyId']),
+    })
+      .index('by_property', ['propertyId'])
+      .index('by_icon', ['iconId']),
+
+    propertyCategoryZoneTemplates: defineTable({
+      propertyCategory: v.union(
+        v.literal('ECONOMICA'),
+        v.literal('ESTANDAR'),
+        v.literal('PREMIUM'),
+        v.literal('LUJO'),
+        v.literal('ECOTURISMO'),
+        v.literal('CON_PISCINA'),
+        v.literal('CERCA_BOGOTA'),
+        v.literal('GRUPOS_GRANDES'),
+        v.literal('VIP'),
+      ),
+      name: v.string(),
+      order: v.optional(v.number()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index('by_category', ['propertyCategory']),
+
+    propertyCategoryZoneFeatures: defineTable({
+      zoneTemplateId: v.id('propertyCategoryZoneTemplates'),
+      iconographyId: v.id('iconography'),
+      alias: v.optional(v.string()),
+      quantity: v.optional(v.number()),
+      order: v.optional(v.number()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index('by_zone_template', ['zoneTemplateId'])
+      .index('by_iconography', ['iconographyId']),
+
+    adminContractSnapshots: defineTable({
+      contractNumber: v.string(),
+      propertyId: v.id('properties'),
+      payload: v.any(),
+      createdAt: v.number(),
+    }).index('by_contract_number', ['contractNumber']),
+
+    adminContractSettings: defineTable({
+      scope: v.literal('global'),
+      payload: v.any(),
+      updatedAt: v.number(),
+    }).index('by_scope', ['scope']),
+
+    contracts: defineTable({
+      contractNumber: v.string(),
+      propertyId: v.optional(v.id('properties')),
+      propertyTitle: v.optional(v.string()),
+      propertyLocation: v.optional(v.string()),
+      clienteNombre: v.optional(v.string()),
+      clienteCedula: v.optional(v.string()),
+      clienteEmail: v.optional(v.string()),
+      clienteTelefono: v.optional(v.string()),
+      clienteCiudad: v.optional(v.string()),
+      clienteDireccion: v.optional(v.string()),
+      firmanteNombre: v.optional(v.string()),
+      firmanteCedula: v.optional(v.string()),
+      valorTotal: v.optional(v.number()),
+      fechaEntrada: v.optional(v.string()),
+      fechaSalida: v.optional(v.string()),
+      pdfUrl: v.optional(v.string()),
+      pdfFilename: v.optional(v.string()),
+      confirmationPdfUrl: v.optional(v.string()),
+      confirmationPdfFilename: v.optional(v.string()),
+      estado: v.string(),
+      origen: v.optional(v.string()),
+      bookingId: v.optional(v.id('bookings')),
+      // Guardado como texto: los contratos migrados de fincasya-new traen ids de
+      // fill-token que no siempre resuelven a un doc de `contractFillTokens` en
+      // este deployment (referencia cross-tabla del import). Ver mismo patrón en
+      // propertyFeatures.iconId.
+      fillTokenId: v.optional(v.string()),
+      draftJson: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index('by_contract_number', ['contractNumber'])
+      .index('by_status', ['estado'])
+      .index('by_created', ['createdAt'])
+      .index('by_property', ['propertyId']),
+
+    contractFillTokens: defineTable({
+      token: v.string(),
+      conversationId: v.optional(v.id('conversations')),
+      source: v.optional(v.union(v.literal('inbox'), v.literal('admin'))),
+      contractDraftJson: v.optional(v.string()),
+      contractSettingsJson: v.optional(v.string()),
+      propertyMetaJson: v.optional(v.string()),
+      propertyTitle: v.optional(v.string()),
+      propertyLocation: v.optional(v.string()),
+      fechaEntrada: v.optional(v.string()),
+      fechaSalida: v.optional(v.string()),
+      cupo: v.optional(v.number()),
+      precioTotal: v.optional(v.number()),
+      expiresAt: v.number(),
+      status: v.union(
+        v.literal('pending'),
+        v.literal('filled'),
+        v.literal('expired'),
+      ),
+      filledData: v.optional(v.any()),
+      filledDataJson: v.optional(v.string()),
+      contractNumber: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.optional(v.number()),
+    })
+      .index('by_token', ['token'])
+      .index('by_conversation', ['conversationId']),
+
+    saleLinks: defineTable({
+      token: v.string(),
+      contractCode: v.optional(v.string()),
+      propertyId: v.id('properties'),
+      createdBy: v.string(),
+      createdByName: v.optional(v.string()),
+      checkIn: v.number(),
+      checkOut: v.number(),
+      nights: v.number(),
+      guests: v.number(),
+      checkInTime: v.optional(v.string()),
+      checkOutTime: v.optional(v.string()),
+      totalValue: v.number(),
+      rentalValue: v.number(),
+      depositAmount: v.number(),
+      cleaningFee: v.number(),
+      petDeposit: v.optional(v.number()),
+      petSurcharge: v.optional(v.number()),
+      petCount: v.optional(v.number()),
+      selectedBankAccountIds: v.array(v.string()),
+      notes: v.optional(v.string()),
+      clientStep: v.number(),
+      clientPortalUiStep: v.optional(v.number()),
+      clientDraftPhase: v.optional(
+        v.union(v.literal('datos'), v.literal('pago')),
+      ),
+      clientDraftPaymentAmount: v.optional(v.number()),
+      status: v.union(
+        v.literal('active'),
+        v.literal('completed'),
+        v.literal('cancelled'),
+      ),
+      clientData: v.optional(
+        v.object({
+          nombre: v.string(),
+          cedula: v.string(),
+          email: v.string(),
+          telefono: v.string(),
+          direccion: v.string(),
+          ciudad: v.optional(v.string()),
+          fechaNacimiento: v.optional(v.string()),
+          cedulaPhotoUrl: v.optional(v.string()),
+          cedulaPhotoFileName: v.optional(v.string()),
+          cedulaPhotoMimeType: v.optional(v.string()),
+          filledAt: v.number(),
+        }),
+      ),
+      paymentProofUrl: v.optional(v.string()),
+      paymentProofFileName: v.optional(v.string()),
+      paymentProofMimeType: v.optional(v.string()),
+      paymentProofAmount: v.optional(v.number()),
+      paymentProofSubmittedAt: v.optional(v.number()),
+      paymentProofs: v.optional(
+        v.array(
+          v.object({
+            url: v.string(),
+            fileName: v.optional(v.string()),
+            mimeType: v.optional(v.string()),
+            amount: v.optional(v.number()),
+            submittedAt: v.number(),
+          }),
+        ),
+      ),
+      paymentValidationKey: v.optional(v.string()),
+      paymentValidated: v.optional(v.boolean()),
+      paymentValidatedAt: v.optional(v.number()),
+      paymentValidatedBy: v.optional(v.string()),
+      contractUrl: v.optional(v.string()),
+      contractGeneratedAt: v.optional(v.number()),
+      signedContractUrl: v.optional(v.string()),
+      signedContractFileName: v.optional(v.string()),
+      signedContractSubmittedAt: v.optional(v.number()),
+      crUrl: v.optional(v.string()),
+      crGeneratedAt: v.optional(v.number()),
+      bookingId: v.optional(v.id('bookings')),
+      ownerOfferAmount: v.optional(v.number()),
+      ownerOfferSentAt: v.optional(v.number()),
+      ownerOfferAcceptedAt: v.optional(v.number()),
+      ownerOfferRejectedAt: v.optional(v.number()),
+      ownerOfferRejectedReason: v.optional(v.string()),
+      ownerOfferComment: v.optional(v.string()),
+      ownerOfferCommentAt: v.optional(v.number()),
+      checkinGuests: v.optional(
+        v.array(
+          v.object({
+            nombreCompleto: v.string(),
+            cedula: v.optional(v.string()),
+            tipoDocumento: v.optional(v.string()),
+            esMenor: v.optional(v.boolean()),
+          }),
+        ),
+      ),
+      checkinMenoresDe2: v.optional(v.number()),
+      checkinMascotas: v.optional(v.number()),
+      checkinPlacas: v.optional(v.string()),
+      checkinObservaciones: v.optional(v.string()),
+      checkinCompleted: v.optional(v.boolean()),
+      checkinCompletedAt: v.optional(v.number()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index('by_token', ['token'])
+      .index('by_contract_code', ['contractCode'])
+      .index('by_property', ['propertyId'])
+      .index('by_created_by', ['createdBy'])
+      .index('by_status', ['status'])
+      .index('by_booking', ['bookingId']),
 
     /** Datos del propietario, cuentas bancarias y check-in (portado de fincasya-new). */
+    /** Orden manual de fincas por pestaña del home (/admin/reorder). */
+    tabOrders: defineTable({
+      tabId: v.string(), // ej. "melgar", "cerca-bogota", "favoritas", "todas"
+      propertyIds: v.array(v.id('properties')),
+      updatedAt: v.number(),
+    }).index('by_tab', ['tabId']),
+
     propertyOwnerInfo: defineTable({
       propertyId: v.id('properties'),
       ownerUserId: v.string(),
@@ -431,6 +673,7 @@ export default defineSchema(
             accountNumber: v.string(),
             accountType: v.optional(v.string()),
             accountHolderName: v.optional(v.string()),
+            brebKey: v.optional(v.boolean()),
           }),
         ),
       ),
@@ -584,7 +827,7 @@ export default defineSchema(
       transactionId: v.optional(v.string()),
       reference: v.optional(v.string()),
       /** Reserva originada en un link de venta (/venta/:token). */
-      saleLinkId: v.optional(v.string()),
+      saleLinkId: v.optional(v.id('saleLinks')),
       /** El propietario aceptó el valor ofrecido en /anfitrion. */
       ownerOfferAcceptedAt: v.optional(v.number()),
       /** El propietario rechazó la oferta en /anfitrion. */
@@ -1052,6 +1295,48 @@ export default defineSchema(
       createdAt: v.number(),
     }).index('by_event', ['eventId']),
 
+    /** Pagos asociados a reservas (abonos, saldos, reembolsos). */
+    payments: defineTable({
+      bookingId: v.id('bookings'),
+      type: v.union(
+        v.literal('ABONO_50'),
+        v.literal('SALDO_50'),
+        v.literal('COMPLETO'),
+        v.literal('REEMBOLSO'),
+      ),
+      amount: v.number(),
+      currency: v.optional(v.string()),
+      transactionId: v.optional(v.string()),
+      reference: v.optional(v.string()),
+      paymentMethod: v.optional(v.string()),
+      checkoutUrl: v.optional(v.string()),
+      status: v.optional(v.string()),
+      wompiData: v.optional(v.any()),
+      boldData: v.optional(v.any()),
+      receiptUrl: v.optional(v.string()),
+      verifiedBy: v.optional(v.string()),
+      verifiedAt: v.optional(v.number()),
+      notes: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index('by_booking', ['bookingId'])
+      .index('by_transaction', ['transactionId'])
+      .index('by_status', ['status']),
+
+    googleCalendarIntegrations: defineTable({
+      accessToken: v.optional(v.string()),
+      refreshToken: v.optional(v.string()),
+      expiresAt: v.optional(v.number()),
+      calendarId: v.optional(v.string()),
+      connected: v.boolean(),
+      connectedEmail: v.optional(v.string()),
+      connectedName: v.optional(v.string()),
+      needsReauth: v.optional(v.boolean()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }),
+
     /**
      * Config global del agente (singleton: key = 'default').
      * globalAiEnabled: conversaciones nuevas y elegibles entran en modo bot.
@@ -1061,6 +1346,138 @@ export default defineSchema(
       globalAiEnabled: v.boolean(),
       updatedAt: v.number(),
     }).index('by_key', ['key']),
+
+    notificationSettings: defineTable({
+      scope: v.literal('global'),
+      payload: v.any(),
+      updatedAt: v.number(),
+    }).index('by_scope', ['scope']),
+
+    whatsappTemporalMessage: defineTable({
+      scope: v.literal('global'),
+      enabled: v.boolean(),
+      content: v.string(),
+      validUntil: v.optional(v.number()),
+      updatedAt: v.number(),
+      updatedByUserId: v.optional(v.string()),
+    }).index('by_scope', ['scope']),
+
+    adminSessionLogs: defineTable({
+      userId: v.string(),
+      userEmail: v.string(),
+      userName: v.optional(v.string()),
+      role: v.optional(v.string()),
+      loginAt: v.number(),
+      logoutAt: v.optional(v.number()),
+      ipAddress: v.optional(v.string()),
+      userAgent: v.optional(v.string()),
+    })
+      .index('by_loginAt', ['loginAt'])
+      .index('by_user_loginAt', ['userId', 'loginAt']),
+
+    internalPages: defineTable({
+      pageId: v.string(),
+      content: v.any(),
+      updatedAt: v.number(),
+    }).index('by_pageId', ['pageId']),
+
+    rolePermissions: defineTable({
+      role: v.string(),
+      module: v.string(),
+      permissions: v.array(v.string()),
+      isCustom: v.optional(v.boolean()),
+      updatedAt: v.number(),
+    })
+      .index('by_role', ['role'])
+      .index('by_role_module', ['role', 'module']),
+
+    siteAnalytics: defineTable({
+      metricKey: v.string(),
+      count: v.number(),
+      updatedAt: v.number(),
+    }).index('by_metricKey', ['metricKey']),
+
+    conversationOperationalStateEvents: defineTable({
+      conversationId: v.id('conversations'),
+      fromState: v.optional(
+        v.union(
+          v.literal('requires_advisor'),
+          v.literal('validate_availability'),
+          v.literal('ready_to_book'),
+          v.literal('pending_payment'),
+          v.literal('pending_data'),
+        ),
+      ),
+      toState: v.union(
+        v.literal('requires_advisor'),
+        v.literal('validate_availability'),
+        v.literal('ready_to_book'),
+        v.literal('pending_payment'),
+        v.literal('pending_data'),
+      ),
+      source: v.union(v.literal('bot'), v.literal('user')),
+      userId: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index('by_conversation', ['conversationId', 'createdAt']),
+
+    contactNotes: defineTable({
+      contactId: v.id('contacts'),
+      content: v.string(),
+      authorUserId: v.optional(v.string()),
+      authorName: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.optional(v.number()),
+    }).index('by_contact', ['contactId']),
+
+    broadcastLogs: defineTable({
+      templateKey: v.string(),
+      templateName: v.string(),
+      totalRequested: v.number(),
+      totalSent: v.number(),
+      totalFailed: v.number(),
+      totalSkipped: v.number(),
+      sentByUserId: v.optional(v.string()),
+      bodyParams: v.optional(v.array(v.string())),
+      recipients: v.array(
+        v.object({
+          contactId: v.id('contacts'),
+          phone: v.string(),
+          status: v.union(
+            v.literal('sent'),
+            v.literal('failed'),
+            v.literal('skipped'),
+          ),
+          wamid: v.optional(v.string()),
+          error: v.optional(v.string()),
+        }),
+      ),
+      createdAt: v.number(),
+    }).index('by_created', ['createdAt']),
+
+    quienes_somos: defineTable({
+      queEsFincasYa: v.string(),
+      mision: v.string(),
+      vision: v.string(),
+      objetivos: v.union(v.string(), v.array(v.string())),
+      politicas: v.union(v.string(), v.array(v.string())),
+      trayectoriaTitle: v.string(),
+      trayectoriaParagraphs: v.string(),
+      stats: v.array(
+        v.object({
+          label: v.string(),
+          value: v.string(),
+        }),
+      ),
+      recognitionTitle: v.string(),
+      recognitionSubtitle: v.string(),
+      presenciaInstitucional: v.string(),
+      carouselImages: v.optional(v.array(v.string())),
+      videoUrl: v.optional(v.string()),
+      videoTitle: v.optional(v.string()),
+      videoDescription: v.optional(v.string()),
+      videoBadge: v.optional(v.string()),
+      updatedAt: v.number(),
+    }),
   },
   // Tablas importadas aun sin declarar (contracts, payments, reviews, ...)
   { strictTableNameTypes: false },

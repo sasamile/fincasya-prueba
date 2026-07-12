@@ -37,6 +37,19 @@ const REVIEWS_DATA = GOOGLE_REVIEWS as unknown as {
   totalCount?: number;
 };
 
+/**
+ * URLs de fotos de reseñas que ya fallaron (Google expira los links de fotos
+ * adjuntas del snapshot con el tiempo, a diferencia de los avatares de perfil
+ * que son estables). Se comparte entre instancias para no reintentar cargas
+ * rotas conocidas.
+ */
+const brokenPhotoUrls = new Set<string>();
+
+/** Fotos de una reseña, excluyendo las que ya se confirmó que no cargan. */
+function usableReviewPhotos(photos: string[] | undefined): string[] {
+  return (photos ?? []).filter((p) => !brokenPhotoUrls.has(p));
+}
+
 export function TestimonialsSection() {
   const testimonials: Testimonial[] = REVIEWS_DATA.reviews ?? [];
   const totalCount = REVIEWS_DATA.totalCount ?? 125;
@@ -45,6 +58,13 @@ export function TestimonialsSection() {
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 6;
+  // Fuerza un re-render cuando una foto de reseña falla (Google la expiró),
+  // para que `usableReviewPhotos` la excluya del carrusel.
+  const [, bumpPhotoFilter] = useState(0);
+  const markPhotoBroken = (url: string) => {
+    brokenPhotoUrls.add(url);
+    bumpPhotoFilter((n) => n + 1);
+  };
 
   // Lightbox
   const [viewerImages, setViewerImages] = useState<string[]>([]);
@@ -237,28 +257,33 @@ export function TestimonialsSection() {
                   </p>
                 </div>
 
-                {selectedReview.photos && selectedReview.photos.length > 0 && (
-                  <div className="mb-12">
-                    <Carousel className="w-full" opts={{ align: 'start', loop: false }}>
-                      <CarouselContent className="-ml-4">
-                        {selectedReview.photos.map((photo, i) => (
-                          <CarouselItem key={i} className="pl-4 basis-1/2 md:basis-1/3">
-                            <div
-                              className="rounded-3xl overflow-hidden shadow-xl aspect-square border border-border cursor-zoom-in"
-                              onClick={() => openLightbox(selectedReview.photos!, i)}
-                            >
-                              <img
-                                src={photo}
-                                alt={`Review photo ${i + 1}`}
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                          </CarouselItem>
-                        ))}
-                      </CarouselContent>
-                    </Carousel>
-                  </div>
-                )}
+                {(() => {
+                  const photos = usableReviewPhotos(selectedReview.photos);
+                  if (photos.length === 0) return null;
+                  return (
+                    <div className="mb-12">
+                      <Carousel className="w-full" opts={{ align: 'start', loop: false }}>
+                        <CarouselContent className="-ml-4">
+                          {photos.map((photo, i) => (
+                            <CarouselItem key={photo} className="pl-4 basis-1/2 md:basis-1/3">
+                              <div
+                                className="rounded-3xl overflow-hidden shadow-xl aspect-square border border-border cursor-zoom-in"
+                                onClick={() => openLightbox(photos, i)}
+                              >
+                                <img
+                                  src={photo}
+                                  alt={`Review photo ${i + 1}`}
+                                  className="w-full h-full object-cover"
+                                  onError={() => markPhotoBroken(photo)}
+                                />
+                              </div>
+                            </CarouselItem>
+                          ))}
+                        </CarouselContent>
+                      </Carousel>
+                    </div>
+                  );
+                })()}
 
                 <div className="flex items-center gap-2 mb-10 text-muted-foreground font-bold text-[10px] uppercase tracking-widest border-t border-border pt-8 justify-center">
                   <Heart
@@ -369,29 +394,34 @@ export function TestimonialsSection() {
                       {testimonial.quote}
                     </p>
 
-                    {testimonial.photos && testimonial.photos.length > 0 && (
-                      <div className="w-full mb-6">
-                        <Carousel className="w-full" opts={{ align: 'start', loop: false }}>
-                          <CarouselContent className="-ml-3">
-                            {testimonial.photos.map((photo, i) => (
-                              <CarouselItem key={i} className="pl-3 basis-1/2 md:basis-[180px]">
-                                <div
-                                  className="rounded-2xl overflow-hidden shadow-lg aspect-square border border-gray-200 cursor-zoom-in relative"
-                                  onClick={() => openLightbox(testimonial.photos!, i)}
-                                >
-                                  <img
-                                    src={photo}
-                                    alt={`Review photo ${i + 1}`}
-                                    loading="lazy"
-                                    className="w-full h-full object-cover"
-                                  />
-                                </div>
-                              </CarouselItem>
-                            ))}
-                          </CarouselContent>
-                        </Carousel>
-                      </div>
-                    )}
+                    {(() => {
+                      const photos = usableReviewPhotos(testimonial.photos);
+                      if (photos.length === 0) return null;
+                      return (
+                        <div className="w-full mb-6">
+                          <Carousel className="w-full" opts={{ align: 'start', loop: false }}>
+                            <CarouselContent className="-ml-3">
+                              {photos.map((photo, i) => (
+                                <CarouselItem key={photo} className="pl-3 basis-1/2 md:basis-[180px]">
+                                  <div
+                                    className="rounded-2xl overflow-hidden shadow-lg aspect-square border border-gray-200 cursor-zoom-in relative"
+                                    onClick={() => openLightbox(photos, i)}
+                                  >
+                                    <img
+                                      src={photo}
+                                      alt={`Review photo ${i + 1}`}
+                                      loading="lazy"
+                                      className="w-full h-full object-cover"
+                                      onError={() => markPhotoBroken(photo)}
+                                    />
+                                  </div>
+                                </CarouselItem>
+                              ))}
+                            </CarouselContent>
+                          </Carousel>
+                        </div>
+                      );
+                    })()}
 
                     <div className="flex items-center justify-between w-full mt-2">
                       <div className="flex gap-4">

@@ -129,10 +129,13 @@ Arquitectura completa: `docs/ARQUITECTURA.md`. Contexto extendido:
 ## Estructura monorepo (Turborepo, 2026-07-10)
 
 - `bun run dev` en la raíz corre TODO (turbo): `packages/backend` (convex dev)
-  + `apps/web` (vite, puerto 3789).
+  + `apps/web` (Next.js, puerto 3789).
 - `packages/backend` — la API: todo el código Convex (agente, curación, inbox,
   webhook YCloud). Comandos convex SIEMPRE desde aquí.
-- `apps/web` — el front: React + Vite + Tailwind 4 + shadcn (dark, estilo
-  WhatsApp Business). Importa la API generada via `@fincasya/backend/convex/_generated/api`.
+- `apps/web` — el front: Next.js (App Router) + React 19 + Tailwind 4 + shadcn.
+  Rutas: `/` landing pública (réplica fincasya.com, `src/features/landing`) y
+  `/inbox` panel de operadores estilo WhatsApp (`src/features/inbox`). Importa
+  la API generada via `@fincasya/backend/convex/_generated/api`; el cliente
+  Convex vive en `src/app/providers.tsx` (NEXT_PUBLIC_CONVEX_URL).
 - Gotcha: ambos packages necesitan `@types/node` (por `process.env`); sin él,
   `convex dev` NO despliega (falla typecheck silenciosamente dentro de turbo).

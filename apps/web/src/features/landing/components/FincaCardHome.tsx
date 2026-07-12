@@ -1,6 +1,7 @@
 /** Card de finca del home — port de FincasYaWeb finca-card-home.tsx.
  *  (img nativa en vez de next/image; iconos de features con fallback check.) */
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Heart, Star, MapPin, Users, Check } from 'lucide-react';
 import { cn, getSeededRating, slugify } from '@/lib/utils';
 import type { PropertyResponse } from '../types';
@@ -27,7 +28,7 @@ export function FincaCardHome({ finca, badge }: FincaCardHomeProps) {
   const [isFavorited, setIsFavorited] = useState(false);
 
   const price = finca.priceBase;
-  const fincaUrl = `https://fincasya.com/fincas/${finca.slug || slugify(finca.title)}`;
+  const fincaUrl = `/fincas/${finca.slug || slugify(finca.title)}`;
 
   useEffect(() => {
     if (!api) return;
@@ -47,7 +48,7 @@ export function FincaCardHome({ finca, badge }: FincaCardHomeProps) {
           <CarouselContent className="h-full ml-0">
             {images.map((image, index) => (
               <CarouselItem key={index} className="pl-0 h-full w-full">
-                <a href={fincaUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                <Link href={fincaUrl} className="block w-full h-full">
                   <div className="relative w-full h-full">
                     <img
                       src={image}
@@ -56,7 +57,7 @@ export function FincaCardHome({ finca, badge }: FincaCardHomeProps) {
                       className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                     />
                   </div>
-                </a>
+                </Link>
               </CarouselItem>
             ))}
           </CarouselContent>
@@ -117,7 +118,7 @@ export function FincaCardHome({ finca, badge }: FincaCardHomeProps) {
         </button>
       </div>
       {/* Content */}
-      <a href={fincaUrl} target="_blank" rel="noopener noreferrer" className="block">
+      <Link href={fincaUrl} className="block">
         <div className="flex justify-between items-start mb-1">
           <h3 className="font-bold text-foreground line-clamp-1 flex-1 mr-2">{finca.title}</h3>
           <div className="flex items-center gap-1 shrink-0">
@@ -183,7 +184,7 @@ export function FincaCardHome({ finca, badge }: FincaCardHomeProps) {
             {finca.capacity} pax
           </span>
         </div>
-      </a>
+      </Link>
     </div>
   );
 }

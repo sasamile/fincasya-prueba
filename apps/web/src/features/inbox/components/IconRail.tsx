@@ -1,7 +1,10 @@
+'use client';
+
 /** Rail de navegación vertical (columna extrema izquierda estilo WhatsApp Web). */
-import { CircleDashed, MessageCircle, Radio, Settings, Store, Users } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { CircleDashed, LogOut, MessageCircle, Radio, Settings, Store, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import profileAvatar from '@/assets/image.png';
+import { authClient } from '@/lib/auth-client';
 
 /** Icono del rail de navegación (columna extrema izquierda de WhatsApp). */
 function RailIcon({
@@ -35,6 +38,13 @@ function RailIcon({
 
 /** Rail de navegación vertical estilo WhatsApp Web. */
 export function IconRail() {
+  const router = useRouter();
+
+  async function handleLogout() {
+    await authClient.signOut();
+    router.replace('/login');
+  }
+
   return (
     <nav className="flex w-[68px] shrink-0 flex-col items-center justify-between border-r border-border bg-background py-4">
       <div className="flex flex-col items-center gap-2">
@@ -46,8 +56,17 @@ export function IconRail() {
       </div>
       <div className="flex flex-col items-center gap-3">
         <RailIcon icon={Settings} label="Ajustes" />
+        <button
+          type="button"
+          onClick={() => void handleLogout()}
+          title="Cerrar sesión"
+          aria-label="Cerrar sesión"
+          className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+        >
+          <LogOut className="h-[20px] w-[20px]" strokeWidth={1.9} />
+        </button>
         <img
-          src={profileAvatar}
+          src="/inbox-avatar.png"
           alt="FincasYa"
           title="FincasYa"
           className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-border/40"

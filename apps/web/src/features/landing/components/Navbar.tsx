@@ -7,12 +7,15 @@ import { Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-export function Navbar() {
+interface NavbarProps {
+  isHome?: boolean;
+  isFincaPage?: boolean;
+}
+
+export function Navbar({ isHome = true, isFincaPage = false }: NavbarProps) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { scrollY } = useScroll();
-  const isHome = true;
-  const isFincaPage = false;
 
   useMotionValueEvent(scrollY, 'change', (latest) => {
     setIsScrolled(latest > 50);

@@ -2,7 +2,9 @@
  * Queries públicas de la landing (misma data que consumía el front de
  * FincasYaWeb vía Nest, pero directo desde Convex).
  */
+import { v } from 'convex/values';
 import { query } from './_generated/server';
+import type { Id } from './_generated/dataModel';
 
 /** Fincas visibles para el catálogo público del home (cards + filtros). */
 export const listProperties = query({
@@ -52,5 +54,72 @@ export const listProperties = query({
         features: featuresByProperty.get(String(p._id)) ?? [],
       };
     });
+  },
+});
+
+/** Finca individual para /fincas/[slug] (detalle público). */
+export const getPropertyBySlug = query({
+  args: { slug: v.string() },
+  handler: async (ctx, { slug }) => {
+    const property = await ctx.db
+      .query('properties')
+      .withIndex('by_slug', (q) => q.eq('slug', slug))
+      .first();
+    if (!property || property.visible === false) return null;
+
+    const images = (
+      await ctx.db
+        .query('propertyImages')
+        .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+        .collect()
+    )
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((i) => i.url);
+
+    const features = await ctx.db
+      .query('propertyFeatures')
+      .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+      .collect();
+
+    // Resuelve el icono (SVG en S3 / emoji) de cada feature vía la tabla
+    // `iconography`. `iconId` se guarda como texto; solo buscamos los presentes.
+    const iconIds = [...new Set(features.map((f) => f.iconId).filter(Boolean))];
+    const iconsById = new Map<string, { iconUrl: string | null; emoji: string | null }>();
+    await Promise.all(
+      iconIds.map(async (id) => {
+        const icon = await ctx.db.get(id as Id<'iconography'>);
+        if (icon) iconsById.set(id!, { iconUrl: icon.iconUrl ?? null, emoji: icon.emoji ?? null });
+      }),
+    );
+
+    return {
+      id: String(property._id),
+      title: property.title,
+      description: property.description,
+      location: property.location,
+      capacity: property.capacity,
+      rating: property.rating ?? null,
+      reviewsCount: property.reviewsCount ?? 0,
+      priceBase: property.priceBase,
+      priceOriginal: property.priceOriginal ?? null,
+      code: property.code ?? null,
+      slug: property.slug ?? null,
+      images,
+      isFavorite: property.isFavorite ?? false,
+      video: property.video ?? null,
+      lat: property.lat,
+      lng: property.lng,
+      zoneOrder: property.zoneOrder ?? [],
+      features: features.map((f) => {
+        const icon = f.iconId ? iconsById.get(f.iconId) : undefined;
+        return {
+          name: f.name,
+          zone: f.zone ?? null,
+          quantity: f.quantity ?? null,
+          iconUrl: icon?.iconUrl ?? null,
+          emoji: icon?.emoji ?? null,
+        };
+      }),
+    };
   },
 });
