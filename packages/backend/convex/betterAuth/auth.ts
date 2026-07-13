@@ -4,7 +4,7 @@
  * disponibles en `https://<deployment>.convex.site/api/auth/*`.
  */
 import { createClient } from '@convex-dev/better-auth';
-import { convex } from '@convex-dev/better-auth/plugins';
+import { convex, crossDomain } from '@convex-dev/better-auth/plugins';
 import type { GenericCtx } from '@convex-dev/better-auth/utils';
 import type { BetterAuthOptions } from 'better-auth';
 import { betterAuth } from 'better-auth';
@@ -42,28 +42,18 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
   const database = authComponent.adapter(ctx);
 
   const siteUrl = process.env.SITE_URL || 'http://localhost:3789';
+  const convexSiteUrl =
+    process.env.CONVEX_SITE_URL ?? 'https://modest-husky-871.convex.site';
 
   return {
     appName: 'FincasYa',
-    baseURL: siteUrl + '/api/auth',
-    basePath: '/api/auth',
+    // Auth vive en *.convex.site; la app en localhost/Vercel es otro origen.
+    baseURL: convexSiteUrl,
     secret: process.env.BETTER_AUTH_SECRET,
     database,
     trustedOrigins: buildTrustedOrigins(),
     emailAndPassword: {
       enabled: true,
-    },
-    // Nuestra app (localhost:3789) y Convex (*.convex.site) son orígenes
-    // distintos: las cookies de sesión necesitan SameSite=None + Secure para
-    // que el navegador las envíe en las peticiones cross-origin del cliente
-    // de Better Auth. Secure funciona igual porque convex.site siempre es https,
-    // sin importar que nuestra app corra en http://localhost en dev.
-    advanced: {
-      useSecureCookies: true,
-      defaultCookieAttributes: {
-        sameSite: 'none',
-        secure: true,
-      },
     },
     user: {
       additionalFields: {
@@ -80,9 +70,11 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
       updateAge: 60 * 60 * 24,
     },
     plugins: [
+      // Guarda la sesión en localStorage y la manda por header Better-Auth-Cookie
+      // (las cookies de terceros en el navegador suelen bloquearse).
+      crossDomain({ siteUrl }),
       convex({
         authConfig,
-        options: { basePath: '/api/auth' },
         jwt: { expirationSeconds: 60 * 60 * 24 },
       }),
     ],

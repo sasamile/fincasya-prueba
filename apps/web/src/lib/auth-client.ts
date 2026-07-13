@@ -4,12 +4,15 @@
  * `{CONVEX_SITE_URL}/api/auth/*`. Sin backend Nest de por medio.
  */
 import { createAuthClient } from 'better-auth/react';
-import { convexClient } from '@convex-dev/better-auth/client/plugins';
+import {
+  convexClient,
+  crossDomainClient,
+} from '@convex-dev/better-auth/client/plugins';
 
 const CONVEX_SITE_URL =
   process.env.NEXT_PUBLIC_CONVEX_SITE_URL ?? 'https://modest-husky-871.convex.site';
 
 export const authClient = createAuthClient({
   baseURL: CONVEX_SITE_URL,
-  plugins: [convexClient()],
+  plugins: [convexClient(), crossDomainClient()],
 });
