@@ -6,12 +6,14 @@
  * fases — ver memoria inbox-asesor-roadmap. Los botones marcados "Fase 1/2" aún
  * no ejecutan.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAction, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { toast } from 'sonner';
+import { BankLogoBadge } from '@/features/checkin/components/bank-logo-badge';
 import {
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronDown,
   DoorOpen,
@@ -141,6 +143,16 @@ type FincaOption = {
   code?: string;
   location?: string;
   images?: string[];
+};
+
+type BankAccount = {
+  id: string;
+  bankName?: string;
+  accountType?: string;
+  accountNumber?: string;
+  ownerName?: string;
+  ownerCedula?: string;
+  brebKey?: boolean;
 };
 
 /** Selector de finca con imagen + buscador (estilo página de contratos). */
@@ -280,9 +292,40 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const fincas = useQuery(api.adminProperties.listAll, {}) as
     | FincaOption[]
     | undefined;
+  const settings = useQuery(api.adminContractSettings.getGlobalPayload, {}) as
+    | {
+        bankAccounts?: BankAccount[];
+        contractBankAccountIds?: string[];
+        primaryBankAccountId?: string;
+      }
+    | null
+    | undefined;
+  const bankAccounts: BankAccount[] = settings?.bankAccounts ?? [];
   const [draft, setDraft] = useState<ContractDraft>(EMPTY_DRAFT);
+  const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
+  const [bankTouched, setBankTouched] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [generating, setGenerating] = useState(false);
+
+  // Selección de cuentas por defecto (las del contrato / la principal).
+  useEffect(() => {
+    if (bankTouched || !settings || bankAccounts.length === 0) return;
+    const def =
+      settings.contractBankAccountIds?.length
+        ? settings.contractBankAccountIds
+        : settings.primaryBankAccountId
+          ? [settings.primaryBankAccountId]
+          : [];
+    if (def.length) setSelectedBankIds(def.map(String));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings]);
+
+  const toggleBank = (id: string) => {
+    setBankTouched(true);
+    setSelectedBankIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
 
   const set =
     (k: keyof ContractDraft) =>
@@ -363,6 +406,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             refundableDeposit: Number(draft.refundableDeposit) || 0,
             manillaCondominio: Number(draft.manillaCondominio) || 0,
             otherCharges: Number(draft.otherCharges) || 0,
+            bankAccountIds: selectedBankIds,
           }),
         },
       );
@@ -461,6 +505,61 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           {field('Manilla / condominio', 'manillaCondominio', '$ 0')}
           {field('Otros cobros', 'otherCharges', '$ 0')}
         </div>
+      </Section>
+
+      <Section
+        title="Cuentas de pago"
+        hint={`${selectedBankIds.length} seleccionada${selectedBankIds.length === 1 ? '' : 's'}`}
+      >
+        {bankAccounts.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No hay cuentas configuradas en Ajustes del contrato.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {bankAccounts.map((acc) => {
+              const on = selectedBankIds.includes(acc.id);
+              return (
+                <button
+                  key={acc.id}
+                  type="button"
+                  onClick={() => toggleBank(acc.id)}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-xl border p-2 text-left transition',
+                    on
+                      ? 'border-primary/50 bg-primary/5'
+                      : 'border-border hover:bg-muted',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'grid h-5 w-5 shrink-0 place-items-center rounded-md border-2 transition',
+                      on
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border',
+                    )}
+                  >
+                    {on ? <Check className="h-3 w-3" /> : null}
+                  </span>
+                  <BankLogoBadge
+                    bankName={acc.bankName ?? ''}
+                    brebKey={Boolean(acc.brebKey)}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-semibold">
+                      {acc.bankName}
+                      {acc.accountType ? ` · ${acc.accountType}` : ''}
+                    </p>
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {acc.accountNumber}
+                      {acc.ownerName ? ` · ${acc.ownerName}` : ''}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </Section>
 
       <Section title="Cliente">
