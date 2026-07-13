@@ -18,7 +18,7 @@ export const authComponent = createClient<DataModel, typeof schema>(components.b
   verbose: false,
 });
 
-function buildTrustedOrigins(): string[] {
+export function buildTrustedOrigins(): string[] {
   const origins = new Set([
     'http://localhost:3789',
     'https://modest-husky-871.convex.site',

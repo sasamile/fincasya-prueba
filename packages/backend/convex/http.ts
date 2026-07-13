@@ -10,13 +10,15 @@
 import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
-import { authComponent, createAuth } from './betterAuth/auth';
+import { authComponent, buildTrustedOrigins, createAuth } from './betterAuth/auth';
 
 const http = httpRouter();
 
 // Rutas de Better Auth (login, sesión, etc.) — expuestas en
 // https://<deployment>.convex.site/api/auth/*
-authComponent.registerRoutes(http, createAuth, { cors: true });
+authComponent.registerRoutes(http, createAuth, {
+  cors: { allowedOrigins: buildTrustedOrigins() },
+});
 
 const ycloudWebhookHandler = httpAction(async (ctx, request) => {
   let body: unknown;
