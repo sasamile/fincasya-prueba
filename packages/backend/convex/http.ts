@@ -329,4 +329,103 @@ http.route({
   }),
 });
 
+/**
+ * Webhook de Meta (Facebook Pages + Instagram).
+ *   Verify URL: https://<deployment>.convex.site/meta/webhook
+ *
+ * GET  -> handshake de verificación (hub.challenge) con META_WEBHOOK_VERIFY_TOKEN.
+ * POST -> eventos (comentarios, menciones, mensajes). Se valida la firma
+ *         X-Hub-Signature-256 con el App Secret antes de procesar.
+ */
+http.route({
+  path: '/meta/webhook',
+  method: 'GET',
+  handler: httpAction(async (_ctx, request) => {
+    const url = new URL(request.url);
+    const mode = url.searchParams.get('hub.mode');
+    const token = url.searchParams.get('hub.verify_token');
+    const challenge = url.searchParams.get('hub.challenge');
+    const expected = process.env.META_WEBHOOK_VERIFY_TOKEN;
+
+    if (mode === 'subscribe' && token && token === expected && challenge) {
+      return new Response(challenge, {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      });
+    }
+    return new Response('Forbidden', { status: 403 });
+  }),
+});
+
+/** HMAC-SHA256 hex del cuerpo crudo con el App Secret (Web Crypto). */
+async function metaSignatureHex(rawBody: string, appSecret: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(appSecret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(rawBody));
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+http.route({
+  path: '/meta/webhook',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const rawBody = await request.text();
+    const appSecret = process.env.META_APP_SECRET;
+
+    // Validación de firma (si hay App Secret configurado).
+    if (appSecret) {
+      const header = request.headers.get('x-hub-signature-256') || '';
+      const provided = header.replace('sha256=', '');
+      const expected = await metaSignatureHex(rawBody, appSecret);
+      if (!provided || provided !== expected) {
+        console.error('[meta-webhook] firma inválida');
+        return new Response('Invalid signature', { status: 401 });
+      }
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return new Response('Bad JSON', { status: 400 });
+    }
+
+    const object: string = body?.object ?? '';
+    const provider = object === 'instagram' ? 'instagram' : 'facebook';
+
+    for (const entry of body?.entry ?? []) {
+      const pageId: string | undefined = entry?.id;
+      for (const change of entry?.changes ?? []) {
+        const value = change?.value ?? {};
+        const from = value.from ?? {};
+        await ctx.runMutation(internal.metaChannels.recordWebhookEvent, {
+          provider,
+          pageId,
+          objectId: value.post_id || value.media?.id || value.media_id,
+          field: change.field,
+          verb: value.verb,
+          commentId: value.comment_id || value.id,
+          parentId: value.parent_id,
+          fromId: from.id,
+          fromName: from.name || from.username,
+          text: value.message || value.text,
+          permalink: value.permalink_url,
+          payload: change,
+        });
+      }
+    }
+
+    // Meta exige 200 rápido, siempre.
+    return new Response('EVENT_RECEIVED', { status: 200 });
+  }),
+});
+
 export default http;

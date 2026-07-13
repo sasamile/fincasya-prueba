@@ -75,6 +75,7 @@ import type * as lib_ycloud_senders from "../lib/ycloud/senders.js";
 import type * as lib_ycloud_templateCatalog from "../lib/ycloud/templateCatalog.js";
 import type * as lib_zoneProximity from "../lib/zoneProximity.js";
 import type * as media from "../media.js";
+import type * as metaChannels from "../metaChannels.js";
 import type * as notificationSettings from "../notificationSettings.js";
 import type * as paymentPortal from "../paymentPortal.js";
 import type * as paymentReceipts from "../paymentReceipts.js";
@@ -161,6 +162,7 @@ declare const fullApi: ApiFromModules<{
   "lib/ycloud/templateCatalog": typeof lib_ycloud_templateCatalog;
   "lib/zoneProximity": typeof lib_zoneProximity;
   media: typeof media;
+  metaChannels: typeof metaChannels;
   notificationSettings: typeof notificationSettings;
   paymentPortal: typeof paymentPortal;
   paymentReceipts: typeof paymentReceipts;

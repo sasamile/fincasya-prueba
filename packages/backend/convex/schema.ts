@@ -1518,6 +1518,63 @@ export default defineSchema(
       .index('by_status', ['status'])
       .index('by_submittedAt', ['submittedAt'])
       .index('by_email', ['email']),
+
+    /**
+     * Canales sociales conectados via Meta (Facebook Pages / Instagram).
+     * Una fila por Página de Facebook. `pageAccessToken` es SENSIBLE: nunca
+     * exponer al cliente (solo se lee desde actions/webhook internos).
+     * El token de Página, derivado de un user token de larga duracion, no
+     * expira mientras la conexion siga vigente.
+     */
+    metaChannelConnections: defineTable({
+      // Identidad de la Pagina de Facebook (fuente de verdad de la conexion).
+      pageId: v.string(),
+      pageName: v.string(),
+      pageAccessToken: v.string(),
+      category: v.optional(v.string()),
+      pictureUrl: v.optional(v.string()),
+      // Cuenta de Instagram Business vinculada a la Pagina (si existe).
+      igUserId: v.optional(v.string()),
+      igUsername: v.optional(v.string()),
+      igPictureUrl: v.optional(v.string()),
+      // Metadatos de la conexion.
+      scopes: v.optional(v.array(v.string())),
+      connected: v.boolean(),
+      webhookSubscribed: v.optional(v.boolean()),
+      connectedByUserId: v.optional(v.string()),
+      connectedByName: v.optional(v.string()),
+      tokenExpiresAt: v.optional(v.number()),
+      lastError: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index('by_page', ['pageId'])
+      .index('by_ig', ['igUserId']),
+
+    /**
+     * Log de eventos entrantes del webhook de Meta (comentarios, menciones,
+     * mensajes). Alimenta el feed en tiempo real del panel de Canales y sirve
+     * de auditoria. `payload` guarda el value crudo del cambio.
+     */
+    metaWebhookEvents: defineTable({
+      provider: v.union(v.literal('facebook'), v.literal('instagram')),
+      pageId: v.optional(v.string()),
+      objectId: v.optional(v.string()),
+      field: v.optional(v.string()),
+      verb: v.optional(v.string()),
+      commentId: v.optional(v.string()),
+      parentId: v.optional(v.string()),
+      fromId: v.optional(v.string()),
+      fromName: v.optional(v.string()),
+      text: v.optional(v.string()),
+      permalink: v.optional(v.string()),
+      handled: v.boolean(),
+      payload: v.any(),
+      receivedAt: v.number(),
+    })
+      .index('by_page', ['pageId'])
+      .index('by_receivedAt', ['receivedAt'])
+      .index('by_comment', ['commentId']),
   },
   // Tablas importadas aun sin declarar (contracts, payments, reviews, ...)
   { strictTableNameTypes: false },

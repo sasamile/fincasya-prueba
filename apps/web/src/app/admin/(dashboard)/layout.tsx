@@ -33,6 +33,7 @@ import {
   ShoppingBag,
   BadgeCheck,
   Home,
+  Share2,
 } from "lucide-react";
 import { useTheme } from '@/components/theme-provider';
 import { useState, useEffect } from "react";
@@ -148,6 +149,12 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
       { label: "CRM", href: "/admin/crm", icon: Sparkles },
       { label: "Roles y Permisos", href: "/admin/roles", icon: ShieldCheck },
       { label: "Historial de accesos", href: "/admin/access-logs", icon: History },
+    ],
+  },
+  {
+    title: "REDES SOCIALES",
+    items: [
+      { label: "Canales", href: "/admin/canales", icon: Share2 },
     ],
   },
   {
