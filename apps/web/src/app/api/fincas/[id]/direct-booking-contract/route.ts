@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getConvexHttpClient, api } from "@/lib/convex-server";
 import { fillContractDocx } from "@/lib/server/contract-docx";
+import { convertDocxToPdf } from "@/lib/server/docx-to-pdf";
 import {
   buildContractWordValues,
   type ContractDto,
@@ -105,14 +106,27 @@ export async function POST(
       ownerCedula,
     });
 
-    const filename = `Contrato_${sanitize(finca.title || "FincasYa")}_${sanitize(contractNumber)}.docx`;
+    const baseName = `Contrato_${sanitize(finca.title || "FincasYa")}_${sanitize(contractNumber)}`;
+
+    // Se intenta PDF (LibreOffice); si no está disponible, se entrega el .docx.
+    const pdf = await convertDocxToPdf(docx);
+    if (pdf) {
+      return NextResponse.json({
+        success: true,
+        fileBase64: pdf.toString("base64"),
+        filename: `${baseName}.pdf`,
+        mimeType: "application/pdf",
+        contractNumber,
+      });
+    }
 
     return NextResponse.json({
       success: true,
       fileBase64: docx.toString("base64"),
-      filename,
+      filename: `${baseName}.docx`,
       mimeType: DOCX_MIME,
       contractNumber,
+      pdfUnavailable: true,
     });
   } catch (error) {
     const message =
