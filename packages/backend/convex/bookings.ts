@@ -17,56 +17,8 @@ import {
 } from './lib/ownerPayout';
 import { resolveRefundableDeposit } from './lib/bookingDeposit';
 import { resolveSaleLinkReference } from './lib/saleLinkReference';
-
-/** Fecha calendario YYYY-MM-DD en hora de Colombia (negocio). */
-function calendarDateColombia(ms: number): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Bogota',
-  }).format(new Date(ms));
-}
-
-function todayColombia(): string {
-  return calendarDateColombia(Date.now());
-}
-
-/**
- * Impide reservas con entrada o salida ya pasadas (calendario Colombia) o rango inválido.
- */
-function assertBookingDatesAreFuture(args: {
-  fechaEntrada: number;
-  fechaSalida: number;
-  fechaCheckOut?: number;
-}): void {
-  if (
-    !Number.isFinite(args.fechaEntrada) ||
-    !Number.isFinite(args.fechaSalida)
-  ) {
-    throw new Error('Las fechas de la reserva no son válidas.');
-  }
-  const salidaEfectiva = args.fechaCheckOut ?? args.fechaSalida;
-  if (!Number.isFinite(salidaEfectiva)) {
-    throw new Error('La fecha de salida no es válida.');
-  }
-  if (salidaEfectiva <= args.fechaEntrada) {
-    throw new Error(
-      'La fecha de salida debe ser posterior a la fecha de entrada.',
-    );
-  }
-  const today = todayColombia();
-  const diaEntrada = calendarDateColombia(args.fechaEntrada);
-  const diaSalida = calendarDateColombia(salidaEfectiva);
-  // No se permite check-in hoy ni en pasado — mínimo mañana.
-  if (diaEntrada <= today) {
-    throw new Error(
-      'La fecha de entrada debe ser a partir de mañana (no se acepta ingreso el mismo día, hora Colombia).',
-    );
-  }
-  if (diaSalida < today) {
-    throw new Error(
-      'La fecha de salida no puede ser anterior a hoy (hora Colombia).',
-    );
-  }
-}
+import { assertBookingDatesAreFuture } from './lib/bookings/dates';
+import { applyBookingListFilters } from './lib/bookings/listFilters';
 
 // ============ QUERIES ============
 
@@ -121,43 +73,7 @@ export const list = query({
                 .collect()
             : await ctx.db.query('bookings').collect();
 
-    let filtered = allBookings;
-
-    // Filtrar por año (vista meses del calendario admin)
-    if (args.year && !args.month) {
-      const year = parseInt(args.year, 10);
-      const startMs = new Date(year, 0, 1).getTime();
-      const endMs = new Date(year, 11, 31, 23, 59, 59, 999).getTime();
-
-      filtered = filtered.filter(
-        (b) => b.fechaEntrada <= endMs && b.fechaSalida >= startMs,
-      );
-    } else if (args.month && args.year) {
-      const year = parseInt(args.year, 10);
-      const month = parseInt(args.month, 10) - 1; // 0-based
-      const startMs = new Date(year, month, 1).getTime();
-      const endMs = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
-
-      filtered = filtered.filter(
-        (b) => b.fechaEntrada <= endMs && b.fechaSalida >= startMs,
-      );
-    }
-
-    if (args.isDirect !== undefined) {
-      filtered = filtered.filter((b) => b.isDirect === args.isDirect);
-    }
-
-    if (args.userEmail !== undefined) {
-      filtered = filtered.filter((b) => b.correo === args.userEmail);
-    }
-
-    // Aplicar cursor si existe (filtrar manualmente después de obtener los resultados)
-    if (args.cursor) {
-      filtered = filtered.filter((b) => b._id > args.cursor!);
-    }
-
-    // Ordenar por fecha de creación (más recientes primero)
-    filtered = filtered.sort((a, b) => b.createdAt - a.createdAt);
+    const filtered = applyBookingListFilters(allBookings, args);
 
     // Determinar si hay más resultados
     const hasMore = filtered.length > limit;
