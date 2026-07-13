@@ -7,14 +7,13 @@
  * no ejecutan.
  */
 import { useState } from 'react';
-import { useAction } from 'convex/react';
+import { useAction, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { toast } from 'sonner';
 import {
   CalendarDays,
   CheckCircle2,
   DoorOpen,
-  FileSignature,
   FileText,
   Link2,
   Loader2,
@@ -35,9 +34,15 @@ type ContractDraft = {
   contractCode: string;
   checkIn: string;
   checkOut: string;
+  checkInTime: string;
+  checkOutTime: string;
   guests: string;
   pricePerNight: string;
-  total: string;
+  petCount: string;
+  cleaningFee: string;
+  refundableDeposit: string;
+  manillaCondominio: string;
+  otherCharges: string;
   clientName: string;
   clientCedula: string;
   clientPhone: string;
@@ -53,9 +58,15 @@ const EMPTY_DRAFT: ContractDraft = {
   contractCode: '',
   checkIn: '',
   checkOut: '',
+  checkInTime: '10:00 AM',
+  checkOutTime: '04:00 PM',
   guests: '',
   pricePerNight: '',
-  total: '',
+  petCount: '0',
+  cleaningFee: '',
+  refundableDeposit: '',
+  manillaCondominio: '',
+  otherCharges: '',
   clientName: '',
   clientCedula: '',
   clientPhone: '',
@@ -122,54 +133,131 @@ function Section({
   );
 }
 
-/** Contrato IA — protagonista. Flujo: analizar → datos → preview → enviar. */
+function downloadBase64(fileBase64: string, filename: string, mime: string) {
+  const bytes = Uint8Array.from(atob(fileBase64), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Contrato — formulario completo (como la página de contratos) con escaneo IA
+ * OPCIONAL para prellenar. El asesor ve y edita todos los campos y genera.
+ */
 function ContratoTool({ conversation }: { conversation: ConversationRow | null }) {
   const extract = useAction(api.contractAi.extractFromConversation);
+  const fincas = useQuery(api.adminProperties.listAll, {}) as
+    | Array<{ _id: string; title: string; code?: string }>
+    | undefined;
   const [draft, setDraft] = useState<ContractDraft>(EMPTY_DRAFT);
   const [analyzing, setAnalyzing] = useState(false);
-  const [analyzed, setAnalyzed] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
-  const set = (k: keyof ContractDraft) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setDraft((d) => ({ ...d, [k]: e.target.value }));
+  const set =
+    (k: keyof ContractDraft) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setDraft((d) => ({ ...d, [k]: e.target.value }));
 
   async function handleAnalyze() {
     if (!conversation) return;
     setAnalyzing(true);
     try {
-      const r = await extract({
-        conversationId: conversation.conversationId,
-      });
-      setDraft({
-        fincaId: r.finca?.id ?? '',
-        fincaTitle: r.finca?.title ?? r.fincaGuess ?? '',
-        contractCode: r.contractCode,
-        checkIn: r.checkIn,
-        checkOut: r.checkOut,
-        guests: r.guests ? String(r.guests) : '',
-        pricePerNight: r.pricePerNight ? String(r.pricePerNight) : '',
-        total: r.total ? String(r.total) : '',
-        clientName: r.client.name,
-        clientCedula: r.client.cedula,
-        clientPhone: r.client.phone,
-        clientEmail: r.client.email,
-        clientCity: r.client.city,
-        clientAddress: r.client.address,
-        notes: r.notes,
-      });
-      setAnalyzed(true);
-      if (!r.finca && r.fincaGuess) {
-        toast.warning(
-          `No encontré la finca "${r.fincaGuess}" en el catálogo. Ajústala manualmente.`,
-        );
-      } else {
-        toast.success('Datos extraídos del chat. Revísalos antes de generar.');
-      }
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : 'No se pudo analizar el chat.',
+      const r = await extract({ conversationId: conversation.conversationId });
+      setDraft((d) => ({
+        ...d,
+        fincaId: r.finca?.id ?? d.fincaId,
+        fincaTitle: r.finca?.title ?? r.fincaGuess ?? d.fincaTitle,
+        contractCode: r.contractCode || d.contractCode,
+        checkIn: r.checkIn || d.checkIn,
+        checkOut: r.checkOut || d.checkOut,
+        guests: r.guests ? String(r.guests) : d.guests,
+        pricePerNight: r.pricePerNight ? String(r.pricePerNight) : d.pricePerNight,
+        clientName: r.client.name || d.clientName,
+        clientCedula: r.client.cedula || d.clientCedula,
+        clientPhone: r.client.phone || d.clientPhone,
+        clientEmail: r.client.email || d.clientEmail,
+        clientCity: r.client.city || d.clientCity,
+        clientAddress: r.client.address || d.clientAddress,
+      }));
+      toast.success(
+        r.finca
+          ? 'Datos extraídos del chat. Revísalos antes de generar.'
+          : `Extraje los datos; la finca "${r.fincaGuess}" no matcheó — selecciónala.`,
       );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo analizar.');
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function handleGenerate() {
+    if (!draft.fincaId) {
+      toast.error('Selecciona la finca.');
+      return;
+    }
+    const nights = (() => {
+      const a = new Date(`${draft.checkIn}T12:00:00`).getTime();
+      const b = new Date(`${draft.checkOut}T12:00:00`).getTime();
+      return Number.isFinite(a) && Number.isFinite(b) && b > a
+        ? Math.max(1, Math.round((b - a) / 86400000))
+        : 1;
+    })();
+    const perNight = Number(draft.pricePerNight) || 0;
+    setGenerating(true);
+    try {
+      const res = await fetch(
+        `/api/fincas/${draft.fincaId}/direct-booking-contract`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyId: draft.fincaId,
+            contractNumber: draft.contractCode,
+            nightlyPrice: String(perNight),
+            totalPrice: String(perNight * nights),
+            clientName: draft.clientName,
+            clientId: draft.clientCedula,
+            clientEmail: draft.clientEmail,
+            clientPhone: draft.clientPhone,
+            clientCity: draft.clientCity,
+            clientAddress: draft.clientAddress,
+            checkInDate: draft.checkIn,
+            checkOutDate: draft.checkOut,
+            checkInTime: draft.checkInTime,
+            checkOutTime: draft.checkOutTime,
+            guests: Number(draft.guests) || 1,
+            petCount: Number(draft.petCount) || 0,
+            cleaningFee: Number(draft.cleaningFee) || 0,
+            refundableDeposit: Number(draft.refundableDeposit) || 0,
+            manillaCondominio: Number(draft.manillaCondominio) || 0,
+            otherCharges: Number(draft.otherCharges) || 0,
+          }),
+        },
+      );
+      const data = (await res.json()) as {
+        success?: boolean;
+        fileBase64?: string;
+        filename?: string;
+        mimeType?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.fileBase64) {
+        throw new Error(data.error || 'No se pudo generar el contrato.');
+      }
+      downloadBase64(
+        data.fileBase64,
+        data.filename || 'contrato',
+        data.mimeType || 'application/pdf',
+      );
+      toast.success('Contrato generado y descargado.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al generar.');
+    } finally {
+      setGenerating(false);
     }
   }
 
@@ -193,86 +281,104 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
 
   return (
     <>
+      {/* Escaneo con IA — OPCIONAL */}
       <button
         type="button"
         onClick={() => void handleAnalyze()}
         disabled={!conversation || analyzing}
-        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground shadow-sm transition disabled:opacity-70"
+        className="flex w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-2.5 text-sm font-bold text-primary transition hover:bg-primary/15 disabled:opacity-60"
       >
         {analyzing ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
           <Wand2 className="h-4 w-4" />
         )}
-        {analyzing
-          ? 'Analizando conversación…'
-          : analyzed
-            ? 'Volver a analizar el chat'
-            : 'Analizar chat y prellenar contrato'}
+        {analyzing ? 'Analizando chat…' : 'Prellenar con IA (opcional)'}
       </button>
-      <p className="text-center text-[11px] text-muted-foreground">
-        La IA lee la conversación y detecta finca, fechas, personas, precio y
-        datos del cliente.
-      </p>
 
-      <Section title="Datos detectados" hint="editables">
-        <div className="grid grid-cols-2 gap-3">
-          {field('Finca', 'fincaTitle', 'Sin analizar')}
-          {field('Código contrato', 'contractCode', 'Ej. CR 2041')}
-          {field('Entrada', 'checkIn', 'aaaa-mm-dd')}
-          {field('Salida', 'checkOut', 'aaaa-mm-dd')}
-          {field('Personas', 'guests', '0')}
-          {field('Valor / noche', 'pricePerNight', '$ 0')}
-          {field('Cliente', 'clientName', 'Nombre')}
-          {field('Cédula', 'clientCedula', '—')}
-          {field('Teléfono', 'clientPhone', '—')}
-          {field('Ciudad', 'clientCity', '—')}
-        </div>
-        {draft.fincaTitle && !draft.fincaId ? (
-          <p className="mt-2 text-[11px] font-medium text-amber-600">
-            ⚠ Finca no vinculada al catálogo — verifica el nombre.
-          </p>
-        ) : null}
-      </Section>
-
-      <Section title="Vista previa del contrato" hint="editable como Word">
-        <div className="relative aspect-[1/1.15] w-full overflow-hidden rounded-xl border border-border bg-[repeating-linear-gradient(var(--muted),var(--muted)_26px,transparent_26px,transparent_27px)]">
-          <div className="absolute inset-0 grid place-items-center">
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-background/85 px-6 py-5 text-center">
-              <FileText className="h-6 w-6 text-muted-foreground/60" />
-              <p className="max-w-[15rem] text-xs text-muted-foreground">
-                Aparecerá el contrato con logo, formato y datos — editable inline
-                (tipo Word) antes de enviar.
-              </p>
-            </div>
+      <Section title="Finca y estadía">
+        <div className="space-y-3">
+          <div>
+            <label className={fl}>Finca</label>
+            <select
+              className={input}
+              value={draft.fincaId}
+              onChange={(e) => {
+                const f = fincas?.find((x) => x._id === e.target.value);
+                setDraft((d) => ({
+                  ...d,
+                  fincaId: e.target.value,
+                  fincaTitle: f?.title ?? '',
+                }));
+              }}
+            >
+              <option value="">
+                {draft.fincaTitle && !draft.fincaId
+                  ? `Sugerida: ${draft.fincaTitle} (selecciona)`
+                  : 'Selecciona una finca…'}
+              </option>
+              {(fincas ?? []).map((f) => (
+                <option key={f._id} value={f._id}>
+                  {f.title}
+                  {f.code ? ` · ${f.code}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {field('Código contrato', 'contractCode', 'Ej. CR 2041')}
+            {field('Valor / noche', 'pricePerNight', '$ 0')}
+            {field('Entrada', 'checkIn', '', 'date')}
+            {field('Salida', 'checkOut', '', 'date')}
+            {field('Hora entrada', 'checkInTime')}
+            {field('Hora salida', 'checkOutTime')}
+            {field('Personas', 'guests', '0')}
+            {field('N° mascotas', 'petCount', '0')}
           </div>
         </div>
       </Section>
 
-      <Section title="Firma del jefe">
-        <button
-          type="button"
-          disabled
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-semibold text-foreground disabled:opacity-70"
-        >
-          <FileSignature className="h-4 w-4" /> Colocar firma del jefe
-        </button>
+      <Section title="Cargos y depósitos">
+        <div className="grid grid-cols-2 gap-3">
+          {field('Aseo final', 'cleaningFee', '$ 0')}
+          {field('Depósito garantía', 'refundableDeposit', '$ 0')}
+          {field('Manilla / condominio', 'manillaCondominio', '$ 0')}
+          {field('Otros cobros', 'otherCharges', '$ 0')}
+        </div>
+      </Section>
+
+      <Section title="Cliente">
+        <div className="grid grid-cols-2 gap-3">
+          {field('Nombre', 'clientName', 'Nombre completo')}
+          {field('Cédula', 'clientCedula', '—')}
+          {field('Teléfono', 'clientPhone', '—')}
+          {field('Correo', 'clientEmail', '—')}
+          {field('Ciudad', 'clientCity', '—')}
+          {field('Dirección', 'clientAddress', '—')}
+        </div>
       </Section>
 
       <div className="sticky bottom-0 -mx-4 mt-auto flex items-center gap-2 border-t border-border bg-background/90 px-4 py-3 backdrop-blur">
         <button
           type="button"
-          disabled
-          className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-60"
+          onClick={() => void handleGenerate()}
+          disabled={generating || !draft.fincaId}
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
         >
-          <FileText className="h-4 w-4" /> Descargar
+          {generating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <FileText className="h-4 w-4" />
+          )}
+          Generar contrato
         </button>
         <button
           type="button"
           disabled
-          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-90"
+          title="Próxima fase"
+          className="flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-50"
         >
-          <Send className="h-4 w-4" /> Enviar por WhatsApp
+          <Send className="h-4 w-4" /> Enviar
         </button>
       </div>
     </>
@@ -380,7 +486,7 @@ export function AsesorPanel({
   const Icon = meta.icon;
 
   return (
-    <aside className="flex w-full min-w-0 flex-1 flex-col bg-muted/20">
+    <aside className="flex w-[440px] shrink-0 flex-col border-r border-border bg-muted/20">
       {/* Cabecera */}
       <header className="flex items-center gap-3 border-b border-border bg-background px-4 py-3">
         <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">

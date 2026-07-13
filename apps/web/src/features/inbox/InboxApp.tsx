@@ -82,7 +82,15 @@ export default function App() {
         hasSelection={Boolean(selected)}
       />
 
-      {/* Lista de chats */}
+      {/* Panel de herramienta del asesor (izquierda) o lista de chats.
+          El chat de la conversación queda siempre visible a la derecha. */}
+      {activeTool ? (
+        <AsesorPanel
+          tool={activeTool}
+          conversation={selected}
+          onClose={() => setActiveTool(null)}
+        />
+      ) : (
       <aside className="flex w-[380px] shrink-0 flex-col border-r border-border bg-card">
         {/* Cabecera con título y acciones */}
         <header className="flex items-center justify-between px-4 py-3">
@@ -163,15 +171,10 @@ export default function App() {
           )}
         </div>
       </aside>
+      )}
 
-      {/* Panel principal: herramienta de asesor, o el chat */}
-      {activeTool ? (
-        <AsesorPanel
-          tool={activeTool}
-          conversation={selected}
-          onClose={() => setActiveTool(null)}
-        />
-      ) : selected ? (
+      {/* Conversación (siempre visible a la derecha; no la tapa el panel) */}
+      {selected ? (
         <ChatPanel key={selected.conversationId} conv={selected} />
       ) : (
         <ChatHomeScreen />
