@@ -1642,7 +1642,12 @@ export function ContractsReservationSection({
       if (hasPropertyPdfTemplate) {
         const contractResponse = await axios.post(
           `/api/fincas/${effectiveForm.propertyId}/direct-booking-contract`,
-          buildContractPayload(effectiveForm, generatedContractNumber),
+          {
+            ...buildContractPayload(effectiveForm, generatedContractNumber),
+            // El servidor genera el PDF desde este HTML ya renderizado (WYSIWYG
+            // con la vista previa) vía Puppeteer.
+            customHtml: contractPreviewHtml,
+          },
           { withCredentials: true },
         );
         contractUrlResult = contractResponse.data?.url || "";
