@@ -58,7 +58,19 @@ type PreviewFormSlice = {
   checkOutDate: string;
   checkInTime: string;
   checkOutTime: string;
+  /** Opcional: # de habitaciones entregadas; si viene, reemplaza el detalle de camas. */
+  habitaciones?: string;
 };
+
+/**
+ * Texto de habitaciones para {{caracteristicasDeFinca}} (ej. "09 HABITACIONES").
+ * Si no se especifica un número, devuelve cadena vacía (no se detallan camas).
+ */
+export function formatHabitacionesText(value: string | undefined | null): string {
+  const n = parseInt(String(value ?? "").replace(/\D/g, ""), 10);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return `${String(n).padStart(2, "0")} HABITACIONES`;
+}
 
 /** Opcional: datos guardados en admin para {{nombrePropietario}} y cédula en el contrato. */
 export type ContractOwnerOverrideInput = {
@@ -110,11 +122,18 @@ export function buildReservationPreviewFincaData(
   nights: number,
   contractTotalCop: number,
   formatCop: (n: number) => string,
-  formatFincaFeatures: (features: unknown[]) => string,
+  // Se mantiene por compatibilidad de firma; ya no se detallan las camas.
+  _formatFincaFeatures: (features: unknown[]) => string,
   contractOwnerOverride?: ContractOwnerOverrideInput | null,
 ): Partial<FincaData> {
   const n = Math.max(0, nights);
   const total = Math.max(0, Math.round(contractTotalCop));
+
+  // Ya no se listan las camas; solo, opcionalmente, el # de habitaciones.
+  const habitacionesText = formatHabitacionesText(form.habitaciones);
+  const caracteristicasHtml = habitacionesText
+    ? `<div style="margin: 0 0 4px 0; text-align: left !important;">${habitacionesText}</div>`
+    : "";
 
   const nombreManual = contractOwnerOverride?.nombreCompleto?.trim();
   const cedulaManual = contractOwnerOverride?.cedula?.trim();
@@ -130,9 +149,7 @@ export function buildReservationPreviewFincaData(
     municipioFinca: property?.location || "—",
     nombrePropietario,
     capacidadDePersonas: String(property?.capacity ?? 0),
-    caracteristicasDeFinca: property?.features?.length
-      ? formatFincaFeatures(property.features)
-      : "",
+    caracteristicasDeFinca: caracteristicasHtml,
     precioNumerico: formatCop(total),
     precioLetras: numberToSpanishTextCO(total, true),
     codigoContrato:

@@ -42,6 +42,7 @@ import {
 } from "@/features/admin/utils/contract-utils";
 import {
   buildReservationPreviewFincaData,
+  formatHabitacionesText,
 } from "@/features/admin/utils/contract-preview-helpers";
 import { ContractGlobalSetupSections } from "@/features/admin/components/contracts/contract-global-setup-sections";
 import { ContractDocumentPreview } from "@/features/admin/components/contracts/contract-document-preview";
@@ -136,6 +137,8 @@ type FormState = {
   checkInTime: string;
   checkOutTime: string;
   guests: string;
+  /** Opcional: # de habitaciones entregadas (reemplaza el detalle de camas). */
+  habitaciones: string;
   temporada: string;
   groupType: string;
   petCount: string;
@@ -175,6 +178,7 @@ const INITIAL: FormState = {
   checkInTime: "10:00 AM",
   checkOutTime: "04:00 PM",
   guests: "1",
+  habitaciones: "",
   temporada: "ESTANDAR",
   groupType: "FAMILIAR",
   petCount: "0",
@@ -885,9 +889,12 @@ export function ContractsReservationSection({
         checkOutDate: form.checkOutDate,
         checkInTime: form.checkInTime,
         checkOutTime: form.checkOutTime,
+        habitaciones: form.habitaciones,
       },
       nights,
-      contractTotal,
+      // El "valor" del contrato es SOLO el arriendo (noches × precio). El
+      // depósito, aseo, mascotas y demás se detallan aparte, no en este total.
+      staySubtotal,
       money,
       formatFincaFeatures,
       contractOwnerRow,
@@ -925,8 +932,9 @@ export function ContractsReservationSection({
     form.checkOutDate,
     form.checkInTime,
     form.checkOutTime,
+    form.habitaciones,
     nights,
-    contractTotal,
+    staySubtotal,
     propertyContractOwnerOverrides,
     bankIdsForContract,
     bankAccounts,
@@ -1159,8 +1167,12 @@ export function ContractsReservationSection({
     propertyId: draft.propertyId,
     contractNumber: generatedContractNumber,
     nightlyPrice: String(draft.nightlyPrice),
-    totalPrice: String(contractTotal),
+    // El "valor" del contrato es SOLO el arriendo (noches × precio). Depósito,
+    // aseo, mascotas y demás cargos se detallan aparte, no en este total.
+    totalPrice: String(Number(draft.nightlyPrice || 0) * nights),
     conversationId: "direct-reservation",
+    // No se detallan camas; solo, opcionalmente, el # de habitaciones.
+    caracteristicasOverride: formatHabitacionesText(draft.habitaciones),
     clientName: draft.clientName,
     clientId: draft.clientId,
     clientEmail: draft.clientEmail,
@@ -2796,6 +2808,26 @@ export function ContractsReservationSection({
                       </p>
                     )}
                   <GuestCapacityWarningAlert message={guestCapacityWarning} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className={fieldLabelClass("habitaciones")}>
+                    N° de habitaciones (opcional)
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Ej: 9"
+                    value={form.habitaciones}
+                    onChange={(event) =>
+                      setField("habitaciones", event.target.value)
+                    }
+                    className={fieldClass("habitaciones")}
+                  />
+                  <p className="ml-1 text-[11px] font-medium text-zinc-400">
+                    Reemplaza el detalle de camas en el contrato. Si lo dejas
+                    vacío, no se listan características.
+                  </p>
                 </div>
 
                 <div className="space-y-2">

@@ -422,7 +422,14 @@ export function buildContractWordValues(
   const ownerOverride =
     ownerOverrides[propertyId] ?? ownerOverrides[String(propertyId)] ?? {};
 
-  const caracteristicasPlain = formatFincaFeaturesPlain(finca.features || []);
+  // Si viene un override (ej. "09 HABITACIONES"), se usa tal cual y NO se
+  // detallan las camas. Si es cadena vacía explícita, tampoco se listan camas.
+  const caracteristicasOverride = (dto as { caracteristicasOverride?: unknown })
+    .caracteristicasOverride;
+  const caracteristicasPlain =
+    typeof caracteristicasOverride === "string"
+      ? caracteristicasOverride.trim()
+      : formatFincaFeaturesPlain(finca.features || []);
   const nombrePropietario =
     (dto.propertyOwnerName && String(dto.propertyOwnerName).trim()) ||
     ownerOverride.nombreCompleto?.trim() ||
