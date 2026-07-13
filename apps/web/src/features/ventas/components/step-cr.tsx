@@ -74,7 +74,7 @@ export function StepCr({ data, onSubmitted }: Props) {
         </p>
       </div>
 
-      <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+      <div className="rounded-2xl bg-white p-5 shadow-sm">
         <div className="mb-4 flex items-center gap-3">
           <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary/10 text-primary">
             <FileCheck className="h-6 w-6" />

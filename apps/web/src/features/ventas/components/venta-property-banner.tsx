@@ -11,7 +11,7 @@ export function VentaPropertyBanner({ property }: Props) {
   const subtitle = [property.location, property.code].filter(Boolean).join(" · ");
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
+    <div className="overflow-hidden rounded-2xl border border-border/40 bg-white shadow-sm">
       {property.images?.[0] ? (
         <div className="relative h-40 w-full sm:h-48">
           <img

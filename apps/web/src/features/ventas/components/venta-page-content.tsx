@@ -237,7 +237,7 @@ export function VentaPageContent({ token, validatedParam }: Props) {
       {/* Top bar */}
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-sm border-b border-border/70">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-          <img src="/dark-logo.svg" alt="FincasYa" className="h-7 w-auto" />
+          <img src="/dark-logo.svg" alt="FincasYa" className="h-9 w-auto" />
         </div>
       </header>
 
