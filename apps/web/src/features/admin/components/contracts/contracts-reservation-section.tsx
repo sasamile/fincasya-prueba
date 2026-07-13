@@ -25,6 +25,8 @@ import {
   Copy,
   MessageCircle,
   History,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { FormSection } from "../shared/form-section";
 import {
@@ -480,6 +482,9 @@ export function ContractsReservationSection({
 
   // Firmante de Fincas Ya elegido para este contrato (default = el marcado por defecto).
   const [selectedFirmanteId, setSelectedFirmanteId] = useState<string>("");
+  // Paso actual del asistente (stepper) de generación de contrato.
+  const [step, setStep] = useState(0);
+  const CONTRACT_STEPS = ["Finca", "Estadía", "Cargos", "Cliente", "Revisar"];
   const selectedFirmante = useMemo(
     () =>
       firmantes.find((f) => f.id === selectedFirmanteId) ??
@@ -2308,6 +2313,42 @@ export function ContractsReservationSection({
             </div>
 
             <div className="space-y-6 p-4 md:p-6">
+            {/* ── Stepper del asistente de contrato ─────────────────────── */}
+            <div className="flex gap-1.5 overflow-x-auto rounded-2xl border border-border bg-card p-1.5 shadow-sm scrollbar-hide">
+              {CONTRACT_STEPS.map((label, i) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setStep(i)}
+                  className={cn(
+                    "flex flex-1 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-left transition-colors",
+                    i === step ? "bg-primary/10" : "hover:bg-muted",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "grid h-6 w-6 flex-none place-items-center rounded-full text-[11px] font-bold",
+                      i <= step
+                        ? "bg-primary text-white"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {i < step ? "✓" : i + 1}
+                  </span>
+                  <span
+                    className={cn(
+                      "text-xs font-semibold",
+                      i === step ? "text-primary" : "text-muted-foreground",
+                    )}
+                  >
+                    {label}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {step === 0 && (
+            <>
             <FormSection
               title="Finca"
               description="Selecciona la finca. Un PDF en Propiedades es opcional si quieres descargar el mismo texto en plantilla."
@@ -2564,7 +2605,11 @@ export function ContractsReservationSection({
                 </div>
               </FormSection>
             ) : null}
+            </>
+            )}
 
+            {step === 1 && (
+            <>
             <FormSection
               title="Estadia y Logistica"
               description="Fechas, horas y valores del contrato"
@@ -2573,7 +2618,7 @@ export function ContractsReservationSection({
               iconBg="bg-amber-100 text-amber-600"
               iconShadow="shadow-amber-500/20"
               textColor="text-amber-500"
-              defaultOpen={false}
+              defaultOpen={true}
               className="bg-zinc-50/50"
             >
               <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -2796,7 +2841,11 @@ export function ContractsReservationSection({
                 </div>
               </div>
             </FormSection>
+            </>
+            )}
 
+            {step === 2 && (
+            <>
             <FormSection
               title="Adicionales y Cargos"
               description="Mascotas, servicio y extras del contrato"
@@ -2805,7 +2854,7 @@ export function ContractsReservationSection({
               iconBg="bg-emerald-100 text-emerald-600"
               iconShadow="shadow-emerald-500/20"
               textColor="text-emerald-500"
-              defaultOpen={false}
+              defaultOpen={true}
               className="bg-zinc-50/50"
             >
               <div className="grid gap-4">
@@ -3095,6 +3144,11 @@ export function ContractsReservationSection({
                 </div>
               </div>
             </FormSection>
+            </>
+            )}
+
+            {step === 3 && (
+            <>
             {!isLinkMode && (
             <FormSection
               title="Informacion del Cliente"
@@ -3104,7 +3158,7 @@ export function ContractsReservationSection({
               iconBg="bg-zinc-100 text-zinc-700"
               iconShadow="shadow-zinc-500/20"
               textColor="text-zinc-500"
-              defaultOpen={false}
+              defaultOpen={true}
               className="bg-zinc-50/50"
             >
               <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -3235,7 +3289,11 @@ export function ContractsReservationSection({
                 {errors.bankAccounts}
               </p>
             )}
+            </>
+            )}
 
+            {step === 4 && (
+            <>
             <FormSection
               title="Vista previa del contrato"
               description="Vista del documento tal como se generará en PDF (texto justificado y logo). Los datos salen del formulario y de las cláusulas."
@@ -3244,7 +3302,7 @@ export function ContractsReservationSection({
               iconBg="bg-indigo-100 text-indigo-700"
               iconShadow="shadow-indigo-500/20"
               textColor="text-indigo-600"
-              defaultOpen={false}
+              defaultOpen={true}
               className="bg-zinc-50/50"
             >
               {!form.propertyId ? (
@@ -3282,6 +3340,41 @@ export function ContractsReservationSection({
                 </div>
               )}
             </FormSection>
+            </>
+            )}
+
+            {/* ── Navegación del stepper ────────────────────────────────── */}
+            <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={step === 0}
+                onClick={() => setStep((s) => Math.max(0, s - 1))}
+                className="rounded-xl"
+              >
+                <ChevronLeft className="mr-1 h-4 w-4" />
+                Atrás
+              </Button>
+              <span className="text-xs font-semibold text-muted-foreground">
+                Paso {step + 1} de {CONTRACT_STEPS.length}
+              </span>
+              {step < CONTRACT_STEPS.length - 1 ? (
+                <Button
+                  type="button"
+                  onClick={() =>
+                    setStep((s) => Math.min(CONTRACT_STEPS.length - 1, s + 1))
+                  }
+                  className="rounded-xl"
+                >
+                  Siguiente
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </Button>
+              ) : (
+                <span className="text-xs font-semibold text-primary">
+                  Último paso · genera abajo
+                </span>
+              )}
+            </div>
             </div>
           </div>
 
