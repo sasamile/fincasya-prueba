@@ -14,7 +14,6 @@ import { FileText, Loader2, Send, X } from 'lucide-react';
 import Image from 'next/image';
 import { buildContractHTML } from '@/features/admin/utils/contract-utils';
 import { buildReservationPreviewFincaData } from '@/features/admin/utils/contract-preview-helpers';
-import { wrapContractHtmlForPdf } from '@/features/admin/utils/contract-pdf-shell';
 import { CONTRACT_DOCUMENT_CSS } from '@/features/admin/utils/contract-document-styles';
 import {
   CONTRACT_LOGO_HEIGHT,
@@ -158,12 +157,11 @@ export function ContractPreviewModal({
     if (!edited.trim()) return;
     setBusy(true);
     try {
-      const full = wrapContractHtmlForPdf(edited);
-      const res = await fetch('/api/fincas/html-to-pdf', {
+      const res = await fetch('/api/fincas/contract-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          html: full,
+          html: edited,
           filename: `contrato-${draft.contractCode || 'fincasya'}`,
         }),
       });
