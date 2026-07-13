@@ -17,7 +17,8 @@ import type { CtxTarget } from '@/features/inbox/components/ConversationContextM
 import { SidebarFilters } from '@/features/inbox/components/SidebarFilters';
 import { BotToggle } from '@/features/inbox/components/primitives';
 import { ConversationItem } from '@/features/inbox/components/ConversationItem';
-import { IconRail } from '@/features/inbox/components/IconRail';
+import { IconRail, type AsesorTool } from '@/features/inbox/components/IconRail';
+import { AsesorPanel } from '@/features/inbox/components/AsesorPanel';
 import { ChatPanel } from '@/features/inbox/components/ChatPanel';
 import type { ConversationRow, Filter } from '@/features/inbox/types';
 
@@ -27,6 +28,7 @@ export default function App() {
   const setGlobalAi = useMutation(api.agentSettings.setGlobalAiEnabled);
   const markRead = useMutation(api.inbox.markConversationRead);
   const [selectedId, setSelectedId] = useState<ConversationRow['conversationId'] | null>(null);
+  const [activeTool, setActiveTool] = useState<AsesorTool | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('todas');
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
@@ -73,8 +75,12 @@ export default function App() {
 
   return (
     <div className="flex h-full bg-background">
-      {/* Rail de navegación (columna extrema izquierda) */}
-      <IconRail />
+      {/* Rail de herramientas del asesor (columna extrema izquierda) */}
+      <IconRail
+        activeTool={activeTool}
+        onOpenTool={setActiveTool}
+        hasSelection={Boolean(selected)}
+      />
 
       {/* Lista de chats */}
       <aside className="flex w-[380px] shrink-0 flex-col border-r border-border bg-card">
@@ -158,8 +164,14 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Panel principal */}
-      {selected ? (
+      {/* Panel principal: herramienta de asesor, o el chat */}
+      {activeTool ? (
+        <AsesorPanel
+          tool={activeTool}
+          conversation={selected}
+          onClose={() => setActiveTool(null)}
+        />
+      ) : selected ? (
         <ChatPanel key={selected.conversationId} conv={selected} />
       ) : (
         <ChatHomeScreen />
