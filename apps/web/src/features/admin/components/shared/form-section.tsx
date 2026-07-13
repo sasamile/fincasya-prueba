@@ -18,6 +18,8 @@ interface FormSectionProps {
   className?: string;
   hoverShadow?: string; // e.g., 'hover:shadow-indigo-500/5'
   customHeaderActions?: React.ReactNode;
+  /** Variante densa: menos padding/radio/espaciado (para flujos por pasos). */
+  compact?: boolean;
 }
 
 export function FormSection({
@@ -33,13 +35,15 @@ export function FormSection({
   className,
   hoverShadow = "hover:shadow-primary/5",
   customHeaderActions,
+  compact = false,
 }: FormSectionProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
     <section
       className={cn(
-        "rounded-3xl md:rounded-[40px] bg-background border border-border shadow-sm overflow-hidden transition-all duration-500",
+        "bg-background border border-border shadow-sm overflow-hidden transition-all duration-500",
+        compact ? "rounded-2xl" : "rounded-3xl md:rounded-[40px]",
         isOpen ? "shadow-xl" : "hover:shadow-md",
         !isOpen && hoverShadow,
         className
@@ -48,29 +52,43 @@ export function FormSection({
       <div
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          "w-full flex flex-wrap items-center justify-between p-4 sm:px-6 md:px-8 py-4 md:py-7 border-b border-border/50 bg-linear-to-br transition-all duration-500 text-left cursor-pointer select-none gap-y-1 sm:gap-y-0",
+          "w-full flex flex-wrap items-center justify-between border-b border-border/50 bg-linear-to-br transition-all duration-500 text-left cursor-pointer select-none gap-y-1 sm:gap-y-0",
+          compact
+            ? "px-4 py-3 sm:px-5"
+            : "p-4 sm:px-6 md:px-8 py-4 md:py-7",
           gradientFrom,
           !isOpen && "border-b-transparent"
         )}
       >
-        <div className="flex items-center gap-3 md:gap-4 min-w-0 pr-2 flex-1 order-1">
+        <div className="flex items-center gap-3 min-w-0 pr-2 flex-1 order-1 md:gap-4">
           <div
             className={cn(
-              "w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl text-white flex items-center justify-center shadow-lg shrink-0 transition-all duration-500",
+              "rounded-xl text-white flex items-center justify-center shadow-lg shrink-0 transition-all duration-500",
+              compact
+                ? "w-9 h-9"
+                : "w-10 h-10 md:w-12 md:h-12 md:rounded-2xl",
               iconBg,
               iconShadow,
-              isOpen ? "scale-110 rotate-3" : "scale-100 rotate-0"
+              isOpen && !compact ? "scale-110 rotate-3" : "scale-100 rotate-0"
             )}
           >
-            <Icon className="w-5 h-5 md:w-6 md:h-6" />
+            <Icon className={cn(compact ? "w-4 h-4" : "w-5 h-5 md:w-6 md:h-6")} />
           </div>
           <div className="min-w-0">
-            <h2 className="truncate text-base font-bold tracking-tight text-zinc-900 md:text-xl dark:text-zinc-50">
+            <h2
+              className={cn(
+                "truncate font-bold tracking-tight text-zinc-900 dark:text-zinc-50",
+                compact ? "text-sm md:text-base" : "text-base md:text-xl"
+              )}
+            >
               {title}
             </h2>
             <p
               className={cn(
-                "mt-0.5 line-clamp-2 break-words text-[9px] font-semibold uppercase leading-snug tracking-widest transition-colors duration-500 sm:text-[10px] sm:line-clamp-3",
+                "mt-0.5 break-words font-semibold uppercase leading-snug tracking-widest transition-colors duration-500",
+                compact
+                  ? "line-clamp-1 text-[9px]"
+                  : "line-clamp-2 text-[9px] sm:text-[10px] sm:line-clamp-3",
                 textColor
               )}
             >
@@ -105,7 +123,14 @@ export function FormSection({
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
           >
-            <div className="min-w-0 max-w-full space-y-6 overflow-x-hidden p-4 sm:p-6 md:space-y-8 md:p-8">
+            <div
+              className={cn(
+                "min-w-0 max-w-full overflow-x-hidden",
+                compact
+                  ? "space-y-4 p-4 sm:p-5"
+                  : "space-y-6 p-4 sm:p-6 md:space-y-8 md:p-8"
+              )}
+            >
               {children}
             </div>
           </motion.div>

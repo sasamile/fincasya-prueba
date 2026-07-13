@@ -484,7 +484,14 @@ export function ContractsReservationSection({
   const [selectedFirmanteId, setSelectedFirmanteId] = useState<string>("");
   // Paso actual del asistente (stepper) de generación de contrato.
   const [step, setStep] = useState(0);
-  const CONTRACT_STEPS = ["Finca", "Estadía", "Cargos", "Cliente", "Revisar"];
+  const CONTRACT_STEPS = [
+    "Finca",
+    "Propietario",
+    "Estadía",
+    "Cargos",
+    "Cliente",
+    "Revisar",
+  ];
   const selectedFirmante = useMemo(
     () =>
       firmantes.find((f) => f.id === selectedFirmanteId) ??
@@ -2299,25 +2306,19 @@ export function ContractsReservationSection({
             className="border-r border-zinc-100 lg:overflow-y-auto scrollbar-hide"
             ref={formTopRef}
           >
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 px-4 py-4 md:px-6">
-              <div className="flex items-center gap-4">
-                <div className="rounded-2xl bg-zinc-900 p-3 text-white shadow-xl">
-                  <FileText className="h-6 w-6" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold tracking-tight text-zinc-950">
-                    {isLinkMode ? "Link de Contrato" : "Generar Contrato"}
-                  </h2>
-                  <p className="text-sm text-zinc-500">
-                    {isLinkMode
-                      ? "Completa la finca, cobros y cláusulas. Genera un link para que el cliente llene sus datos, descargue el PDF y lo devuelva firmado."
-                      : "Llena los datos, previsualiza y descarga el contrato. Se guarda un borrador interno hasta que uses el botón «Confirmar pago» (modal) cuando el cliente haya pagado."}
-                  </p>
-                </div>
+            <div className="flex flex-wrap items-center gap-3 border-b border-zinc-100 px-4 py-3 md:px-5">
+              <div className="rounded-xl bg-zinc-900 p-2 text-white shadow-md">
+                <FileText className="h-4 w-4" />
               </div>
+              <h2 className="text-base font-bold tracking-tight text-zinc-950">
+                {isLinkMode ? "Link de Contrato" : "Generar Contrato"}
+              </h2>
+              <span className="hidden text-xs text-zinc-400 sm:inline">
+                · Completa los pasos y genera el PDF
+              </span>
             </div>
 
-            <div className="space-y-6 p-4 md:p-6">
+            <div className="space-y-4 p-3 md:p-4">
             {/* ── Stepper del asistente de contrato ─────────────────────── */}
             <div className="flex gap-1.5 overflow-x-auto rounded-2xl border border-border bg-card p-1.5 shadow-sm scrollbar-hide">
               {CONTRACT_STEPS.map((label, i) => (
@@ -2362,6 +2363,7 @@ export function ContractsReservationSection({
               iconBg="bg-blue-100 text-blue-600"
               iconShadow="shadow-blue-500/20"
               textColor="text-blue-500"
+              compact
               defaultOpen={true}
               className="bg-zinc-50/50"
             >
@@ -2525,7 +2527,11 @@ export function ContractsReservationSection({
                 )}
               </div>
             </FormSection>
+            </>
+            )}
 
+            {step === 1 && (
+            <>
             {selectedProperty && form.propertyId ? (
               <FormSection
                 title="Propietario de la finca (contrato)"
@@ -2535,7 +2541,8 @@ export function ContractsReservationSection({
                 iconBg="bg-violet-100 text-violet-700"
                 iconShadow="shadow-violet-500/20"
                 textColor="text-violet-600"
-                defaultOpen={true}
+                compact
+              defaultOpen={true}
                 className="bg-zinc-50/50"
               >
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -2613,7 +2620,7 @@ export function ContractsReservationSection({
             </>
             )}
 
-            {step === 1 && (
+            {step === 2 && (
             <>
             <FormSection
               title="Estadia y Logistica"
@@ -2623,6 +2630,7 @@ export function ContractsReservationSection({
               iconBg="bg-amber-100 text-amber-600"
               iconShadow="shadow-amber-500/20"
               textColor="text-amber-500"
+              compact
               defaultOpen={true}
               className="bg-zinc-50/50"
             >
@@ -2849,7 +2857,7 @@ export function ContractsReservationSection({
             </>
             )}
 
-            {step === 2 && (
+            {step === 3 && (
             <>
             <FormSection
               title="Adicionales y Cargos"
@@ -2859,6 +2867,7 @@ export function ContractsReservationSection({
               iconBg="bg-emerald-100 text-emerald-600"
               iconShadow="shadow-emerald-500/20"
               textColor="text-emerald-500"
+              compact
               defaultOpen={true}
               className="bg-zinc-50/50"
             >
@@ -3152,7 +3161,7 @@ export function ContractsReservationSection({
             </>
             )}
 
-            {step === 3 && (
+            {step === 4 && (
             <>
             {!isLinkMode && (
             <FormSection
@@ -3163,6 +3172,7 @@ export function ContractsReservationSection({
               iconBg="bg-zinc-100 text-zinc-700"
               iconShadow="shadow-zinc-500/20"
               textColor="text-zinc-500"
+              compact
               defaultOpen={true}
               className="bg-zinc-50/50"
             >
@@ -3297,7 +3307,7 @@ export function ContractsReservationSection({
             </>
             )}
 
-            {step === 4 && (
+            {step === 5 && (
             <>
             <FormSection
               title="Vista previa del contrato"
@@ -3307,6 +3317,7 @@ export function ContractsReservationSection({
               iconBg="bg-indigo-100 text-indigo-700"
               iconShadow="shadow-indigo-500/20"
               textColor="text-indigo-600"
+              compact
               defaultOpen={true}
               className="bg-zinc-50/50"
             >
