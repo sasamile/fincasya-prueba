@@ -30,6 +30,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ContractPreviewModal } from '@/features/inbox/components/ContractPreviewModal';
+import { ReservasTool } from '@/features/inbox/components/tools/ReservasTool';
+import { VentaTool } from '@/features/inbox/components/tools/VentaTool';
+import { CheckinTool } from '@/features/inbox/components/tools/CheckinTool';
 import type { AsesorTool } from '@/features/inbox/components/IconRail';
 import type { ConversationRow } from '@/features/inbox/types';
 
@@ -92,18 +95,18 @@ const TOOL_META: Record<
   },
   calendario: {
     icon: CalendarDays,
-    title: 'Disponibilidad de fincas',
-    subtitle: 'Revisa si una finca está libre para responder al instante.',
+    title: 'Reservas',
+    subtitle: 'Calendario de reservas y reserva rápida sin salir del chat.',
   },
   venta: {
     icon: Link2,
-    title: 'Crear link de venta',
-    subtitle: 'Genera un link con metadata para compartir en el chat.',
+    title: 'Links de venta',
+    subtitle: 'Tus links enviados, su estado y creación rápida.',
   },
   checkin: {
     icon: DoorOpen,
-    title: 'Check-ins del día',
-    subtitle: 'Mensajes de check-in por enviar hoy, según las reglas.',
+    title: 'Check-ins',
+    subtitle: 'Reservas próximas sin check-in — abre el chat y despacha.',
   },
 };
 
@@ -671,103 +674,20 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   );
 }
 
-function CalendarioTool() {
-  return (
-    <>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className={fl}>Entrada</label>
-          <input className={input} type="date" disabled />
-        </div>
-        <div>
-          <label className={fl}>Salida</label>
-          <input className={input} type="date" disabled />
-        </div>
-      </div>
-      <button
-        type="button"
-        disabled
-        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground disabled:opacity-90"
-      >
-        <Search className="h-4 w-4" /> Ver fincas libres
-      </button>
-      <Section title="Resultado">
-        <div className="flex flex-col items-center gap-2 py-6 text-center">
-          <CalendarDays className="h-6 w-6 text-muted-foreground/50" />
-          <p className="max-w-xs text-xs text-muted-foreground">
-            Verás qué fincas están libres/ocupadas en esas fechas para
-            responderle al cliente al instante.
-          </p>
-        </div>
-      </Section>
-    </>
-  );
-}
-
-function VentaTool() {
-  return (
-    <>
-      <div className="space-y-3">
-        <div>
-          <label className={fl}>Finca</label>
-          <div className={cn(input, 'flex items-center justify-between text-muted-foreground/60')}>
-            Selecciona una finca
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={fl}>Valor negociado</label>
-            <input className={input} placeholder="$ 0" disabled />
-          </div>
-          <div>
-            <label className={fl}>Código contrato</label>
-            <input className={input} placeholder="Ej. CR 2041" disabled />
-          </div>
-        </div>
-      </div>
-      <button
-        type="button"
-        disabled
-        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground disabled:opacity-90"
-      >
-        <Link2 className="h-4 w-4" /> Generar link y copiar
-      </button>
-      <Section title="Links enviados en este chat">
-        <div className="flex flex-col items-center gap-2 py-6 text-center">
-          <CheckCircle2 className="h-6 w-6 text-muted-foreground/50" />
-          <p className="max-w-xs text-xs text-muted-foreground">
-            El link se comparte con metadata de WhatsApp; el cliente llena sus
-            datos y sube el soporte de pago.
-          </p>
-        </div>
-      </Section>
-    </>
-  );
-}
-
-function CheckinTool() {
-  return (
-    <Section title="Por enviar hoy">
-      <div className="flex flex-col items-center gap-2 py-8 text-center">
-        <DoorOpen className="h-6 w-6 text-muted-foreground/50" />
-        <p className="max-w-xs text-xs text-muted-foreground">
-          Lista de check-ins que toca enviar hoy según las reglas (un día antes,
-          al propietario, etc.), con sus teléfonos, para despacharlos rápido.
-        </p>
-      </div>
-    </Section>
-  );
-}
-
 export function AsesorPanel({
   tool,
   conversation,
   onClose,
+  onOpenChat,
 }: {
   tool: AsesorTool;
   conversation: ConversationRow | null;
   onClose: () => void;
+  onOpenChat?: (phone: string) => void;
 }) {
+  const fincasForTools = useQuery(api.adminProperties.listAll, {}) as
+    | Array<{ _id: string; title: string }>
+    | undefined;
   const meta = TOOL_META[tool];
   const Icon = meta.icon;
 
@@ -781,9 +701,6 @@ export function AsesorPanel({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h2 className="truncate text-sm font-bold">{meta.title}</h2>
-            <span className={soonPill}>
-              <Sparkles className="h-3 w-3" /> Fase 1
-            </span>
           </div>
           <p className="truncate text-xs text-muted-foreground">{meta.subtitle}</p>
         </div>
@@ -822,9 +739,13 @@ export function AsesorPanel({
       {/* Contenido de la herramienta */}
       <div className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col gap-3 overflow-y-auto p-4">
         {tool === 'contrato' && <ContratoTool conversation={conversation} />}
-        {tool === 'calendario' && <CalendarioTool />}
-        {tool === 'venta' && <VentaTool />}
-        {tool === 'checkin' && <CheckinTool />}
+        {tool === 'calendario' && (
+          <ReservasTool conversation={conversation} fincas={fincasForTools} />
+        )}
+        {tool === 'venta' && (
+          <VentaTool conversation={conversation} fincas={fincasForTools} />
+        )}
+        {tool === 'checkin' && <CheckinTool onOpenChat={onOpenChat} />}
       </div>
     </aside>
   );

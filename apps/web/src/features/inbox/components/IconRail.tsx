@@ -25,10 +25,10 @@ const TOOLS: {
   label: string;
   needsChat: boolean;
 }[] = [
-  { id: 'contrato', icon: FileText, label: 'Generar contrato con IA', needsChat: true },
-  { id: 'calendario', icon: CalendarDays, label: 'Disponibilidad de fincas', needsChat: false },
-  { id: 'venta', icon: Link2, label: 'Crear link de venta', needsChat: true },
-  { id: 'checkin', icon: DoorOpen, label: 'Check-ins del día', needsChat: false },
+  { id: 'contrato', icon: FileText, label: 'Generar contrato', needsChat: true },
+  { id: 'calendario', icon: CalendarDays, label: 'Reservas', needsChat: false },
+  { id: 'venta', icon: Link2, label: 'Links de venta', needsChat: false },
+  { id: 'checkin', icon: DoorOpen, label: 'Check-ins', needsChat: false },
 ];
 
 function RailIcon({
