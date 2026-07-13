@@ -29,6 +29,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ContractPreviewModal } from '@/features/inbox/components/ContractPreviewModal';
 import type { AsesorTool } from '@/features/inbox/components/IconRail';
 import type { ConversationRow } from '@/features/inbox/types';
 
@@ -306,6 +307,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const [bankTouched, setBankTouched] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   // Selección de cuentas por defecto (las del contrato / la principal).
   useEffect(() => {
@@ -589,13 +591,26 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         </button>
         <button
           type="button"
-          disabled
-          title="Próxima fase"
+          onClick={() =>
+            draft.fincaId
+              ? setShowPreview(true)
+              : toast.error('Selecciona la finca.')
+          }
+          disabled={!draft.fincaId}
           className="flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-50"
         >
-          <Send className="h-4 w-4" /> Enviar
+          <FileText className="h-4 w-4" /> Ver / editar
         </button>
       </div>
+
+      {showPreview ? (
+        <ContractPreviewModal
+          draft={draft}
+          settings={settings}
+          selectedBankIds={selectedBankIds}
+          onClose={() => setShowPreview(false)}
+        />
+      ) : null}
     </>
   );
 }
