@@ -2291,10 +2291,10 @@ export function ContractsReservationSection({
       <div className="rounded-2xl lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] xl:grid-cols-[minmax(0,1fr)_480px] lg:overflow-hidden">
           <div
-            className="border-r border-zinc-100 lg:overflow-y-auto scrollbar-hide"
+            className="border-r border-zinc-100 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden"
             ref={formTopRef}
           >
-            <div className="flex flex-wrap items-center gap-3 border-b border-zinc-100 px-4 py-3 md:px-5">
+            <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-zinc-100 px-4 py-3 md:px-5">
               <div className="rounded-xl bg-zinc-900 p-2 text-white shadow-md">
                 <FileText className="h-4 w-4" />
               </div>
@@ -2318,7 +2318,7 @@ export function ContractsReservationSection({
               )}
             </div>
 
-            <div className="space-y-4 p-3 md:p-4">
+            <div className="space-y-4 p-3 md:p-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto scrollbar-hide">
             {/* ── Stepper del asistente de contrato ─────────────────────── */}
             <div className="flex gap-1 rounded-xl border border-border bg-card p-1 shadow-sm">
               {CONTRACT_STEPS.map((label, i) => (
@@ -3362,8 +3362,10 @@ export function ContractsReservationSection({
             </>
             )}
 
-            {/* ── Navegación del stepper ────────────────────────────────── */}
-            <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
+            </div>
+
+            {/* ── Navegación (footer fijo al fondo de la columna) ───────── */}
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-background px-3 py-3 md:px-4">
               <Button
                 type="button"
                 variant="outline"
@@ -3393,7 +3395,6 @@ export function ContractsReservationSection({
                   Último paso · genera abajo
                 </span>
               )}
-            </div>
             </div>
           </div>
 
