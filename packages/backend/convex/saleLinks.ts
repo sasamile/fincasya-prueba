@@ -415,6 +415,33 @@ export const attachContract = mutation({
   },
 });
 
+/**
+ * Público (portal del cliente / panel): adjunta la confirmación de reserva (CR)
+ * ya generada (PDF en S3) al link por token, y avanza a check-in (clientStep 6)
+ * si el pago está validado. La generación del PDF ocurre en una ruta Next.
+ */
+export const attachCr = mutation({
+  args: {
+    token: v.string(),
+    crUrl: v.string(),
+  },
+  handler: async (ctx, { token, crUrl }) => {
+    const url = crUrl.trim();
+    if (!url) return { ok: false as const, reason: 'no_url' as const };
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    await ctx.db.patch(link._id, {
+      crUrl: url,
+      clientStep: Math.max(link.clientStep ?? 0, 6),
+      updatedAt: Date.now(),
+    });
+    return { ok: true as const, crUrl: url };
+  },
+});
+
 export const setCrUrl = internalMutation({
   args: {
     id: v.id('saleLinks'),
