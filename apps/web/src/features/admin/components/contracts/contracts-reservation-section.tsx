@@ -2069,7 +2069,7 @@ export function ContractsReservationSection({
   const sectionTitleClass = "text-lg font-bold tracking-tight text-zinc-950";
 
   return (
-    <div className="space-y-4 p-4 md:p-6 lg:flex lg:h-[calc(100dvh-3.75rem)] lg:flex-col lg:gap-3 lg:overflow-hidden lg:p-4">
+    <div className="space-y-4 p-4 md:p-6 lg:flex lg:h-[calc(100dvh-3.75rem)] lg:flex-col lg:gap-0 lg:overflow-hidden lg:p-3">
 
       {/* ── CONFIRMAR PAGO (modal) ─────────────────────────────────────── */}
       {!isLinkMode && (
@@ -2289,7 +2289,7 @@ export function ContractsReservationSection({
 
       {/* ── CONTRATOS ─────────────────────────────────────────────────── */}
       <div className="rounded-2xl lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
-        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] xl:grid-cols-[minmax(0,1fr)_480px] lg:overflow-hidden">
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
           <div
             className="border-r border-zinc-100 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden"
             ref={formTopRef}
@@ -2318,8 +2318,8 @@ export function ContractsReservationSection({
               )}
             </div>
 
-            <div className="space-y-4 p-3 md:p-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto scrollbar-hide">
-            {/* ── Stepper del asistente de contrato ─────────────────────── */}
+            {/* ── Stepper (fijo arriba, fuera del scroll) ───────────────── */}
+            <div className="shrink-0 px-3 pt-3 md:px-4 md:pt-4">
             <div className="flex gap-1 rounded-xl border border-border bg-card p-1 shadow-sm">
               {CONTRACT_STEPS.map((label, i) => (
                 <button
@@ -2355,7 +2355,10 @@ export function ContractsReservationSection({
                 </button>
               ))}
             </div>
+            </div>
 
+            {/* ── Contenido del paso (única zona con scroll) ────────────── */}
+            <div className="space-y-4 p-3 md:p-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto scrollbar-hide">
             {step === 0 && (
             <>
             <FormSection
@@ -3399,10 +3402,10 @@ export function ContractsReservationSection({
           </div>
 
           <div className="bg-zinc-50/50 lg:border-l lg:border-zinc-100 lg:overflow-y-auto scrollbar-hide">
-            <div className="p-4 md:p-6">
-              <div className="rounded-[24px] border border-zinc-200/50 bg-white p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+            <div className="p-3 md:p-4">
+              <div className="rounded-2xl border border-zinc-200/60 bg-white p-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
                 <div>
-                  <h3 className="text-xl font-bold tracking-tight text-zinc-950">
+                  <h3 className="text-base font-bold tracking-tight text-zinc-950">
                     Resumen de Cobro
                   </h3>
                   <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
