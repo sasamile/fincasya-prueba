@@ -305,6 +305,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const [draft, setDraft] = useState<ContractDraft>(EMPTY_DRAFT);
   const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
   const [bankTouched, setBankTouched] = useState(false);
+  const [openOwners, setOpenOwners] = useState<Set<string>>(new Set());
   const [analyzing, setAnalyzing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -519,45 +520,99 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           </p>
         ) : (
           <div className="space-y-2">
-            {bankAccounts.map((acc) => {
-              const on = selectedBankIds.includes(acc.id);
+            {Array.from(
+              bankAccounts
+                .reduce((map, acc) => {
+                  const owner = (acc.ownerName || 'Sin titular').trim();
+                  if (!map.has(owner)) map.set(owner, []);
+                  map.get(owner)!.push(acc);
+                  return map;
+                }, new Map<string, BankAccount[]>())
+                .entries(),
+            ).map(([owner, accs]) => {
+              const open = openOwners.has(owner);
+              const selCount = accs.filter((a) =>
+                selectedBankIds.includes(a.id),
+              ).length;
               return (
-                <button
-                  key={acc.id}
-                  type="button"
-                  onClick={() => toggleBank(acc.id)}
-                  className={cn(
-                    'flex w-full items-center gap-3 rounded-xl border p-2 text-left transition',
-                    on
-                      ? 'border-primary/50 bg-primary/5'
-                      : 'border-border hover:bg-muted',
-                  )}
+                <div
+                  key={owner}
+                  className="overflow-hidden rounded-xl border border-border"
                 >
-                  <span
-                    className={cn(
-                      'grid h-5 w-5 shrink-0 place-items-center rounded-md border-2 transition',
-                      on
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border',
-                    )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenOwners((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(owner)) next.delete(owner);
+                        else next.add(owner);
+                        return next;
+                      })
+                    }
+                    className="flex w-full items-center gap-2 bg-muted/40 px-3 py-2 text-left"
                   >
-                    {on ? <Check className="h-3 w-3" /> : null}
-                  </span>
-                  <BankLogoBadge
-                    bankName={acc.bankName ?? ''}
-                    brebKey={Boolean(acc.brebKey)}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-semibold">
-                      {acc.bankName}
-                      {acc.accountType ? ` · ${acc.accountType}` : ''}
-                    </p>
-                    <p className="truncate text-[11px] text-muted-foreground">
-                      {acc.accountNumber}
-                      {acc.ownerName ? ` · ${acc.ownerName}` : ''}
-                    </p>
-                  </div>
-                </button>
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+                      {owner.slice(0, 2).toUpperCase()}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-bold">{owner}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {accs.length} cuenta{accs.length === 1 ? '' : 's'}
+                        {selCount > 0 ? ` · ${selCount} seleccionada${selCount === 1 ? '' : 's'}` : ''}
+                      </p>
+                    </div>
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
+                        open && 'rotate-180',
+                      )}
+                    />
+                  </button>
+                  {open ? (
+                    <div className="space-y-1.5 p-2">
+                      {accs.map((acc) => {
+                        const on = selectedBankIds.includes(acc.id);
+                        return (
+                          <button
+                            key={acc.id}
+                            type="button"
+                            onClick={() => toggleBank(acc.id)}
+                            className={cn(
+                              'flex w-full items-center gap-3 rounded-lg border p-2 text-left transition',
+                              on
+                                ? 'border-primary/50 bg-primary/5'
+                                : 'border-border hover:bg-muted',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'grid h-5 w-5 shrink-0 place-items-center rounded-md border-2 transition',
+                                on
+                                  ? 'border-primary bg-primary text-primary-foreground'
+                                  : 'border-border',
+                              )}
+                            >
+                              {on ? <Check className="h-3 w-3" /> : null}
+                            </span>
+                            <BankLogoBadge
+                              bankName={acc.bankName ?? ''}
+                              brebKey={Boolean(acc.brebKey)}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-[13px] font-semibold">
+                                {acc.bankName}
+                                {acc.accountType ? ` · ${acc.accountType}` : ''}
+                              </p>
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {acc.accountNumber}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </div>
