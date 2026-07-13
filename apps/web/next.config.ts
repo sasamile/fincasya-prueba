@@ -3,6 +3,8 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   /** El backend Convex del workspace se importa como TS/JS generado. */
   transpilePackages: ['@fincasya/backend'],
+  /** Puppeteer/Chromium no se puede bundlear; se resuelve en runtime Node. */
+  serverExternalPackages: ['puppeteer', 'puppeteer-core'],
   images: {
     formats: ['image/webp'],
     remotePatterns: [
