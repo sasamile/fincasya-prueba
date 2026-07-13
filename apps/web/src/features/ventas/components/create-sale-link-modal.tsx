@@ -292,7 +292,7 @@ function PaymentHoldersAccordion({
                     <div
                       key={account.id}
                       className={cn(
-                        "flex min-w-0 items-start gap-3 rounded-xl border p-3 transition-colors",
+                        "flex min-w-0 items-start gap-3 rounded-xl border border-border p-3 transition-colors",
                         checked
                           ? "border-emerald-400/50 bg-emerald-50/40 dark:bg-emerald-950/20"
                           : "border-border/50 bg-background/60",
@@ -307,7 +307,7 @@ function PaymentHoldersAccordion({
                         className="mt-2"
                       />
                       {previewImage ? (
-                        <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg border bg-white">
+                        <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-border bg-white">
                           <img
                             src={previewImage}
                             alt={`QR ${account.bankName}`}
@@ -860,9 +860,12 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[92vh] w-[min(96vw,56rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
-        <DialogHeader className="shrink-0 border-b px-6 py-4">
-          <DialogTitle>Crear Link de Venta</DialogTitle>
+        <DialogContent className="admin flex max-h-[92vh] w-[min(96vw,56rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+        <DialogHeader className="shrink-0 border-b border-border bg-muted/30 px-6 py-4 text-left">
+          <DialogTitle className="text-base font-bold">Crear link de venta</DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            El cliente abre el link, completa sus datos y sube el comprobante de pago.
+          </p>
         </DialogHeader>
 
         <Form {...form}>
@@ -883,11 +886,11 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
                     value={field.value || undefined}
                   >
                     <FormControl>
-                      <SelectTrigger className="group h-auto! min-h-20 w-full whitespace-normal rounded-2xl border bg-muted/40 py-3 pl-3 pr-10 text-left **:data-[slot=select-value]:line-clamp-none **:data-[slot=select-value]:items-start **:data-[slot=select-value]:whitespace-normal">
+                      <SelectTrigger className="group h-auto! min-h-20 w-full whitespace-normal rounded-2xl border border-border bg-muted/40 py-3 pl-3 pr-10 text-left **:data-[slot=select-value]:line-clamp-none **:data-[slot=select-value]:items-start **:data-[slot=select-value]:whitespace-normal">
                         <div className="flex min-h-0 w-full min-w-0 items-center gap-3 text-left">
                           {selectedProperty ? (
                             <>
-                              <div className="relative size-14 shrink-0 overflow-hidden rounded-xl border shadow-sm">
+                              <div className="relative size-14 shrink-0 overflow-hidden rounded-xl border border-border shadow-sm">
                                 {selectedProperty.images?.[0] ? (
                                   <img
                                     src={selectedProperty.images[0]}
@@ -1182,7 +1185,7 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
             {/* Valores */}
             <div>
               <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold">Desglose de valores</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.14em] text-muted-foreground">Desglose de valores</p>
                 {isFetchingPrice && selectedPropertyId && nights > 0 && (
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

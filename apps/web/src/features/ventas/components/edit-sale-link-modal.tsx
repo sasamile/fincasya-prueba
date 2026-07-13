@@ -118,7 +118,7 @@ export function EditSaleLinkModal({ link, open, onOpenChange, onUpdated }: Props
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="admin max-w-xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Editar Link de Venta</DialogTitle>
         </DialogHeader>
@@ -212,7 +212,7 @@ export function EditSaleLinkModal({ link, open, onOpenChange, onUpdated }: Props
                     type="button"
                     onClick={() => toggleBankAccount(account.id)}
                     className={cn(
-                      "w-full text-left rounded-lg border p-2.5 transition-all text-sm",
+                      "w-full text-left rounded-lg border border-border p-2.5 transition-all text-sm",
                       isSelected ? "border-primary bg-primary/5" : "border-border"
                     )}
                   >
