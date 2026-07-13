@@ -352,6 +352,23 @@ body {
   min-height: 100dvh;
 }
 
+/* `border` sin color explícito hereda currentColor (texto oscuro); suavizar. */
+.landing :where(.border):not(
+    [class*="border-primary"],
+    [class*="border-emerald"],
+    [class*="border-amber"],
+    [class*="border-blue"],
+    [class*="border-red"],
+    [class*="border-green"],
+    [class*="border-destructive"],
+    [class*="border-dashed"],
+    [class*="border-border"],
+    [class*="border-zinc"],
+    [class*="border-muted"]
+  ) {
+  border-color: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
 /* Evita que el fondo oscuro del inbox (#161717) asome en overscroll/bordes. */
 html:has(.landing),
 body:has(.landing) {

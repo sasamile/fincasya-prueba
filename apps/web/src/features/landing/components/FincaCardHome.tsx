@@ -20,15 +20,18 @@ interface FincaCardHomeProps {
     text: string;
     color?: 'green' | 'orange' | 'blue' | 'yellow';
   };
+  /** Enlace con ?modo=venta para marketplace */
+  modoVenta?: boolean;
 }
 
-export function FincaCardHome({ finca, badge }: FincaCardHomeProps) {
+export function FincaCardHome({ finca, badge, modoVenta }: FincaCardHomeProps) {
   const [api, setApi] = useState<CarouselApi>();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isFavorited, setIsFavorited] = useState(false);
 
   const price = finca.priceBase;
-  const fincaUrl = `/fincas/${finca.slug || slugify(finca.title)}`;
+  const baseUrl = `/fincas/${finca.slug || slugify(finca.title)}`;
+  const fincaUrl = modoVenta ? `${baseUrl}?modo=venta` : baseUrl;
 
   useEffect(() => {
     if (!api) return;

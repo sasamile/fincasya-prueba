@@ -21,6 +21,8 @@ type SearchAutocompleteInputProps = {
   minChars?: number;
   emptyMessage?: string;
   ariaLabel?: string;
+  /** ID estable para evitar mismatch de hidratación con varios autocompletes en la misma página. */
+  listId?: string;
 };
 
 export function SearchAutocompleteInput({
@@ -33,8 +35,10 @@ export function SearchAutocompleteInput({
   minChars = 1,
   emptyMessage = "Sin coincidencias",
   ariaLabel,
+  listId: listIdProp,
 }: SearchAutocompleteInputProps) {
-  const listId = useId();
+  const autoId = useId();
+  const listId = listIdProp ?? autoId;
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);

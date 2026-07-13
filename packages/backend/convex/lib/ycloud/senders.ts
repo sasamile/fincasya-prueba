@@ -270,6 +270,46 @@ export async function sendImageToYcloud(args: {
   return { wamid, status };
 }
 
+export async function sendVideoToYcloud(args: {
+  to: string;
+  videoBuffer: Uint8Array;
+  mimeType: string;
+  filename?: string;
+  caption?: string;
+}): Promise<{ wamid?: string; status?: string }> {
+  const { apiKey, wabaNumber } = requireYcloudEnv();
+  const mediaId = await uploadMediaBufferToYcloud({
+    buffer: args.videoBuffer,
+    mimeType: args.mimeType,
+    filename: args.filename || "video.mp4",
+  });
+
+  const body: Record<string, unknown> = {
+    from: wabaNumber,
+    to: args.to,
+    type: "video",
+    video: {
+      id: mediaId,
+      ...(args.caption?.trim() ? { caption: args.caption.trim() } : {}),
+    },
+  };
+
+  const res = await fetch(SEND_DIRECTLY, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-API-Key": apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+  const textRes = await res.text();
+  if (!res.ok) {
+    throw new Error(`YCloud video send failed: ${res.status}: ${textRes}`);
+  }
+  const parsed = textRes ? JSON.parse(textRes) : {};
+  return { wamid: wamidFromYcloudSendResponse(parsed) };
+}
+
 function normalizeWhatsAppAudioMime(
   mimeType: string,
   filename: string,

@@ -80,6 +80,7 @@ export function Hero({ fincas, onOpenChat }: { fincas: PropertyResponse[]; onOpe
               <div className="flex items-center gap-2">
                 <Search className="w-5 h-5 text-muted-foreground hidden md:block" />
                 <SearchAutocompleteInput
+                  listId="hero-search-property"
                   value={propertyName}
                   onChange={setPropertyName}
                   suggestions={propertyNameSuggestions}
@@ -103,6 +104,7 @@ export function Hero({ fincas, onOpenChat }: { fincas: PropertyResponse[]; onOpe
               <div className="flex items-center gap-2">
                 <MapPin className="w-5 h-5 text-muted-foreground hidden md:block" />
                 <SearchAutocompleteInput
+                  listId="hero-search-destination"
                   value={destination}
                   onChange={setDestination}
                   suggestions={destinationSuggestions}

@@ -18,7 +18,6 @@ import { SocialSection } from './components/SocialSection';
 import { TestimonialsSection } from './components/TestimonialsSection';
 import { FincaCardSkeleton } from './components/FincaCardSkeleton';
 import { OpenChatButton } from './components/OpenChatButton';
-import { WhatsappFab } from './components/WhatsappFab';
 import { Skeleton } from '@/components/ui/skeleton';
 import { HomeStoreProvider, useHomeStore } from './store/home-store';
 import { useDebounce } from '@/hooks/use-debounce';
@@ -38,12 +37,11 @@ import {
 } from '@/lib/property/property-search';
 import type { PropertyResponse } from './types';
 
-/** Mientras el web-chat no está portado, el asistente abre WhatsApp. */
+/** Mientras el web-chat no está portado, el asistente abre el modal. */
+import { openChatAssistant } from '@/features/landing/components/ChatAssistantWidget';
+
 function openChat() {
-  window.open(
-    'https://wa.me/573157773937?text=Hola!%20Quiero%20ayuda%20para%20encontrar%20una%20finca',
-    '_blank',
-  );
+  openChatAssistant();
 }
 
 function Home() {
@@ -235,7 +233,6 @@ function Home() {
           <Footer />
         </>
       )}
-      <WhatsappFab />
     </main>
   );
 }

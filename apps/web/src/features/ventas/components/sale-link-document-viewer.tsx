@@ -32,6 +32,7 @@ export function SaleLinkDocumentViewerDialog({
 }: Props) {
   const safeUrl = url?.trim() ?? "";
   const displayUrl = previewSrc?.trim() || safeUrl;
+  const externalUrl = safeUrl || displayUrl;
   const mediaKind = useMemo(
     () => resolveProofMediaKind(fileName, mimeType),
     [fileName, mimeType],
@@ -52,7 +53,7 @@ export function SaleLinkDocumentViewerDialog({
     setLoadState(mediaKind === "image" ? "loading" : "ready");
   }, [open, displayUrl, mediaKind]);
 
-  const openExternalHref = safeUrl || displayUrl;
+  const openExternalHref = externalUrl;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

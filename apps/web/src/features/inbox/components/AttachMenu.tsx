@@ -3,8 +3,9 @@
  * WhatsApp: Documento, Fotos y videos, Cámara, Audio, Contacto, Encuesta,
  * Evento, Nuevo sticker · Catálogo · Respuestas rápidas.
  *
- * Solo "Catálogo" está cableado (abre el modal de envío). El resto son
- * placeholders visuales que muestran un aviso hasta que se implementen.
+ * Documento, Fotos y videos, Cámara y Audio abren el selector de archivo y lo
+ * envían por WhatsApp; Catálogo y Respuestas rápidas abren sus modales. El
+ * resto (Contacto, Encuesta, Evento, Sticker) son placeholders por ahora.
  */
 import { useEffect, useRef } from 'react';
 import {

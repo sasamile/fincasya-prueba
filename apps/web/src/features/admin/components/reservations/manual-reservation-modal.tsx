@@ -45,6 +45,9 @@ import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import axios from "axios";
+import { useQuery as useConvexQuery } from "convex/react";
+import { api } from "@fincasya/backend/convex/_generated/api";
+import type { Id } from "@fincasya/backend/convex/_generated/dataModel";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   usePropertiesForBooking,
@@ -150,6 +153,8 @@ type VerifiedGuestHistory = {
   celular: string;
   correo: string;
   city: string;
+  address?: string;
+  fechaNacimiento?: string;
   reference: string;
   propertyTitle: string;
   source: "checkin" | "payment" | "sale-link";
@@ -898,6 +903,32 @@ export function ManualReservationModal({
     return keys;
   }, [verifiedGuests]);
 
+  const bookingDetail = useConvexQuery(
+    api.bookings.getById,
+    isOpen && bookingId
+      ? { id: bookingId as Id<"bookings"> }
+      : "skip",
+  );
+
+  useEffect(() => {
+    if (!isOpen || !bookingId || !bookingDetail) return;
+    setFormData((prev) => ({
+      ...prev,
+      fechaNacimiento: String(
+        bookingDetail.fechaNacimiento ?? prev.fechaNacimiento ?? "",
+      ).trim(),
+      address: toClientFieldUpper(
+        String(bookingDetail.address ?? prev.address ?? ""),
+      ),
+    }));
+  }, [
+    isOpen,
+    bookingId,
+    bookingDetail?._id,
+    bookingDetail?.fechaNacimiento,
+    bookingDetail?.address,
+  ]);
+
   const crmContactsFiltered = useMemo(() => {
     if (!contacts?.length) return [];
     return contacts.filter((c: { cedula?: string; phone?: string }) => {
@@ -915,6 +946,7 @@ export function ManualReservationModal({
     correo?: string;
     email?: string;
     city?: string;
+    address?: string;
     fechaNacimiento?: string;
   }) => {
     setFormData({
@@ -926,6 +958,7 @@ export function ManualReservationModal({
       celular: toClientFieldUpper(guest.celular || guest.phone || ""),
       correo: toClientFieldUpper(guest.correo || guest.email || ""),
       city: toClientFieldUpper(guest.city || ""),
+      address: toClientFieldUpper(guest.address || ""),
       fechaNacimiento: String(guest.fechaNacimiento ?? "").trim(),
     });
     setIsClientPickerOpen(false);
@@ -1615,7 +1648,7 @@ export function ManualReservationModal({
       sileo.success({
         title: isEditMode ? "Reserva actualizada" : "Reserva creada",
         description: isEditMode
-          ? "Los cambios se guardaron. Revisa los datos actualizados abajo."
+          ? "Los cambios se guardaron correctamente."
           : formData.depositAmount > 0
             ? "Reserva creada. Solo el abono quedó registrado como pagado."
             : "Se ha registrado en el sistema y en Google Calendar.",
@@ -1624,12 +1657,10 @@ export function ManualReservationModal({
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
 
       if (isEditMode && savedBookingId && onSaved) {
-        setMultimediaFiles([]);
-        setStep(3);
         await onSaved(savedBookingId);
-      } else {
-        onClose();
       }
+      setMultimediaFiles([]);
+      onClose();
     } catch (error) {
       const detail =
         axios.isAxiosError(error) && typeof error.response?.data?.error === "string"
@@ -1644,7 +1675,7 @@ export function ManualReservationModal({
       sileo.error({
         title: "Error",
         description:
-          detail ??
+          (detail && detail.trim()) ||
           (isEditMode
             ? "No se pudo actualizar la reserva."
             : "No se pudo crear la reserva."),

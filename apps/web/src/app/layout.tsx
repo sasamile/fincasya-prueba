@@ -3,6 +3,8 @@ import type { Metadata } from 'next';
 import { Poppins } from 'next/font/google';
 import { Toaster } from 'sileo';
 import { Toaster as SonnerToaster } from 'sonner';
+import { ConsentBootstrap } from '@/features/legal/components/consent-bootstrap';
+import { MetaPixel, MetaPixelRouteTracker } from '@/lib/meta-pixel';
 import { Providers } from './providers';
 import './globals.css';
 
@@ -22,13 +24,17 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" suppressHydrationWarning>
+      <head>
+        <ConsentBootstrap />
+      </head>
       <body className={`${poppins.variable} antialiased`}>
         <Providers>
           {children}
-          {/* Toasts de sileo (igual que FincasYaWeb app/layout.tsx). */}
           <Toaster position="top-right" options={{ fill: 'white' }} />
           <SonnerToaster richColors position="top-right" />
         </Providers>
+        <MetaPixel />
+        <MetaPixelRouteTracker />
       </body>
     </html>
   );

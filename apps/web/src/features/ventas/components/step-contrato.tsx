@@ -130,10 +130,10 @@ export function StepContrato({ data, onSubmitted }: Props) {
       </div>
 
       {/* Descargar contrato */}
-      <div className="rounded-xl border bg-card p-5 space-y-4">
+      <div className="rounded-xl bg-card p-5 space-y-4 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-            <FileText className="w-5 h-5 text-primary" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+            <FileText className="h-6 w-6 text-primary" />
           </div>
           <div>
             <p className="font-semibold text-sm">Contrato de arrendamiento</p>

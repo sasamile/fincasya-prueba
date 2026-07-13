@@ -319,5 +319,15 @@ export type PropertyDetail = {
   lat: number;
   lng: number;
   zoneOrder: string[];
-  features: { name: string; zone: string | null; quantity: number | null }[];
+  marketplaceForSale?: boolean;
+  salePriceCop?: number | null;
+  saleSquareMeters?: number | null;
+  saleDescription?: string | null;
+  features: {
+    name: string;
+    zone: string | null;
+    quantity: number | null;
+    iconUrl?: string | null;
+    emoji?: string | null;
+  }[];
 };

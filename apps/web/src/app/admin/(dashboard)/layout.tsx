@@ -32,6 +32,7 @@ import {
   History,
   ShoppingBag,
   BadgeCheck,
+  Home,
 } from "lucide-react";
 import { useTheme } from '@/components/theme-provider';
 import { useState, useEffect } from "react";
@@ -68,11 +69,19 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { logout, getSession } from "@/features/auth/api/auth.api";
+import { logout, getSession, ensureSessionLogged } from "@/features/auth/api/auth.api";
 import { useAuthStore } from "@/features/auth/store/auth.store";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/features/admin/components/notification-bell";
 import { ContractSettingsRemoteSync } from "@/features/admin/components/contracts/contract-settings-remote-sync";
+import { useRolePermissions } from "@/features/admin/hooks/use-role-permissions";
+import {
+  ADMIN_ROUTE_PRIORITY,
+  canAccessAdminPath,
+  canAccessNavItem,
+  getDefaultAdminPath,
+  isFullAdminRole,
+} from "@/lib/admin-nav-permissions";
 
 type NavItem = {
   label: string;
@@ -135,6 +144,7 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
     items: [
       { label: "Usuarios", href: "/admin/users", icon: Users },
       { label: "Clientes", href: "/admin/customers", icon: Users },
+      { label: "Propietarios", href: "/admin/propietarios", icon: Home },
       { label: "CRM", href: "/admin/crm", icon: Sparkles },
       { label: "Roles y Permisos", href: "/admin/roles", icon: ShieldCheck },
       { label: "Historial de accesos", href: "/admin/access-logs", icon: History },
@@ -148,8 +158,8 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         href: "/admin/sections",
         icon: LayoutDashboard,
       },
-      { label: "Base de Conocimiento", href: "/admin/knowledge", icon: Brain },
-      { label: "Playbook de Tono", href: "/admin/playbook", icon: GraduationCap },
+     // { label: "Base de Conocimiento", href: "/ad min/knowledge", icon: Brain },
+    //  { label: "Playbook de Tono", href: "/admin/playbook", icon: GraduationCap },
       { label: "Reseñas de Google", href: "/admin/reviews", icon: Star },
       { label: "Notificaciones", href: "/admin/notifications", icon: Bell },
       {
@@ -165,6 +175,7 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
   const router = useRouter();
   const { user, clearUser } = useAuthStore();
   const { setTheme, theme } = useTheme();
+  const { permissions } = useRolePermissions(user?.role);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
     () =>
       collapsibleNavGroups.reduce<Record<string, boolean>>((acc, group) => {
@@ -173,11 +184,21 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
       }, {}),
   );
 
-  const isSeller = user?.role === "vendedor";
   const filteredTopNavItems = !user
     ? []
-    : topNavItems.filter((item) => !isSeller || item.href === "/admin/inbox");
-  const filteredNavGroups = !user || isSeller ? [] : collapsibleNavGroups;
+    : topNavItems.filter((item) =>
+        canAccessNavItem(item.href, user.role, permissions),
+      );
+  const filteredNavGroups = !user
+    ? []
+    : collapsibleNavGroups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) =>
+            canAccessNavItem(item.href, user.role, permissions),
+          ),
+        }))
+        .filter((group) => group.items.length > 0);
   const renderNavItems = (items: NavItem[]) =>
     items.map((item) => {
       const isActive =
@@ -412,6 +433,9 @@ export default function AdminLayout({
   const { user, setUser, clearUser } = useAuthStore();
   const pathname = usePathname();
   const router = useRouter();
+  const { permissions, isLoading: isLoadingPermissions } = useRolePermissions(
+    user?.role,
+  );
   const [isChecking, setIsChecking] = useState(true);
   const isConversationsRoute =
     pathname.startsWith("/admin/inbox") ||
@@ -436,17 +460,8 @@ export default function AdminLayout({
             sessionUser.role === "vendedor"
           ) {
             setUser(sessionUser);
-
-            // Role-based redirect if on wrong path
-            if (
-              sessionUser.role === "vendedor" &&
-              !pathname.startsWith("/admin/inbox") &&
-              !pathname.startsWith("/admin/conversations")
-            ) {
-              router.replace("/admin/inbox");
-            } else {
-              setIsChecking(false);
-            }
+            void ensureSessionLogged(sessionUser);
+            setIsChecking(false);
           } else {
             // No autorizado para admin, pero posiblemente logueado como cliente
             sileo.error({
@@ -484,23 +499,32 @@ export default function AdminLayout({
 
       if (!isAdminRole) {
         router.replace(
-          (user.role === "owner" || user.role === "propietario") 
-            ? "/owner" 
+          (user.role === "owner" || user.role === "propietario")
+            ? "/owner"
             : "/"
         );
         return;
       }
 
-      if (
-        user.role === "vendedor" &&
-        !pathname.startsWith("/admin/conversations")
-      ) {
-        router.replace("/admin/inbox");
-      } else {
-        setIsChecking(false);
-      }
+      void ensureSessionLogged(user);
+      setIsChecking(false);
     }
   }, [user, setUser, clearUser, router, pathname]);
+
+  useEffect(() => {
+    if (!user || isLoadingPermissions || isFullAdminRole(user.role)) return;
+
+    if (!canAccessAdminPath(pathname, user.role, permissions)) {
+      const fallback = getDefaultAdminPath(
+        user.role,
+        permissions,
+        [...ADMIN_ROUTE_PRIORITY],
+      );
+      if (fallback && fallback !== pathname) {
+        router.replace(fallback);
+      }
+    }
+  }, [user, permissions, isLoadingPermissions, pathname, router]);
   const initials = user?.name
     ? user.name
         .split(" ")

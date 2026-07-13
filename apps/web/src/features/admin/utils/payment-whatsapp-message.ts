@@ -68,6 +68,66 @@ export function buildCheckinPortalUrl(reference: string): string {
   return `${base.replace(/\/+$/, "")}/${encodeURIComponent(ref)}`;
 }
 
+/** Mensaje corto de invitación al portal de check-in (copiar / WhatsApp / inbox). */
+export function buildSimpleCheckinInviteMessage(booking: {
+  _id: string;
+  reference?: string | null;
+  nombreCompleto?: string;
+  property?: { title?: string } | null;
+  propertyTitle?: string;
+  fechaEntrada?: number;
+  horaEntrada?: string;
+}): string {
+  const ref = (booking.reference || booking._id).trim();
+  const nombre =
+    (booking.nombreCompleto || "").trim().split(/\s+/)[0] || "viajero";
+  const finca =
+    booking.property?.title || booking.propertyTitle || "tu finca";
+
+  let fechaLarga = "";
+  if (booking.fechaEntrada) {
+    const raw = new Intl.DateTimeFormat("es-CO", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "America/Bogota",
+    }).format(new Date(booking.fechaEntrada));
+    fechaLarga = raw.charAt(0).toUpperCase() + raw.slice(1);
+  }
+
+  const horaRaw = String(booking.horaEntrada ?? "").trim();
+  const horaMatch = /^(\d{1,2}):(\d{2})$/.exec(horaRaw);
+  let hora = "";
+  if (horaMatch) {
+    let h = parseInt(horaMatch[1], 10);
+    const ap = h >= 12 ? "PM" : "AM";
+    h = h % 12 || 12;
+    hora = `${h}:${horaMatch[2]} ${ap}`;
+  } else if (horaRaw) {
+    hora = horaRaw;
+  } else if (booking.fechaEntrada) {
+    hora = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/Bogota",
+    }).format(new Date(booking.fechaEntrada));
+  }
+
+  const link = buildCheckinPortalUrl(ref);
+  return (
+    `¡Hola, ${nombre}! 👋\n` +
+    `🌴 Ya casi llega el momento de disfrutar de ${finca}.\n` +
+    (fechaLarga ? `📅 Llegada: ${fechaLarga}\n` : "") +
+    (hora ? `🕒 Ingreso: ${hora}\n` : "") +
+    `Para continuar con tu proceso de ingreso, por favor realiza tu check-in aquí:\n` +
+    `👉 ${link}\n` +
+    `⚠️ Importante: El check-in debe completarse mínimo 36 horas antes de tu llegada. Sin este proceso no podremos autorizar el ingreso a la propiedad.\n` +
+    `🏡 FincasYa.com`
+  );
+}
+
 export function buildReservationPaymentWhatsAppMessage(
   input: ReservationPaymentWhatsAppInput,
 ): string {

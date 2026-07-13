@@ -1,5 +1,11 @@
 import { v } from 'convex/values';
-import { query, mutation, internalQuery, internalMutation } from './_generated/server';
+import {
+  query,
+  mutation,
+  internalQuery,
+  internalMutation,
+  type MutationCtx,
+} from './_generated/server';
 import { api, internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { normalizeContractLookupQueryConvex } from './lib/contractLookup';
@@ -36,6 +42,88 @@ async function resolveAbonoResponsible(
     | { name?: string; email?: string }
     | null;
   return authUser?.name?.trim() || authUser?.email?.trim() || undefined;
+}
+
+function parseBirthdateIso(raw: string | undefined | null): string | undefined {
+  const t = String(raw ?? '').trim();
+  if (!t) return undefined;
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : undefined;
+}
+
+/** Actualiza el contacto CRM con datos del huésped al crear/editar una reserva. */
+async function upsertContactFromReservation(
+  ctx: MutationCtx,
+  args: {
+    celular: string;
+    nombreCompleto: string;
+    correo?: string;
+    cedula?: string;
+    city?: string;
+    address?: string;
+    fechaNacimiento?: string;
+    existingUserId?: Id<'contacts'>;
+    now: number;
+  },
+): Promise<Id<'contacts'> | undefined> {
+  const celular = args.celular.trim();
+  if (!celular) return args.existingUserId;
+
+  const fechaNacimiento = parseBirthdateIso(args.fechaNacimiento);
+  const address = String(args.address ?? '').trim() || undefined;
+  const city = String(args.city ?? '').trim() || undefined;
+  const correo = String(args.correo ?? '').trim() || undefined;
+  const cedula = String(args.cedula ?? '').trim() || undefined;
+
+  let contactId = args.existingUserId;
+
+  if (!contactId) {
+    const byPhone = await ctx.db
+      .query('contacts')
+      .withIndex('by_phone', (q) => q.eq('phone', celular))
+      .first();
+    contactId = byPhone?._id;
+  }
+
+  if (!contactId && correo) {
+    const byEmail = await ctx.db
+      .query('contacts')
+      .filter((q) => q.eq(q.field('email'), correo))
+      .first();
+    contactId = byEmail?._id;
+  }
+
+  const profilePatch = {
+    name: args.nombreCompleto,
+    phone: celular,
+    ...(correo ? { email: correo } : {}),
+    ...(cedula ? { cedula } : {}),
+    ...(city ? { city } : {}),
+    ...(address ? { address } : {}),
+    ...(fechaNacimiento ? { fechaNacimiento } : {}),
+    crmType: 'client' as const,
+    lastReservationAt: args.now,
+    updatedAt: args.now,
+  };
+
+  if (contactId) {
+    const contact = await ctx.db.get(contactId);
+    if (contact) {
+      await ctx.db.patch(contactId, {
+        ...profilePatch,
+        email: correo || contact.email,
+        cedula: cedula || contact.cedula,
+        city: city || contact.city,
+        address: address || contact.address,
+        fechaNacimiento: fechaNacimiento || contact.fechaNacimiento,
+      });
+    }
+    return contactId;
+  }
+
+  return await ctx.db.insert('contacts', {
+    ...profilePatch,
+    createdAt: args.now,
+  });
 }
 
 // ============ QUERIES ============
@@ -391,8 +479,20 @@ export const getById = query({
       .withIndex('by_booking', (q) => q.eq('bookingId', args.id))
       .collect();
 
+    let fechaNacimiento: string | undefined;
+    let contactAddress: string | undefined;
+    if (booking.userId) {
+      const contact = await ctx.db.get(booking.userId);
+      if (contact) {
+        fechaNacimiento = contact.fechaNacimiento;
+        contactAddress = contact.address;
+      }
+    }
+
     return {
       ...booking,
+      fechaNacimiento,
+      address: booking.address ?? contactAddress,
       property,
       payments,
     };
@@ -869,72 +969,19 @@ export const create = mutation({
       );
     }
 
-    const fechaNacimiento = (() => {
-      const raw = args.fechaNacimiento?.trim();
-      if (!raw) return undefined;
-      return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
-    })();
+    let resolvedUserId: Id<'contacts'> | undefined;
 
-    let resolvedUserId: any | undefined;
-
-    // Crear/Enlazar cliente (Contacto CRM)
     if (args.celular) {
-      // Buscar por celular
-      const contactByPhone = await ctx.db
-        .query('contacts')
-        .withIndex('by_phone', (q) => q.eq('phone', args.celular))
-        .first();
-
-      if (contactByPhone) {
-        resolvedUserId = contactByPhone._id;
-        // Actualizar datos del contacto existente
-        await ctx.db.patch(resolvedUserId, {
-          name: args.nombreCompleto,
-          email: args.correo || contactByPhone.email,
-          cedula: args.cedula || contactByPhone.cedula,
-          city: args.city || contactByPhone.city,
-          ...(fechaNacimiento ? { fechaNacimiento } : {}),
-          crmType: 'client',
-          lastReservationAt: now,
-          updatedAt: now,
-        });
-      } else if (args.correo) {
-        // Buscar por email
-        const contactByEmail = await ctx.db
-          .query('contacts')
-          .filter((q) => q.eq(q.field('email'), args.correo))
-          .first();
-
-        if (contactByEmail) {
-          resolvedUserId = contactByEmail._id;
-          await ctx.db.patch(resolvedUserId, {
-            name: args.nombreCompleto,
-            phone: args.celular || contactByEmail.phone,
-            cedula: args.cedula || contactByEmail.cedula,
-            city: args.city || contactByEmail.city,
-            ...(fechaNacimiento ? { fechaNacimiento } : {}),
-            crmType: 'client',
-            lastReservationAt: now,
-            updatedAt: now,
-          });
-        }
-      }
-
-      // Si no existe de ninguna forma, crearlo
-      if (!resolvedUserId) {
-        resolvedUserId = await ctx.db.insert('contacts', {
-          name: args.nombreCompleto,
-          phone: args.celular,
-          email: args.correo,
-          cedula: args.cedula,
-          city: args.city,
-          fechaNacimiento,
-          crmType: 'client',
-          createdAt: now,
-          lastReservationAt: now,
-          updatedAt: now,
-        });
-      }
+      resolvedUserId = await upsertContactFromReservation(ctx, {
+        celular: args.celular,
+        nombreCompleto: args.nombreCompleto,
+        correo: args.correo,
+        cedula: args.cedula,
+        city: args.city,
+        address: args.address,
+        fechaNacimiento: args.fechaNacimiento,
+        now,
+      });
     }
 
     const bookingId = await ctx.db.insert('bookings', {
@@ -1174,11 +1221,6 @@ export const adminUpdate = mutation({
       );
     }
 
-    const fechaNacimiento = (() => {
-      const raw = updates.fechaNacimiento?.trim();
-      if (!raw) return undefined;
-      return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
-    })();
     const { fechaNacimiento: _dropBirthdate, ...bookingUpdates } = updates;
 
     const patch: Record<string, unknown> = {
@@ -1196,45 +1238,23 @@ export const adminUpdate = mutation({
     const correo = updates.correo ?? booking.correo;
     const cedula = updates.cedula ?? booking.cedula;
     const city = updates.city ?? booking.city;
+    const address = updates.address ?? booking.address;
     const now = Date.now();
 
-    if (celular && (fechaNacimiento || booking.userId)) {
-      let contactId = booking.userId;
-
-      if (!contactId) {
-        const contactByPhone = await ctx.db
-          .query('contacts')
-          .withIndex('by_phone', (q) => q.eq('phone', celular))
-          .first();
-        contactId = contactByPhone?._id;
-      }
-
-      if (contactId) {
-        await ctx.db.patch(contactId, {
-          name: nombreCompleto,
-          phone: celular,
-          email: correo,
-          cedula,
-          city,
-          ...(fechaNacimiento ? { fechaNacimiento } : {}),
-          crmType: 'client',
-          lastReservationAt: now,
-          updatedAt: now,
-        });
-      } else if (fechaNacimiento) {
-        const newContactId = await ctx.db.insert('contacts', {
-          name: nombreCompleto,
-          phone: celular,
-          email: correo,
-          cedula,
-          city,
-          fechaNacimiento,
-          crmType: 'client',
-          createdAt: now,
-          lastReservationAt: now,
-          updatedAt: now,
-        });
-        await ctx.db.patch(id, { userId: newContactId });
+    if (celular) {
+      const contactId = await upsertContactFromReservation(ctx, {
+        celular,
+        nombreCompleto,
+        correo,
+        cedula,
+        city,
+        address,
+        fechaNacimiento: updates.fechaNacimiento,
+        existingUserId: booking.userId,
+        now,
+      });
+      if (contactId && !booking.userId) {
+        await ctx.db.patch(id, { userId: contactId });
       }
     }
 

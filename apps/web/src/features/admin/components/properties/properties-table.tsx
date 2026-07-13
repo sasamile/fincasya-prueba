@@ -54,7 +54,7 @@ export function PropertiesTable({
 
   if (isLoading) {
     return (
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-border/40">
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="flex items-center gap-4 px-5 py-4">
             <div className="w-14 h-10 rounded-lg bg-muted animate-pulse" />
@@ -97,7 +97,7 @@ export function PropertiesTable({
   return (
     <div className="bg-background/50 backdrop-blur-sm">
       {/* Table Header */}
-      <div className="hidden md:grid grid-cols-[80px_2fr_1.2fr_100px_160px_120px] gap-4 px-8 py-5 bg-muted/50 border-b border-border text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+      <div className="hidden md:grid grid-cols-[80px_2fr_1.2fr_100px_160px_120px] gap-4 px-8 py-5 bg-muted/30 border-b border-border/40 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
         <span>Imagen</span>
         <span>Propiedad & Detalles</span>
         <span>Ubicación</span>

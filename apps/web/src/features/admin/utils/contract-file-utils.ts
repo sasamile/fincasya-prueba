@@ -36,6 +36,15 @@ export function getContractFileLabel(url?: string, filename?: string): string {
   return isContractDocx(url, filename) ? "Word" : "PDF";
 }
 
+/** Proxy admin para previsualizar PDF en iframe (evita bloqueos de S3 / X-Frame-Options). */
+export function contractDocumentPreviewSrc(
+  contractNumber: string,
+  kind: ContractDocumentKind = "contract",
+): string {
+  const params = new URLSearchParams({ kind });
+  return `/api/contracts/${encodeURIComponent(contractNumber)}/document-file?${params}`;
+}
+
 function extractContractFromDraft(draftJson?: string | null): {
   url?: string;
   filename?: string;

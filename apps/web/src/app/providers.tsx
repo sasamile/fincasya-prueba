@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { authClient } from '@/lib/auth-client';
 import { convex } from '@/lib/convex-client';
+import { PublicSiteWidgets } from '@/features/landing/components/PublicSiteWidgets';
 
 const typedAuthClient = authClient as unknown as AuthClient;
 
@@ -26,6 +27,7 @@ export function Providers({ children }: { children: ReactNode }) {
       <ConvexBetterAuthProvider client={convex} authClient={typedAuthClient}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           {children}
+          <PublicSiteWidgets />
         </ThemeProvider>
       </ConvexBetterAuthProvider>
     </QueryClientProvider>

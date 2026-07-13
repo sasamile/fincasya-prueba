@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
+import { ensureSessionLogged, getSession } from '@/features/auth/api/auth.api';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
@@ -25,6 +26,10 @@ export function AdminLoginForm() {
       if (signInError) {
         setError(signInError.message ?? 'Credenciales incorrectas. Inténtalo de nuevo.');
         return;
+      }
+      const sessionUser = await getSession();
+      if (sessionUser) {
+        await ensureSessionLogged(sessionUser);
       }
       const callbackUrl = searchParams.get('callbackUrl') || '/admin';
       router.push(callbackUrl);

@@ -4,6 +4,7 @@ import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import {
   parseBookingFormData,
   readBookingFormRequest,
+  toAdminUpdateArgs,
 } from '@/lib/bookings/parse-booking-form';
 
 export const runtime = 'nodejs';
@@ -19,7 +20,7 @@ export async function PUT(
     const client = getConvexHttpClient();
     await client.mutation(api.bookings.adminUpdate, {
       id: id as Id<'bookings'>,
-      ...payload,
+      ...toAdminUpdateArgs(payload),
     });
     return NextResponse.json({ ok: true, bookingId: id, id });
   } catch (error) {

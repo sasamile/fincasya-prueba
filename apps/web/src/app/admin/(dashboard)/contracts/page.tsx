@@ -281,7 +281,7 @@ export default function ContractsManagerPage() {
 
       {/* Filters panel */}
       <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-border bg-muted/20 flex flex-wrap items-center justify-between gap-2">
+        <div className="px-4 py-3 border-b border-border/40 bg-muted/20 flex flex-wrap items-center justify-between gap-2">
           <Tabs value={tipo} onValueChange={setTipo}>
             <TabsList className="h-8 bg-muted/60">
               <TabsTrigger value="todos" className="text-xs px-3 h-7">
@@ -418,7 +418,7 @@ export default function ContractsManagerPage() {
       {/* Table */}
       <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
         {isLoading ? (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-border/40">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4 px-5 py-4 animate-pulse">
                 <div className="h-4 bg-muted rounded w-20" />
@@ -471,7 +471,7 @@ export default function ContractsManagerPage() {
         ) : (
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/30 hover:bg-muted/30">
+              <TableRow className="bg-muted/20 hover:bg-muted/20 border-border/40">
                 <TableHead className="font-semibold text-xs">N° / Tipo</TableHead>
                 <TableHead className="font-semibold text-xs">Finca · Cliente</TableHead>
                 <TableHead className="font-semibold text-xs">Estado</TableHead>

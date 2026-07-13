@@ -20,7 +20,6 @@ import {
   Save,
   Loader2,
   MapPin,
-  Star,
   LayoutGrid,
   ChevronRight,
   Info,
@@ -297,13 +296,6 @@ export function PropertyReorder() {
     const propertyIds = tabOrderData?.propertyIds || [];
     const propertyMap = new Map(filteredByCategory.map((f) => [f.id, f]));
 
-    // Debug logging to help identify why data might not be persisting
-    console.log(`[Reorder] Loading tab: ${selectedTab}`, {
-      foundInDb: !!tabOrderData,
-      propertyIdsCount: propertyIds.length,
-      filteredByCategoryCount: filteredByCategory.length,
-    });
-
     const orderedTotal = [...propertyIds]
       .map((id) => propertyMap.get(id))
       .filter((f): f is PropertyResponse => !!f);
@@ -371,11 +363,6 @@ export function PropertyReorder() {
         ...orderedOthers.map((f) => f.id),
       ];
 
-      console.log(`[Reorder] Saving tab: ${selectedTab}`, {
-        propertyIdsCount: propertyIds.length,
-        propertyIds,
-      });
-
       await updateTabOrderMutation.mutateAsync({
         tabId: selectedTab,
         propertyIds,
@@ -391,269 +378,269 @@ export function PropertyReorder() {
   const isLoading = isLoadingFincas || isLoadingOrder;
 
   return (
-    <div className="min-h-screen bg-transparent">
-      <div className="max-w-[1400px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-0 lg:gap-8">
-        {/* Sidebar Navigation */}
-        <aside
-          className={cn(
-            "lg:col-span-3 fixed inset-y-0 left-0 z-999 w-[280px] bg-background border-r border-border lg:sticky lg:top-[64px] lg:h-[calc(100vh-64px)] transition-transform duration-300 ease-in-out lg:translate-x-0 overflow-hidden",
-            isSidebarOpen ? "translate-x-0" : "-translate-x-full",
-          )}
-        >
-          <ScrollArea className="h-full">
-            <div className="px-6 pt-6 pb-8">
-              <button
-                onClick={() => setIsSidebarOpen(false)}
-                className="lg:hidden absolute top-4 right-4 p-2 text-muted-foreground hover:text-foreground"
-              >
-                <ChevronRight className="w-6 h-6 rotate-180" />
-              </button>
-              <div className="mb-4">
-                <h1 className="text-lg font-bold text-foreground tracking-tight leading-tight">
-                  {currentTabLabel}
-                </h1>
-                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest mt-1.5 leading-none">
-                  Prioridad de Fincas
-                </p>
+    <div className="mx-auto flex min-h-0 max-w-[1400px] flex-col gap-4 p-4 md:p-6 lg:flex-row lg:gap-6">
+      {/* Sidebar: drawer en móvil, columna sticky en desktop (sin fixed → no hueco blanco) */}
+      <aside
+        className={cn(
+          "z-50 flex w-[min(288px,88vw)] shrink-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm",
+          "fixed inset-y-0 left-0 transition-transform duration-300 ease-out",
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full",
+          "lg:relative lg:inset-auto lg:w-64 lg:translate-x-0",
+          "lg:sticky lg:top-16 lg:self-start lg:max-h-[calc(100vh-5rem)]",
+        )}
+      >
+        <div className="relative shrink-0 border-b border-border/60 p-4">
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(false)}
+            className="absolute top-3 right-3 p-1.5 text-muted-foreground hover:text-foreground lg:hidden"
+            aria-label="Cerrar menú"
+          >
+            <ChevronRight className="h-5 w-5 rotate-180" />
+          </button>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Prioridad de fincas
+          </p>
+          <h1 className="mt-1 truncate text-base font-bold tracking-tight">
+            {currentTabLabel}
+          </h1>
+          <button
+            type="button"
+            onClick={handleSaveOrder}
+            disabled={updateTabOrderMutation.isPending || isLoading}
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:opacity-50"
+          >
+            {updateTabOrderMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            Guardar orden
+          </button>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col">
+          <p className="shrink-0 px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Pestañas front-page
+          </p>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="space-y-0.5 px-3 pb-3">
+              {reorderTabs.map((tab) => (
                 <button
-                  onClick={handleSaveOrder}
-                  disabled={updateTabOrderMutation.isPending || isLoading}
-                  className="mt-4 w-full inline-flex items-center justify-center gap-2 px-6 py-4 rounded-2xl bg-primary hover:bg-primary/90 text-white text-xs transition-all disabled:opacity-50 shadow-lg shadow-primary/20 active:scale-95 group font-bold!"
-                >
-                  {updateTabOrderMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTab(tab.id);
+                    if (window.innerWidth < 1024) setIsSidebarOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs font-semibold transition-colors",
+                    selectedTab === tab.id
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
                   )}
-                  <span>Guardar Orden</span>
+                >
+                  <span className="truncate">{tab.label}</span>
+                  {selectedTab === tab.id ? (
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  ) : null}
                 </button>
-              </div>
-              <div className="h-px bg-border mb-8" />
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] mb-4 block">
-                Pestañas Front-Page
-              </span>
-              <div className="space-y-1">
-                {reorderTabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => {
-                      setSelectedTab(tab.id);
-                      if (window.innerWidth < 1024) setIsSidebarOpen(false);
-                    }}
-                    className={cn(
-                      "w-full text-left px-4 py-3 rounded-2xl text-xs font-bold transition-all flex items-center justify-between group",
-                      selectedTab === tab.id
-                        ? "bg-primary/10 text-primary border border-primary/20"
-                        : "bg-transparent text-muted-foreground hover:bg-muted",
-                    )}
-                  >
-                    <span>{tab.label}</span>
-                    <ChevronRight
-                      className={cn(
-                        "w-4 h-4 transition-transform",
-                        selectedTab === tab.id
-                          ? "translate-x-0"
-                          : "-translate-x-2 opacity-0 group-hover:opacity-100 group-hover:translate-x-0",
-                      )}
-                    />
-                  </button>
-                ))}
-              </div>
+              ))}
             </div>
           </ScrollArea>
-        </aside>
+        </div>
+      </aside>
 
-        {/* Content Area */}
-        <main className="lg:col-span-9 p-4 md:p-8 pt-6">
-          <div className="flex items-center gap-3 mb-8 sticky top-[64px] lg:top-[64px] z-20 py-4 -mt-4">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsSidebarOpen(true)}
-                className="lg:hidden p-3.5 bg-background border border-border rounded-2xl text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors shadow-sm"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-              <button
-                onClick={handleSaveOrder}
-                disabled={updateTabOrderMutation.isPending || isLoading}
-                className="lg:hidden p-3.5 bg-primary text-white rounded-2xl shadow-lg shadow-primary/20 active:scale-95 disabled:opacity-50 transition-all font-bold!"
-                title="Guardar Orden"
-              >
-                {updateTabOrderMutation.isPending ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Save className="w-5 h-5" />
-                )}
-              </button>
-            </div>
-            <div className="flex-1 relative group flex items-center gap-2">
-              <div className="relative flex-1 group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                <input
-                  type="text"
-                  placeholder="Ubicar finca por código o nombre..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full bg-background border border-border rounded-2xl pl-12 pr-4 py-3.5 text-xs focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all font-bold placeholder:text-muted-foreground/30 shadow-sm"
-                />
-              </div>
-
-              {matchingIds.length > 1 && (
-                <div className="flex items-center gap-1 bg-background border border-border p-1.5 rounded-2xl shadow-sm">
-                  <span className="text-[10px] font-black text-muted-foreground px-2">
-                    {currentMatchIndex + 1} de {matchingIds.length}
-                  </span>
-                  <button
-                    onClick={handlePrevMatch}
-                    className="p-2 hover:bg-muted rounded-xl transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4 rotate-180" />
-                  </button>
-                  <button
-                    onClick={handleNextMatch}
-                    className="p-2 hover:bg-muted rounded-xl transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-32">
-              <div className="relative">
-                <div className="w-16 h-16 border-4 border-muted border-t-primary rounded-full animate-spin" />
-                <LayoutGrid className="absolute inset-0 m-auto w-6 h-6 text-primary" />
-              </div>
-              <p className="text-muted-foreground font-bold uppercase tracking-widest text-[9px] mt-6">
-                Sincronizando con Fincas...
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-12">
-              <section>
-                <div className="flex items-center gap-3 mb-4 px-1">
-                  <div className="p-1.5 bg-pink-100 rounded-lg">
-                    <Heart className="w-4 h-4 text-pink-600 fill-pink-600" />
-                  </div>
-                  <div>
-                    <h2 className="text-[14px] font-bold text-foreground tracking-tight uppercase">
-                      Favoritas de la categoría
-                    </h2>
-                    <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">
-                      {orderedFavorites.length} Propiedades destacadas
-                    </p>
-                  </div>
-                </div>
-
-                {orderedFavorites.length === 0 ? (
-                  <div className="py-12 bg-muted/20 border border-dashed border-border rounded-[32px] flex flex-col items-center justify-center">
-                    <Heart className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                    <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest">
-                      Sin favoritas seleccionadas
-                    </p>
-                  </div>
-                ) : (
-                  <Reorder.Group
-                    key={`favs-${selectedTab}`}
-                    axis="y"
-                    values={orderedFavorites}
-                    onReorder={setOrderedFavorites}
-                    className="grid grid-cols-1 gap-2"
-                  >
-                    <AnimatePresence>
-                      {orderedFavorites.map((item, idx) => (
-                        <ReorderableFincaItem
-                          key={item.id}
-                          item={item}
-                          index={idx}
-                          isFavorite
-                          searchTerm={searchTerm}
-                          isCurrentMatch={
-                            searchTerm
-                              ? matchingIds[currentMatchIndex] === item.id
-                              : false
-                          }
-                        />
-                      ))}
-                    </AnimatePresence>
-                  </Reorder.Group>
-                )}
-              </section>
-
-              <section>
-                <div className="flex items-center gap-3 mb-4 px-1">
-                  <div className="p-1.5 bg-orange-100 rounded-lg">
-                    <LayoutGrid className="w-4 h-4 text-orange-600" />
-                  </div>
-                  <div>
-                    <h2 className="text-[14px] font-bold text-foreground tracking-tight uppercase">
-                      Otras propiedades
-                    </h2>
-                    <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">
-                      {orderedOthers.length} Fincas disponibles
-                    </p>
-                  </div>
-                </div>
-
-                {orderedOthers.length === 0 ? (
-                  <div className="py-12 bg-muted/20 border border-dashed border-border rounded-[32px] flex flex-col items-center justify-center">
-                    <Info className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                    <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest">
-                      No hay más propiedades en esta pestaña
-                    </p>
-                  </div>
-                ) : (
-                  <Reorder.Group
-                    key={`others-${selectedTab}`}
-                    axis="y"
-                    values={orderedOthers}
-                    onReorder={setOrderedOthers}
-                    className="grid grid-cols-1 gap-2"
-                  >
-                    <AnimatePresence>
-                      {orderedOthers.map((item, idx) => (
-                        <ReorderableFincaItem
-                          key={item.id}
-                          item={item}
-                          index={idx}
-                          searchTerm={searchTerm}
-                          isCurrentMatch={
-                            searchTerm
-                              ? matchingIds[currentMatchIndex] === item.id
-                              : false
-                          }
-                        />
-                      ))}
-                    </AnimatePresence>
-                  </Reorder.Group>
-                )}
-              </section>
-            </div>
-          )}
-        </main>
-      </div>
-      {isSidebarOpen && (
-        <div
-          className="lg:hidden fixed inset-0 z-998 bg-background/80 backdrop-blur-sm"
+      {isSidebarOpen ? (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-background/70 backdrop-blur-[2px] lg:hidden"
+          aria-label="Cerrar menú"
           onClick={() => setIsSidebarOpen(false)}
         />
-      )}
+      ) : null}
 
-      {/* Scroll to Top Button */}
+      {/* Lista de fincas */}
+      <main className="min-w-0 flex-1">
+        <div className="sticky top-0 z-10 -mx-1 mb-4 flex items-center gap-2 bg-background/95 px-1 py-2 backdrop-blur-sm">
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            className="rounded-xl border border-border bg-card p-2.5 text-muted-foreground shadow-sm transition hover:text-primary lg:hidden"
+            aria-label="Abrir pestañas"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveOrder}
+            disabled={updateTabOrderMutation.isPending || isLoading}
+            className="rounded-xl bg-primary p-2.5 text-primary-foreground shadow-sm transition active:scale-95 disabled:opacity-50 lg:hidden"
+            title="Guardar orden"
+          >
+            {updateTabOrderMutation.isPending ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Save className="h-5 w-5" />
+            )}
+          </button>
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Buscar por código o nombre…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="h-10 w-full rounded-xl border border-border bg-card pr-3 pl-9 text-xs font-medium shadow-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+            />
+          </div>
+          {matchingIds.length > 1 ? (
+            <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-border bg-card p-1 shadow-sm">
+              <span className="px-2 text-[10px] font-bold text-muted-foreground tabular-nums">
+                {currentMatchIndex + 1}/{matchingIds.length}
+              </span>
+              <button
+                type="button"
+                onClick={handlePrevMatch}
+                className="rounded-lg p-1.5 hover:bg-muted"
+              >
+                <ChevronRight className="h-4 w-4 rotate-180" />
+              </button>
+              <button
+                type="button"
+                onClick={handleNextMatch}
+                className="rounded-lg p-1.5 hover:bg-muted"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-24">
+            <div className="relative">
+              <div className="h-14 w-14 animate-spin rounded-full border-4 border-muted border-t-primary" />
+              <LayoutGrid className="absolute inset-0 m-auto h-5 w-5 text-primary" />
+            </div>
+            <p className="mt-4 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              Cargando fincas…
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            <section>
+              <div className="mb-3 flex items-center gap-2 px-0.5">
+                <div className="rounded-lg bg-pink-500/10 p-1.5">
+                  <Heart className="h-4 w-4 fill-pink-500 text-pink-500" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold">Favoritas de la categoría</h2>
+                  <p className="text-[10px] font-medium text-muted-foreground">
+                    {orderedFavorites.length} destacadas
+                  </p>
+                </div>
+              </div>
+
+              {orderedFavorites.length === 0 ? (
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-muted/20 py-10">
+                  <Heart className="mb-2 h-7 w-7 text-muted-foreground/30" />
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Sin favoritas en esta pestaña
+                  </p>
+                </div>
+              ) : (
+                <Reorder.Group
+                  key={`favs-${selectedTab}`}
+                  axis="y"
+                  values={orderedFavorites}
+                  onReorder={setOrderedFavorites}
+                  className="flex flex-col gap-2"
+                >
+                  <AnimatePresence>
+                    {orderedFavorites.map((item, idx) => (
+                      <ReorderableFincaItem
+                        key={item.id}
+                        item={item}
+                        index={idx}
+                        isFavorite
+                        searchTerm={searchTerm}
+                        isCurrentMatch={
+                          searchTerm
+                            ? matchingIds[currentMatchIndex] === item.id
+                            : false
+                        }
+                      />
+                    ))}
+                  </AnimatePresence>
+                </Reorder.Group>
+              )}
+            </section>
+
+            <section>
+              <div className="mb-3 flex items-center gap-2 px-0.5">
+                <div className="rounded-lg bg-orange-500/10 p-1.5">
+                  <LayoutGrid className="h-4 w-4 text-orange-600" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold">Otras propiedades</h2>
+                  <p className="text-[10px] font-medium text-muted-foreground">
+                    {orderedOthers.length} fincas
+                  </p>
+                </div>
+              </div>
+
+              {orderedOthers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-muted/20 py-10">
+                  <Info className="mb-2 h-7 w-7 text-muted-foreground/30" />
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    No hay más propiedades en esta pestaña
+                  </p>
+                </div>
+              ) : (
+                <Reorder.Group
+                  key={`others-${selectedTab}`}
+                  axis="y"
+                  values={orderedOthers}
+                  onReorder={setOrderedOthers}
+                  className="flex flex-col gap-2"
+                >
+                  <AnimatePresence>
+                    {orderedOthers.map((item, idx) => (
+                      <ReorderableFincaItem
+                        key={item.id}
+                        item={item}
+                        index={idx}
+                        searchTerm={searchTerm}
+                        isCurrentMatch={
+                          searchTerm
+                            ? matchingIds[currentMatchIndex] === item.id
+                            : false
+                        }
+                      />
+                    ))}
+                  </AnimatePresence>
+                </Reorder.Group>
+              )}
+            </section>
+          </div>
+        )}
+      </main>
+
       <AnimatePresence>
-        {showScrollToTop && (
+        {showScrollToTop ? (
           <motion.button
+            type="button"
             initial={{ opacity: 0, scale: 0.8, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: 20 }}
             onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-            className="fixed bottom-6 right-6 p-4 bg-primary text-white rounded-2xl shadow-2xl z-100 hover:bg-primary/90 active:scale-95 transition-all group"
+            className="fixed right-5 bottom-5 z-30 rounded-xl bg-primary p-3 text-primary-foreground shadow-lg transition hover:bg-primary/90 active:scale-95"
+            aria-label="Volver arriba"
           >
-            <ChevronRight className="w-5 h-5 -rotate-90 group-hover:-translate-y-1 transition-transform" />
+            <ChevronRight className="h-5 w-5 -rotate-90" />
           </motion.button>
-        )}
+        ) : null}
       </AnimatePresence>
     </div>
   );

@@ -36,9 +36,12 @@ export const QUIENES_SOMOS_DEFAULT = {
   presenciaInstitucional:
     "Participamos activamente en escenarios como la vitrina turística de ANATO y hemos sido invitados por entidades como el Instituto de Turismo del Meta, fortaleciendo nuestro liderazgo en la industria.",
   carouselImages: [
-    "/images/DSC09593.jpg.jpeg",
-    "/images/DSC09593.jpg.jpeg",
-    "/images/DSC09593.jpg.jpeg"
+    '/images/DSC09593.jpg.jpeg',
+    '/images/DSC09604.jpg.jpeg',
+    '/images/DSC09613.jpg.jpeg',
+    '/images/DSC09620.jpg.jpeg',
+    '/images/DSC09625.jpg.jpeg',
+    '/images/DSC09632.jpg.jpeg',
   ],
   videoUrl: "",
   videoTitle: "NUESTRA HISTORIA EN VIDEO",

@@ -2,13 +2,15 @@
 
 import { useRef, useState } from "react";
 import Image from "next/image";
-import axios from "axios";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation as useConvexMutation, useQuery as useConvexQuery } from "convex/react";
+import { api } from "@fincasya/backend/convex/_generated/api";
+import type { Id } from "@fincasya/backend/convex/_generated/dataModel";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   Download,
   ExternalLink,
+  FileWarning,
   ImagePlus,
   Loader2,
   Trash2,
@@ -22,61 +24,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import {
-  resolveContractFile,
-} from "@/features/admin/utils/contract-file-utils";
+import { resolveContractFile } from "@/features/admin/utils/contract-file-utils";
 import type { ContractPreviewTarget } from "@/features/admin/components/contracts/contract-preview-modal";
-
-type ContractDetail = {
-  contract: {
-    _id: string;
-    contractNumber: string;
-    propertyTitle?: string;
-    propertyLocation?: string;
-    clienteNombre?: string;
-    clienteCedula?: string;
-    clienteEmail?: string;
-    clienteTelefono?: string;
-    clienteCiudad?: string;
-    clienteDireccion?: string;
-    valorTotal?: number;
-    fechaEntrada?: string;
-    fechaSalida?: string;
-    pdfUrl?: string;
-    pdfFilename?: string;
-    confirmationPdfUrl?: string;
-    confirmationPdfFilename?: string;
-    draftJson?: string;
-    estado: string;
-    origen?: string;
-    updatedAt?: number;
-  };
-  fillToken?: {
-    token: string;
-    status: string;
-    source?: string;
-    filledData?: {
-      nombre: string;
-      cedula: string;
-      email: string;
-      telefono: string;
-      direccion: string;
-      ciudad?: string;
-      cedulaPhotoUrls?: string[];
-      filledAt: number;
-    };
-    fechaEntrada?: string;
-    fechaSalida?: string;
-    precioTotal?: number;
-  } | null;
-  bookingReference?: string;
-  pdfUrl?: string;
-  pdfFilename?: string;
-  confirmationPdfUrl?: string;
-  confirmationPdfFilename?: string;
-  hasConfirmation?: boolean;
-};
 
 const ESTADOS: Record<string, { label: string; className: string }> = {
   borrador: { label: "Borrador", className: "bg-stone-100 text-stone-700" },
@@ -118,64 +69,90 @@ export function ContractDetailModal({
   onDeleted,
   onPreview,
 }: Props) {
-  const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [deleting, setDeleting] = useState(false);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [removingPhotoUrl, setRemovingPhotoUrl] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["admin-contract-detail", contractNumber],
-    queryFn: async () => {
-      const { data } = await axios.get<ContractDetail>(
-        `/api/bookings/contracts/${encodeURIComponent(contractNumber!)}/detail`,
-        { withCredentials: true },
-      );
-      return data;
-    },
-    enabled: open && !!contractNumber,
-  });
+  const data = useConvexQuery(
+    api.contracts.getDetail,
+    open && contractNumber ? { contractNumber } : "skip",
+  );
+  const removeContract = useConvexMutation(api.contracts.remove);
+  const updateCedulaPhotos = useConvexMutation(
+    api.contractFillTokens.updateCedulaPhotos,
+  );
 
-  const uploadPhotos = useMutation({
-    mutationFn: async (files: FileList) => {
-      const fd = new FormData();
-      Array.from(files).forEach((f) => fd.append("photos", f));
-      const { data } = await axios.post(
-        `/api/bookings/contracts/${encodeURIComponent(contractNumber!)}/cedula-photos`,
-        fd,
-        { headers: { "Content-Type": "multipart/form-data" }, withCredentials: true },
-      );
-      return data;
-    },
-    onSuccess: () => {
-      toast.success("Fotos actualizadas.");
-      queryClient.invalidateQueries({
-        queryKey: ["admin-contract-detail", contractNumber],
+  const isLoading = open && !!contractNumber && data === undefined;
+
+  async function uploadDocument(file: File): Promise<string> {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("folder", "images");
+    const res = await fetch("/api/admin/upload", { method: "POST", body: fd });
+    const json = (await res.json()) as { url?: string; error?: string };
+    if (!res.ok || !json.url) {
+      throw new Error(json.error ?? "No se pudo subir la imagen");
+    }
+    return json.url;
+  }
+
+  const handleUploadPhotos = async (files: FileList) => {
+    const fillTokenId = data?.fillToken?._id;
+    if (!fillTokenId) {
+      toast.error("Este contrato no tiene link de llenado con fotos.");
+      return;
+    }
+    setUploadingPhotos(true);
+    try {
+      const current = data?.fillToken?.filledData?.cedulaPhotoUrls ?? [];
+      const uploaded: string[] = [];
+      for (const file of Array.from(files)) {
+        if (current.length + uploaded.length >= 2) break;
+        uploaded.push(await uploadDocument(file));
+      }
+      if (!uploaded.length) return;
+      const next = [...current, ...uploaded].slice(0, 2);
+      const res = await updateCedulaPhotos({
+        fillTokenId: fillTokenId as Id<"contractFillTokens">,
+        cedulaPhotoUrls: next,
       });
-      queryClient.invalidateQueries({ queryKey: ["admin-contracts"] });
-    },
-    onError: () => toast.error("No se pudieron subir las fotos."),
-  });
+      if (!res.ok) {
+        toast.error("No se pudieron guardar las fotos.");
+        return;
+      }
+      toast.success("Fotos actualizadas.");
+    } catch {
+      toast.error("No se pudieron subir las fotos.");
+    } finally {
+      setUploadingPhotos(false);
+    }
+  };
 
-  const removePhoto = useMutation({
-    mutationFn: async (urlToRemove: string) => {
+  const handleRemovePhoto = async (urlToRemove: string) => {
+    const fillTokenId = data?.fillToken?._id;
+    if (!fillTokenId) return;
+    setRemovingPhotoUrl(urlToRemove);
+    try {
       const current =
         data?.fillToken?.filledData?.cedulaPhotoUrls?.filter(
           (u) => u !== urlToRemove,
         ) ?? [];
-      const { data: res } = await axios.put(
-        `/api/bookings/contracts/${encodeURIComponent(contractNumber!)}/cedula-photos`,
-        { cedulaPhotoUrls: current },
-        { withCredentials: true },
-      );
-      return res;
-    },
-    onSuccess: () => {
-      toast.success("Foto eliminada.");
-      queryClient.invalidateQueries({
-        queryKey: ["admin-contract-detail", contractNumber],
+      const res = await updateCedulaPhotos({
+        fillTokenId: fillTokenId as Id<"contractFillTokens">,
+        cedulaPhotoUrls: current,
       });
-    },
-    onError: () => toast.error("No se pudo eliminar la foto."),
-  });
+      if (!res.ok) {
+        toast.error("No se pudo eliminar la foto.");
+        return;
+      }
+      toast.success("Foto eliminada.");
+    } catch {
+      toast.error("No se pudo eliminar la foto.");
+    } finally {
+      setRemovingPhotoUrl(null);
+    }
+  };
 
   const handleDelete = async () => {
     if (!contractNumber) return;
@@ -188,12 +165,12 @@ export function ContractDetailModal({
     }
     setDeleting(true);
     try {
-      await axios.delete(
-        `/api/bookings/contracts/${encodeURIComponent(contractNumber)}`,
-        { withCredentials: true },
-      );
+      const res = await removeContract({ contractNumber });
+      if (!res.ok) {
+        toast.error("No se pudo eliminar el contrato.");
+        return;
+      }
       toast.success("Contrato eliminado del gestor.");
-      queryClient.invalidateQueries({ queryKey: ["admin-contracts"] });
       onDeleted?.();
       onClose();
     } catch {
@@ -244,16 +221,30 @@ export function ContractDetailModal({
             <Loader2 className="w-4 h-4 animate-spin" /> Cargando…
           </div>
         ) : !c ? (
-          <p className="text-sm text-muted-foreground py-8 text-center">
-            No se encontró el contrato.
-          </p>
+          <div className="flex flex-col items-center gap-3 py-10 text-center">
+            <span className="grid h-12 w-12 place-items-center rounded-full bg-muted">
+              <FileWarning className="h-6 w-6 text-muted-foreground" />
+            </span>
+            <div>
+              <p className="text-sm font-medium">No se encontró el contrato</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                El registro <strong>{contractNumber}</strong> no existe o fue
+                eliminado.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" className="rounded-xl" onClick={onClose}>
+              Cerrar
+            </Button>
+          </div>
         ) : (
           <div className="space-y-5">
             <div className="rounded-xl bg-muted/30 px-4 py-3 space-y-1.5 text-sm">
-              <p className="font-medium">{c.propertyTitle ?? "Sin finca"}</p>
-              {c.propertyLocation && (
+              <p className="font-medium">
+                {c.propertyTitle ?? fill?.propertyTitle ?? "Sin finca"}
+              </p>
+              {(c.propertyLocation ?? fill?.propertyLocation) && (
                 <p className="text-xs text-muted-foreground">
-                  {c.propertyLocation}
+                  {c.propertyLocation ?? fill?.propertyLocation}
                 </p>
               )}
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground pt-1">
@@ -327,10 +318,10 @@ export function ContractDetailModal({
                     <button
                       type="button"
                       onClick={() => fileRef.current?.click()}
-                      disabled={uploadPhotos.isPending}
+                      disabled={uploadingPhotos}
                       className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:opacity-80 disabled:opacity-50"
                     >
-                      {uploadPhotos.isPending ? (
+                      {uploadingPhotos ? (
                         <Loader2 className="w-3 h-3 animate-spin" />
                       ) : (
                         <ImagePlus className="w-3 h-3" />
@@ -347,7 +338,7 @@ export function ContractDetailModal({
                   className="hidden"
                   onChange={(e) => {
                     const files = e.target.files;
-                    if (files?.length) uploadPhotos.mutate(files);
+                    if (files?.length) void handleUploadPhotos(files);
                     e.target.value = "";
                   }}
                 />
@@ -375,8 +366,8 @@ export function ContractDetailModal({
                         />
                         <button
                           type="button"
-                          onClick={() => removePhoto.mutate(url)}
-                          disabled={removePhoto.isPending}
+                          onClick={() => void handleRemovePhoto(url)}
+                          disabled={removingPhotoUrl === url}
                           className="absolute top-2 right-2 p-1.5 rounded-lg bg-background/90 text-red-500 opacity-0 group-hover:opacity-100 transition shadow"
                           title="Eliminar foto"
                         >

@@ -229,7 +229,9 @@ export async function parseBookingFormData(
     discountCode: optionalStr(form, 'discountCode'),
     discountAmount: num(form, 'discountAmount') || undefined,
     issueDate: optionalStr(form, 'issueDate'),
-    economicAdjustments: parseEconomicAdjustments(form),
+    economicAdjustments: normalizeEconomicAdjustments(
+      parseEconomicAdjustments(form),
+    ),
     precioTotal: num(form, 'precioTotal'),
     currency: optionalStr(form, 'currency') ?? 'COP',
     temporada: str(form, 'temporada') || 'ESTANDAR',
@@ -254,6 +256,67 @@ export async function parseBookingFormData(
   }
 
   return payload;
+}
+
+function normalizeEconomicAdjustments(
+  raw: ParsedBookingForm['economicAdjustments'],
+): ParsedBookingForm['economicAdjustments'] {
+  if (!raw?.length) return undefined;
+  return raw.map((item) => ({
+    id: String(item.id),
+    date: String(item.date),
+    description: String(item.description),
+    amount: Math.max(0, Math.round(Number(item.amount) || 0)),
+    type: item.type === 'DISCOUNT' ? 'DISCOUNT' : 'INCREMENT',
+    createdBy: item.createdBy?.trim() || undefined,
+    createdAt:
+      typeof item.createdAt === 'number' && item.createdAt > 0
+        ? item.createdAt
+        : Date.now(),
+  }));
+}
+
+/** Solo campos que acepta `bookings.adminUpdate` (evita fallos de validación Convex). */
+export function toAdminUpdateArgs(payload: ParsedBookingForm) {
+  return {
+    propertyId: payload.propertyId,
+    nombreCompleto: payload.nombreCompleto,
+    cedula: payload.cedula,
+    celular: payload.celular,
+    correo: payload.correo,
+    fechaEntrada: payload.fechaEntrada,
+    fechaSalida: payload.fechaSalida,
+    horaEntrada: payload.horaEntrada,
+    horaSalida: payload.horaSalida,
+    numeroNoches: payload.numeroNoches,
+    numeroPersonas: payload.numeroPersonas,
+    personasAdicionales: payload.personasAdicionales,
+    tieneMascotas: payload.tieneMascotas,
+    numeroMascotas: payload.numeroMascotas,
+    subtotal: payload.subtotal,
+    costoPersonasAdicionales: payload.costoPersonasAdicionales,
+    costoMascotas: payload.costoMascotas,
+    depositoMascotas: payload.depositoMascotas,
+    sobrecargoMascotas: payload.sobrecargoMascotas,
+    costoPersonalServicio: payload.costoPersonalServicio,
+    depositoGarantia: payload.depositoGarantia,
+    depositoAseo: payload.depositoAseo,
+    discountAmount: payload.discountAmount,
+    issueDate: payload.issueDate,
+    economicAdjustments: normalizeEconomicAdjustments(payload.economicAdjustments),
+    precioTotal: payload.precioTotal,
+    temporada: payload.temporada,
+    observaciones: payload.observaciones,
+    city: payload.city,
+    purpose: payload.purpose,
+    groupType: payload.groupType,
+    reference: payload.reference,
+    address: payload.address,
+    fechaNacimiento: payload.fechaNacimiento,
+    calendarLabel: payload.calendarLabel,
+    status: payload.status,
+    multimedia: payload.multimedia,
+  };
 }
 
 export async function readBookingFormRequest(

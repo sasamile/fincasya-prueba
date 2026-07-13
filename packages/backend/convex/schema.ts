@@ -209,6 +209,12 @@ export default defineSchema(
       ),
       /** URL de media cuando type es image/audio/document */
       mediaUrl: v.optional(v.string()),
+      /** Nombre original del archivo (documentos/media) para mostrar en el chat. */
+      mediaFilename: v.optional(v.string()),
+      /** MIME del archivo (image/jpeg, application/pdf, audio/ogg, …). */
+      mediaMime: v.optional(v.string()),
+      /** Tamaño del archivo en bytes (para mostrar "PDF · 240 KB"). */
+      mediaSize: v.optional(v.number()),
       /** Metadatos del mensaje (ej: para catálogos, datos de finca) */
       metadata: v.optional(v.any()),
       createdAt: v.number(),

@@ -22,6 +22,12 @@ import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { v } from 'convex/values';
 import { sendWhatsappReaction, sendWhatsappText } from './lib/ycloud';
+import {
+  sendAudioToYcloud,
+  sendDocumentToYcloud,
+  sendImageToYcloud,
+  sendVideoToYcloud,
+} from './lib/ycloud/senders';
 import { sendCatalogCard, BETWEEN_CATALOG_SENDS_MS, MAX_CATALOG_CARDS, formatCop } from './lib/catalogSend';
 import {
   buildWebFichaCaption,
@@ -183,6 +189,9 @@ export const getMessages = query({
         content: m.content,
         type: m.type ?? 'text',
         mediaUrl: m.mediaUrl ?? null,
+        mediaFilename: m.mediaFilename ?? null,
+        mediaMime: m.mediaMime ?? null,
+        mediaSize: m.mediaSize ?? null,
         createdAt: m.createdAt,
         whatsappStatus: m.whatsappStatus ?? null,
         byAdvisor: Boolean(m.sentByUserId),
@@ -523,6 +532,151 @@ export const deliverAdvisorMessage = internalAction({
     } catch (err) {
       failed = true;
       console.error('[inbox] fallo el envio del mensaje del Experto', err);
+    }
+    await ctx.runMutation(internal.inbox.markDelivery, { messageId, wamid, failed });
+  },
+});
+
+const MEDIA_KIND = v.union(
+  v.literal('image'),
+  v.literal('video'),
+  v.literal('audio'),
+  v.literal('document'),
+);
+
+/**
+ * El Experto envía un archivo (imagen / video / documento / audio) por WhatsApp.
+ * El front sube el archivo a Convex storage (`generateUploadUrl`) y pasa el
+ * `storageId`. Aquí se persiste el mensaje saliente y se agenda el envío por
+ * YCloud (imágenes/video/audio van por buffer subido a YCloud; los documentos
+ * por link público del storage).
+ */
+export const sendAdvisorMedia = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    storageId: v.id('_storage'),
+    kind: MEDIA_KIND,
+    filename: v.string(),
+    mimeType: v.string(),
+    size: v.optional(v.number()),
+    caption: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    { conversationId, storageId, kind, filename, mimeType, size, caption },
+  ) => {
+    const conversation = await ctx.db.get(conversationId);
+    if (!conversation) throw new Error('Conversacion no existe');
+    const url = await ctx.storage.getUrl(storageId);
+    if (!url) throw new Error('No se pudo obtener la URL del archivo');
+    const now = Date.now();
+    const cap = caption?.trim() || undefined;
+    const placeholder =
+      kind === 'image'
+        ? '[imagen]'
+        : kind === 'video'
+          ? '[video]'
+          : kind === 'audio'
+            ? '[nota de voz]'
+            : `[documento] ${filename}`;
+    const messageId = await ctx.db.insert('messages', {
+      conversationId,
+      sender: 'assistant',
+      content: cap ?? placeholder,
+      type: kind,
+      mediaUrl: url,
+      mediaFilename: filename,
+      mediaMime: mimeType,
+      mediaSize: size,
+      sentByUserId: ADVISOR_SENDER_ID,
+      createdAt: now,
+    });
+    // El Experto toma el control: el agente IA deja de responder este chat.
+    await ctx.db.patch(conversationId, {
+      status: 'human',
+      lastMessageAt: now,
+      aiManualOverride: false,
+    });
+    await ctx.scheduler.runAfter(0, internal.inbox.deliverAdvisorMedia, {
+      messageId,
+      conversationId,
+      storageId,
+      kind,
+      filename,
+      mimeType,
+      caption: cap,
+    });
+    return { messageId };
+  },
+});
+
+export const deliverAdvisorMedia = internalAction({
+  args: {
+    messageId: v.id('messages'),
+    conversationId: v.id('conversations'),
+    storageId: v.id('_storage'),
+    kind: MEDIA_KIND,
+    filename: v.string(),
+    mimeType: v.string(),
+    caption: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    { messageId, conversationId, storageId, kind, filename, mimeType, caption },
+  ): Promise<void> => {
+    const info = await ctx.runMutation(internal.inbox.getDeliveryInfo, {
+      messageId,
+      conversationId,
+    });
+    if (!info) return;
+    let wamid: string | undefined;
+    let failed = false;
+    try {
+      if (kind === 'document') {
+        const url = await ctx.storage.getUrl(storageId);
+        if (!url) throw new Error('sin URL de storage para el documento');
+        const sent = await sendDocumentToYcloud({
+          to: info.phone,
+          documentUrl: url,
+          filename,
+          caption,
+        });
+        wamid = sent.wamid;
+      } else {
+        const blob = await ctx.storage.get(storageId);
+        if (!blob) throw new Error('sin archivo en storage');
+        const buffer = new Uint8Array(await blob.arrayBuffer());
+        if (kind === 'image') {
+          const sent = await sendImageToYcloud({
+            to: info.phone,
+            imageBuffer: buffer,
+            mimeType,
+            filename,
+            caption,
+          });
+          wamid = sent.wamid;
+        } else if (kind === 'video') {
+          const sent = await sendVideoToYcloud({
+            to: info.phone,
+            videoBuffer: buffer,
+            mimeType,
+            filename,
+            caption,
+          });
+          wamid = sent.wamid;
+        } else {
+          const sent = await sendAudioToYcloud({
+            to: info.phone,
+            audioBuffer: buffer,
+            mimeType,
+            filename,
+          });
+          wamid = sent.wamid;
+        }
+      }
+    } catch (err) {
+      failed = true;
+      console.error('[inbox] fallo el envio de media del Experto', err);
     }
     await ctx.runMutation(internal.inbox.markDelivery, { messageId, wamid, failed });
   },

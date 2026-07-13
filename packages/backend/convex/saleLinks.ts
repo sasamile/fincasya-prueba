@@ -477,6 +477,28 @@ export const setCrUrl = internalMutation({
   },
 });
 
+/**
+ * Crea la reserva (booking) al aprobar el pago para que aparezca de inmediato en
+ * /admin/reservations. Requiere que el cliente ya haya llenado sus datos
+ * (clientData). Es idempotente: si la reserva ya existe, `provisionFromSaleLink`
+ * la reutiliza. No lanza: un fallo aquí (p. ej. disponibilidad) no debe impedir
+ * marcar el pago como validado; el CR/check-in la provisionarán después.
+ */
+async function provisionBookingOnPayment(
+  ctx: MutationCtx,
+  saleLinkId: Id<'saleLinks'>,
+): Promise<void> {
+  const link = await ctx.db.get(saleLinkId);
+  if (!link || link.bookingId || !link.clientData) return;
+  try {
+    (await ctx.runMutation(internal.bookings.provisionFromSaleLink, {
+      saleLinkId,
+    })) as ProvisionFromSaleLinkResult;
+  } catch {
+    /* la reserva se creará luego en CR/check-in */
+  }
+}
+
 export const validatePayment = internalMutation({
   args: {
     token: v.string(),
@@ -500,6 +522,8 @@ export const validatePayment = internalMutation({
       clientStep: 4,
       updatedAt: Date.now(),
     });
+    // Al aprobar el pago la reserva ya debe existir y verse en /admin/reservations.
+    await provisionBookingOnPayment(ctx, link._id);
     return { ok: true };
   },
 });
@@ -528,6 +552,8 @@ export const validatePaymentAdmin = mutation({
       clientStep: 4,
       updatedAt: Date.now(),
     });
+    // Al aprobar el pago la reserva ya debe existir y verse en /admin/reservations.
+    await provisionBookingOnPayment(ctx, link._id);
     return { ok: true };
   },
 });

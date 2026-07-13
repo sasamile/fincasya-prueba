@@ -19,6 +19,38 @@ export const getSeededRating = (seed: string) => {
 };
 
 /** Slug URL-safe desde un título (port de FincasYaWeb lib/utils). */
+export type FincaListingUrlInput = {
+  slug?: string | null;
+  title: string;
+  id?: string;
+  _id?: string;
+};
+
+export function fincaListingSlugSegment(finca: FincaListingUrlInput): string {
+  const raw = (
+    finca.slug?.trim() ||
+    slugify(finca.title || '') ||
+    finca.id ||
+    finca._id ||
+    ''
+  ).trim();
+  return encodeURIComponent(raw);
+}
+
+/** URL HTTPS canónica de la ficha pública (WhatsApp / OG). */
+export function absoluteFincaListingUrl(
+  finca: FincaListingUrlInput,
+  options?: { origin?: string; modo?: 'venta' },
+): string {
+  const env = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '');
+  const fromEnv =
+    env && !/localhost|127\.0\.0\.1/i.test(env) ? env : 'https://fincasya.com';
+  const origin = (options?.origin ?? fromEnv).replace(/\/$/, '');
+  const path = `/fincas/${fincaListingSlugSegment(finca)}`;
+  const query = options?.modo === 'venta' ? '?modo=venta' : '';
+  return `${origin}${path}${query}`;
+}
+
 export const slugify = (text: string) => {
   return text
     .toString()

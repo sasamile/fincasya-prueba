@@ -56,6 +56,7 @@ export const search = query({
         email: c.email ?? '',
         city: c.city ?? '',
         address: c.address ?? '',
+        fechaNacimiento: c.fechaNacimiento ?? '',
         crmType: c.crmType ?? 'lead',
         lastReservationAt: c.lastReservationAt ?? null,
       }));
@@ -94,8 +95,11 @@ export const verifiedGuests = query({
         celular: string;
         correo: string;
         city: string;
+        address: string;
+        fechaNacimiento: string;
         reference: string;
         propertyId: string | null;
+        userId: string | null;
         source: 'payment';
         lastVerifiedAt: number;
         lastVerifiedAmount: number;
@@ -123,9 +127,12 @@ export const verifiedGuests = query({
           cedula: b.cedula ?? '',
           celular: b.celular ?? '',
           correo: b.correo ?? '',
-          city: b.address ?? '',
+          city: b.city ?? '',
+          address: b.address ?? '',
+          fechaNacimiento: '',
           reference: b.reference ?? '',
           propertyId: b.propertyId ? String(b.propertyId) : null,
+          userId: b.userId ? String(b.userId) : null,
           source: 'payment',
           lastVerifiedAt: when,
           lastVerifiedAmount: b.precioTotal ?? 0,
@@ -148,13 +155,31 @@ export const verifiedGuests = query({
             propertyTitle = prop?.title ?? '';
           }
         }
+
+        let fechaNacimiento = r.fechaNacimiento;
+        let address = r.address;
+        let city = r.city;
+        if (r.userId) {
+          const contactId = ctx.db.normalizeId('contacts', r.userId);
+          if (contactId) {
+            const contact = await ctx.db.get(contactId);
+            if (contact) {
+              fechaNacimiento = contact.fechaNacimiento ?? fechaNacimiento;
+              address = contact.address ?? address;
+              city = contact.city ?? city;
+            }
+          }
+        }
+
         return {
           id: r.id,
           nombre: r.nombre,
           cedula: r.cedula,
           celular: r.celular,
           correo: r.correo,
-          city: r.city,
+          city,
+          address,
+          fechaNacimiento,
           reference: r.reference,
           propertyTitle,
           source: r.source,

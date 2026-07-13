@@ -21,7 +21,6 @@ import {
 import { useState } from 'react';
 import { Navbar } from '@/features/landing/components/Navbar';
 import { Footer } from '@/features/landing/components/Footer';
-import { WhatsappFab } from '@/features/landing/components/WhatsappFab';
 import { OpenChatButton } from '@/features/landing/components/OpenChatButton';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -31,21 +30,20 @@ import { FincaDetailSkeleton } from './components/FincaDetailSkeleton';
 import { FincaMap } from './components/FincaMap';
 import { ShareButton } from './components/ShareButton';
 import { FincaContactCard } from './components/FincaContactCard';
+import { MARKETPLACE_WHATSAPP_E164 } from '@/features/marketplace/lib/sale-whatsapp';
 
-const WHATSAPP_NUMBER = '573157773937';
+import { openChatAssistant } from '@/features/landing/components/ChatAssistantWidget';
 
 function openChat() {
-  window.open(
-    `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hola! Tengo preguntas sobre una finca')}`,
-    '_blank',
-  );
+  openChatAssistant();
 }
 
 interface FincaDetailPageProps {
   slug: string;
+  modoVenta?: boolean;
 }
 
-export function FincaDetailPage({ slug }: FincaDetailPageProps) {
+export function FincaDetailPage({ slug, modoVenta }: FincaDetailPageProps) {
   const finca = useQuery(api.landing.getPropertyBySlug, { slug });
   const [isMuted, setIsMuted] = useState(true);
 
@@ -66,6 +64,9 @@ export function FincaDetailPage({ slug }: FincaDetailPageProps) {
   }
 
   const isFavorite = finca.isFavorite ?? (finca.rating || 0) >= 4.8;
+  const isSaleMode = Boolean(modoVenta || finca.marketplaceForSale);
+  const displayDescription =
+    isSaleMode && finca.saleDescription ? finca.saleDescription : finca.description;
 
   const featuresByZone = finca.features.reduce<Record<string, typeof finca.features>>(
     (acc, feature) => {
@@ -170,11 +171,11 @@ export function FincaDetailPage({ slug }: FincaDetailPageProps) {
                     </div>
                   )}
 
-                  {finca.description && (
+                  {displayDescription ? (
                     <p className="text-muted-foreground text-sm leading-relaxed whitespace-pre-line mb-8 max-md:px-3">
-                      {finca.description}
+                      {displayDescription}
                     </p>
-                  )}
+                  ) : null}
 
                   <Separator className="my-8" />
 
@@ -235,7 +236,7 @@ export function FincaDetailPage({ slug }: FincaDetailPageProps) {
                         Siempre debes confirmar la disponibilidad con un experto, comunícate con
                         nosotros vía{' '}
                         <a
-                          href={`https://wa.me/${WHATSAPP_NUMBER}`}
+                          href={`https://wa.me/${MARKETPLACE_WHATSAPP_E164}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-700 font-bold underline cursor-pointer"
@@ -299,7 +300,7 @@ export function FincaDetailPage({ slug }: FincaDetailPageProps) {
                 </div>
 
                 <div className="lg:col-span-1 max-md:px-3 md:ml-4">
-                  <FincaContactCard finca={finca} />
+                  <FincaContactCard finca={finca} modoVenta={isSaleMode} />
                 </div>
               </div>
 
@@ -317,7 +318,6 @@ export function FincaDetailPage({ slug }: FincaDetailPageProps) {
           </section>
         </div>
         <Footer />
-        <WhatsappFab />
       </main>
     </div>
   );

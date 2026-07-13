@@ -11,8 +11,15 @@ const TOTAL_FOLLOWERS = '+200K';
 const REVIEWS_AVG = '4.7';
 const REVIEWS_COUNT = '147';
 
+const GOOGLE_REVIEWS_URL =
+  'https://www.google.com/travel/search?q=fincas%20ya%20rese%C3%B1as&g2lb=4965990%2C72248050%2C72248051%2C72471280%2C72560029%2C72573224%2C72647020%2C72686036%2C72803964%2C72882230%2C72958624%2C73059275%2C73064764%2C121584149&hl=es-419&gl=co&cs=1&ssta=1&ts=CAEaKwopEicyJTB4OGUzZTMxMDAwNGVmOGYxYjoweGNhYmUzY2QwODA2MTJmY2E&qs=CAEyFENnc0l5dC1FZzRpYWo5X0tBUkFCOAI&ap=ugEHcmV2aWV3cw&ictx=111&ved=0CAAQ5JsGahcKEwiYtfnXmNCVAxUAAAAAHQAAAAAQCQ';
+
 export function StatsSection() {
   const { setCategory } = useHomeStore();
+
+  const openGoogleReviews = () => {
+    window.open(GOOGLE_REVIEWS_URL, '_blank', 'noopener,noreferrer');
+  };
 
   const handleStatClick = (id: number) => {
     switch (id) {
@@ -23,13 +30,8 @@ export function StatsSection() {
         }, 100);
         break;
       case 2:
-        document.getElementById('reseñas')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        break;
       case 5:
-        window.open(
-          'https://www.google.com/travel/search?q=fincas%20ya%20rese%C3%B1as&hl=es-419&gl=co&ap=ugEHcmV2aWV3cw',
-          '_blank',
-        );
+        openGoogleReviews();
         break;
       case 3:
       case 4:

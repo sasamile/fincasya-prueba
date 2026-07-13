@@ -78,6 +78,7 @@ import type * as notificationSettings from "../notificationSettings.js";
 import type * as paymentPortal from "../paymentPortal.js";
 import type * as paymentReceipts from "../paymentReceipts.js";
 import type * as permissions from "../permissions.js";
+import type * as propertyOwners from "../propertyOwners.js";
 import type * as quickReplies from "../quickReplies.js";
 import type * as quienes_somos from "../quienes_somos.js";
 import type * as saleLinks from "../saleLinks.js";
@@ -162,6 +163,7 @@ declare const fullApi: ApiFromModules<{
   paymentPortal: typeof paymentPortal;
   paymentReceipts: typeof paymentReceipts;
   permissions: typeof permissions;
+  propertyOwners: typeof propertyOwners;
   quickReplies: typeof quickReplies;
   quienes_somos: typeof quienes_somos;
   saleLinks: typeof saleLinks;

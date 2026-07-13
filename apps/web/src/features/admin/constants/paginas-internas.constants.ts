@@ -432,3 +432,12 @@ export const CANCELACION_DEFAULT = {
   heroSubtitle: "Reprogramación y Reembolsos",
   content: `<p>Contenido de política de cancelación por definir. Edite desde el panel de administración.</p>`,
 };
+
+// ============ HABEAS DATA ============
+export const HABEAS_DATA_DEFAULT = {
+  heroTitle: "Política de Habeas Data",
+  heroSubtitle:
+    "Tratamiento de datos personales conforme a la Ley 1581 de 2012 y el Decreto 1377 de 2013",
+  content: `<p>En FincasYa.com respetamos tu privacidad y protegemos tus datos personales. Esta política describe cómo recopilamos, usamos y protegemos tu información cuando utilizas nuestros servicios.</p>
+<p>Para ejercer tus derechos de acceso, rectificación, actualización o supresión, escríbenos a <strong>info@fincasya.com</strong>.</p>`,
+};

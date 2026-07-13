@@ -6,6 +6,7 @@ import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import {
   Bot,
+  Download,
   FileText,
   Image,
   Mic,
@@ -28,6 +29,7 @@ import { messagesCache, withCache } from '@/lib/queryCache';
 import { formatCop, formatDay, formatTime } from '@/lib/format';
 import { Avatar, BotToggle, DeliveryTick } from '@/features/inbox/components/primitives';
 import { AttachMenu } from '@/features/inbox/components/AttachMenu';
+import { PdfThumbnail } from '@/features/inbox/components/PdfThumbnail';
 import { AudioRecorder } from '@/features/inbox/components/AudioRecorder';
 import { CatalogModal } from '@/features/inbox/components/CatalogModal';
 import { ContactInfo } from '@/features/inbox/components/ContactInfo';
@@ -37,6 +39,73 @@ import { LabelPicker } from '@/features/inbox/components/LabelPicker';
 import { QuickReplyManager } from '@/features/inbox/components/QuickReplyManager';
 import { SharedMedia } from '@/features/inbox/components/SharedMedia';
 import type { ConversationRow, Message } from '@/features/inbox/types';
+
+/** Formatea bytes a "240 KB" / "1.4 MB" para la tarjeta de documento. */
+function formatBytes(n?: number | null): string {
+  if (!n || n <= 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Extensión del archivo en minúscula (pdf, docx, xlsx…) para la tarjeta. */
+function docExt(filename?: string | null, mime?: string | null): string {
+  const fromName =
+    filename && filename.includes('.') ? filename.split('.').pop() : undefined;
+  return (fromName ?? mime?.split('/')[1] ?? 'archivo').toLowerCase();
+}
+
+/** Línea "354 KB • pdf" (tamaño + extensión) para la tarjeta de documento. */
+function formatDocMeta(
+  filename?: string | null,
+  mime?: string | null,
+  size?: number | null,
+): string {
+  const ext = docExt(filename, mime);
+  const sz = formatBytes(size);
+  return sz ? `${sz} • ${ext}` : ext;
+}
+
+/** Ícono de documento coloreado por tipo con esquina doblada, réplica de WhatsApp. */
+function DocThumbIcon({
+  filename,
+  mime,
+}: {
+  filename?: string | null;
+  mime?: string | null;
+}) {
+  const ext = docExt(filename, mime);
+  const color =
+    ext === 'pdf'
+      ? '#f0392b'
+      : /^docx?$|rtf/.test(ext)
+        ? '#2b7fff'
+        : /^xlsx?$|csv/.test(ext)
+          ? '#12a150'
+          : /^pptx?$/.test(ext)
+            ? '#f79009'
+            : '#667085';
+  const label = ext.slice(0, 4).toUpperCase();
+  return (
+    <svg width="34" height="40" viewBox="0 0 34 40" className="shrink-0" aria-hidden>
+      <path
+        d="M4 1h18l11 11v25a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2z"
+        fill={color}
+      />
+      <path d="M22 1l11 11h-9a2 2 0 0 1-2-2z" fill="rgba(0,0,0,0.18)" />
+      <text
+        x="17.5"
+        y="31"
+        textAnchor="middle"
+        fontSize="7.5"
+        fontWeight="700"
+        fill="#fff"
+      >
+        {label}
+      </text>
+    </svg>
+  );
+}
 
 /** Tarjeta de ficha de catálogo (imagen + precio + Ver), réplica de WhatsApp. */
 function ProductCard({
@@ -383,14 +452,37 @@ function MessageBubble({
               <AudioMessage message={message} contactName={contactName} />
             )}
             {message.type === 'document' && message.mediaUrl && (
-              <a
-                href={message.mediaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mb-1 flex items-center gap-1 text-[12px] text-[#53bdeb] underline"
-              >
-                <Paperclip className="h-3 w-3" /> documento
-              </a>
+              <div className="mb-1 overflow-hidden rounded-lg bg-black/[0.06] dark:bg-white/[0.06]">
+                {(message.mediaMime?.includes('pdf') ||
+                  /\.pdf$/i.test(message.mediaFilename ?? '')) && (
+                  <PdfThumbnail url={message.mediaUrl} />
+                )}
+                <a
+                  href={message.mediaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download={message.mediaFilename ?? undefined}
+                  className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+                >
+                  <DocThumbIcon
+                    filename={message.mediaFilename}
+                    mime={message.mediaMime}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-medium">
+                      {message.mediaFilename ?? 'Documento'}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] opacity-60">
+                      {formatDocMeta(
+                        message.mediaFilename,
+                        message.mediaMime,
+                        message.mediaSize,
+                      )}
+                    </span>
+                  </span>
+                  <Download className="h-4 w-4 shrink-0 opacity-60" />
+                </a>
+              </div>
             )}
             {/* El audio muestra su propia transcripción; el placeholder
                 "[nota de voz]"/"[documento]" no se muestra como texto. */}
@@ -436,6 +528,8 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
   });
   const sendMessage = useMutation(api.inbox.sendAdvisorMessage);
   const setStatus = useMutation(api.inbox.setConversationStatus);
+  const generateUploadUrl = useMutation(api.inbox.generateUploadUrl);
+  const sendMedia = useMutation(api.inbox.sendAdvisorMedia);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -452,6 +546,11 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
   const [searchQuery, setSearchQuery] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const fileDocRef = useRef<HTMLInputElement>(null);
+  const filePhotoRef = useRef<HTMLInputElement>(null);
+  const fileCameraRef = useRef<HTMLInputElement>(null);
+  const fileAudioRef = useRef<HTMLInputElement>(null);
 
   const quickReplies = useQuery(api.quickReplies.listQuickReplies);
   // Sugerencias de respuesta rápida cuando el borrador empieza con "/".
@@ -471,6 +570,52 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
     return (messages ?? []).filter((m) => m.content.toLowerCase().includes(searchTerm)).length;
   }, [messages, searchTerm]);
 
+  /** Sube el archivo a Convex storage y lo envía por WhatsApp (YCloud). */
+  async function uploadAndSend(
+    file: File,
+    kind: 'image' | 'video' | 'audio' | 'document',
+  ) {
+    if (uploadingMedia) return;
+    setUploadingMedia(true);
+    try {
+      const postUrl = await generateUploadUrl();
+      const res = await fetch(postUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      });
+      if (!res.ok) throw new Error('upload falló');
+      const { storageId } = (await res.json()) as { storageId: string };
+      await sendMedia({
+        conversationId: conv.conversationId,
+        storageId: storageId as Id<'_storage'>,
+        kind,
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        size: file.size,
+      });
+    } catch {
+      setAttachNotice('No se pudo enviar el archivo');
+      setTimeout(() => setAttachNotice(null), 2500);
+    } finally {
+      setUploadingMedia(false);
+    }
+  }
+
+  /** Handler de <input type="file">: normaliza el tipo y dispara el envío. */
+  function handleFilePicked(
+    e: React.ChangeEvent<HTMLInputElement>,
+    kind: 'image' | 'audio' | 'document',
+  ) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite volver a elegir el mismo archivo
+    if (!file) return;
+    // "Fotos y videos" acepta ambos: distingue por el MIME real.
+    const realKind: 'image' | 'video' | 'audio' | 'document' =
+      kind === 'image' && file.type.startsWith('video/') ? 'video' : kind;
+    void uploadAndSend(file, realKind);
+  }
+
   function handleAttachSelect(id: string) {
     setShowAttach(false);
     if (id === 'catalogo') {
@@ -481,11 +626,23 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
       setShowQuickReplyMgr(true);
       return;
     }
+    if (id === 'documento') {
+      fileDocRef.current?.click();
+      return;
+    }
+    if (id === 'fotos') {
+      filePhotoRef.current?.click();
+      return;
+    }
+    if (id === 'camara') {
+      fileCameraRef.current?.click();
+      return;
+    }
+    if (id === 'audio') {
+      fileAudioRef.current?.click();
+      return;
+    }
     const labels: Record<string, string> = {
-      documento: 'Documento',
-      fotos: 'Fotos y videos',
-      camara: 'Cámara',
-      audio: 'Audio',
       contacto: 'Contacto',
       encuesta: 'Encuesta',
       evento: 'Evento',
@@ -741,7 +898,18 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
           {recording ? (
             <AudioRecorder
               onCancel={() => setRecording(false)}
-              onSend={() => setRecording(false)}
+              onSend={(blob, mime) => {
+                setRecording(false);
+                const ext = mime.includes('mp4')
+                  ? 'm4a'
+                  : mime.includes('ogg')
+                    ? 'ogg'
+                    : 'webm';
+                const file = new File([blob], `nota-de-voz.${ext}`, {
+                  type: mime,
+                });
+                void uploadAndSend(file, 'audio');
+              }}
             />
           ) : (
             <div className="wa-composer-pill">
@@ -761,6 +929,35 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
                 {showAttach && (
                   <AttachMenu onSelect={handleAttachSelect} onClose={() => setShowAttach(false)} />
                 )}
+                {/* Inputs ocultos para adjuntar archivos (documento/fotos/cámara/audio). */}
+                <input
+                  ref={fileDocRef}
+                  type="file"
+                  hidden
+                  onChange={(e) => handleFilePicked(e, 'document')}
+                />
+                <input
+                  ref={filePhotoRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  hidden
+                  onChange={(e) => handleFilePicked(e, 'image')}
+                />
+                <input
+                  ref={fileCameraRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  hidden
+                  onChange={(e) => handleFilePicked(e, 'image')}
+                />
+                <input
+                  ref={fileAudioRef}
+                  type="file"
+                  accept="audio/*"
+                  hidden
+                  onChange={(e) => handleFilePicked(e, 'audio')}
+                />
               </div>
               <div className="relative">
                 <button

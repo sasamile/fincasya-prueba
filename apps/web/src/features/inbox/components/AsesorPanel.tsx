@@ -744,7 +744,9 @@ export function AsesorPanel({
         {tool === 'venta' && (
           <VentaTool conversation={conversation} fincas={fincasForTools} />
         )}
-        {tool === 'checkin' && <CheckinTool onOpenChat={onOpenChat} />}
+        {tool === 'checkin' && (
+          <CheckinTool conversation={conversation} onOpenChat={onOpenChat} />
+        )}
       </div>
     </aside>
   );

@@ -128,6 +128,48 @@ function bookingsForDay(bookings: CalendarBooking[], day: Date): CalendarBooking
     .sort((a, b) => a.fechaEntrada - b.fechaEntrada);
 }
 
+export type DayMovementFilter = "all" | "checkin" | "checkout" | "ongoing";
+
+/** Clasifica reservas activas en un día: ingresan, salen o en curso. */
+export function groupBookingsByDayMovement(
+  bookings: CalendarBooking[],
+  day: Date,
+) {
+  const d = startOfDay(day);
+  const arrivals: CalendarBooking[] = [];
+  const departures: CalendarBooking[] = [];
+  const ongoing: CalendarBooking[] = [];
+
+  for (const b of bookings) {
+    if (!occupiesDay(b, d)) continue;
+    const inDay = startOfDay(new Date(b.fechaEntrada));
+    const outDay = startOfDay(new Date(b.fechaSalida));
+    if (isSameDay(inDay, d)) arrivals.push(b);
+    else if (isSameDay(outDay, d)) departures.push(b);
+    else if (inDay < d && outDay > d) ongoing.push(b);
+  }
+
+  const byName = (a: CalendarBooking, b: CalendarBooking) =>
+    (a.nombreCompleto || "").localeCompare(b.nombreCompleto || "", "es");
+
+  return {
+    arrivals: arrivals.sort(byName),
+    departures: departures.sort(byName),
+    ongoing: ongoing.sort(byName),
+    all: bookingsForDay(bookings, d),
+  };
+}
+
+function filterDayBookings(
+  groups: ReturnType<typeof groupBookingsByDayMovement>,
+  filter: DayMovementFilter,
+): CalendarBooking[] {
+  if (filter === "checkin") return groups.arrivals;
+  if (filter === "checkout") return groups.departures;
+  if (filter === "ongoing") return groups.ongoing;
+  return groups.all;
+}
+
 /**
  * Segmento de una reserva dentro de una semana (fila de 7 días). Calcula en qué
  * columnas empieza/termina la barra dentro de esa semana y en qué "carril" va
@@ -479,11 +521,33 @@ function WeekView({ bookings, currentDate, onSelectBooking, onNavigate, onViewCh
 
 // ─── Vista Día ───
 
+const DAY_MOVEMENT_FILTERS: {
+  id: DayMovementFilter;
+  label: string;
+  countKey: keyof ReturnType<typeof groupBookingsByDayMovement>;
+}[] = [
+  { id: "all", label: "Todas", countKey: "all" },
+  { id: "checkin", label: "Entran", countKey: "arrivals" },
+  { id: "checkout", label: "Salen", countKey: "departures" },
+  { id: "ongoing", label: "En curso", countKey: "ongoing" },
+];
+
 function DayView({ bookings, currentDate, onSelectBooking }: Props) {
   const openMenu = useContext(MenuContext);
-  const dayBookings = useMemo(
-    () => bookingsForDay(bookings, currentDate),
+  const [movementFilter, setMovementFilter] =
+    useState<DayMovementFilter>("all");
+
+  useEffect(() => {
+    setMovementFilter("all");
+  }, [currentDate]);
+
+  const groups = useMemo(
+    () => groupBookingsByDayMovement(bookings, currentDate),
     [bookings, currentDate],
+  );
+  const dayBookings = useMemo(
+    () => filterDayBookings(groups, movementFilter),
+    [groups, movementFilter],
   );
   const fmtMoney = (n?: number) =>
     typeof n === "number"
@@ -496,16 +560,64 @@ function DayView({ bookings, currentDate, onSelectBooking }: Props) {
 
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-background">
-      <div className="border-b border-border bg-muted/30 px-4 py-3">
+      <div className="border-b border-border bg-muted/30 px-4 py-3 space-y-3">
         <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
           {dayBookings.length}{" "}
-          {dayBookings.length === 1 ? "reserva activa" : "reservas activas"}
+          {dayBookings.length === 1 ? "reserva" : "reservas"}
+          {movementFilter === "all"
+            ? " activas"
+            : movementFilter === "checkin"
+              ? " que entran"
+              : movementFilter === "checkout"
+                ? " que salen"
+                : " en curso"}
         </p>
+        <div className="flex flex-wrap gap-2">
+          {DAY_MOVEMENT_FILTERS.map((item) => {
+            const count = groups[item.countKey].length;
+            const active = movementFilter === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setMovementFilter(item.id)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors",
+                  active
+                    ? item.id === "checkin"
+                      ? "border-emerald-300 bg-emerald-100 text-emerald-900"
+                      : item.id === "checkout"
+                        ? "border-red-300 bg-red-100 text-red-900"
+                        : item.id === "ongoing"
+                          ? "border-blue-300 bg-blue-100 text-blue-900"
+                          : "border-primary/30 bg-primary/10 text-primary"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted/60",
+                )}
+              >
+                {item.label}
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.5 text-[10px]",
+                    active ? "bg-white/70" : "bg-muted",
+                  )}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       {dayBookings.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
           <p className="text-sm font-semibold text-muted-foreground">
-            Sin reservas este día
+            {movementFilter === "all"
+              ? "Sin reservas este día"
+              : movementFilter === "checkin"
+                ? "Nadie entra este día"
+                : movementFilter === "checkout"
+                  ? "Nadie sale este día"
+                  : "Sin estadías en curso este día"}
           </p>
         </div>
       ) : (

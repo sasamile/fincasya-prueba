@@ -44,10 +44,20 @@ export async function login(credentials: LoginCredentials): Promise<AuthResponse
   if (error) throw new Error(error.message ?? 'Credenciales incorrectas');
   const user = data?.user;
   if (!user) throw new Error('No se pudo iniciar sesión');
-  return { user: mapUser(user as Record<string, unknown>) };
+  const mapped = mapUser(user as Record<string, unknown>);
+  await ensureSessionLogged(mapped);
+  return { user: mapped };
 }
 
 export async function logout(): Promise<void> {
+  const session = await getSession();
+  if (session?.id) {
+    try {
+      await recordSessionLogout(session.id);
+    } catch {
+      // No bloquear cierre de sesión si falla el log
+    }
+  }
   await authClient.signOut();
 }
 
@@ -110,4 +120,35 @@ export async function getSessionLogs(params?: {
     userId: params?.userId,
   });
   return rows as SessionLogEntry[];
+}
+
+/** Registra inicio de sesión en el historial de accesos del panel. */
+export async function recordSessionLogin(user: AuthUser): Promise<void> {
+  const { api } = await import('@fincasya/backend/convex/_generated/api');
+  const { convex } = await import('@/lib/convex-client');
+  await convex.mutation(api.adminSessionLogs.recordLogin, {
+    userId: user.id,
+    userEmail: user.email,
+    userName: user.name || undefined,
+    role: user.role,
+    userAgent:
+      typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+  });
+}
+
+/** Cierra la sesión abierta más reciente del usuario en el historial. */
+export async function recordSessionLogout(userId: string): Promise<void> {
+  const { api } = await import('@fincasya/backend/convex/_generated/api');
+  const { convex } = await import('@/lib/convex-client');
+  await convex.mutation(api.adminSessionLogs.recordLogout, { userId });
+}
+
+/**
+ * Evita duplicar registros "En línea" al recargar el panel: solo crea un log
+ * si el usuario no tiene ya una sesión abierta en Convex.
+ */
+export async function ensureSessionLogged(user: AuthUser): Promise<void> {
+  const logs = await getSessionLogs({ userId: user.id, limit: 5 });
+  if (logs.some((row) => row.isActive)) return;
+  await recordSessionLogin(user);
 }

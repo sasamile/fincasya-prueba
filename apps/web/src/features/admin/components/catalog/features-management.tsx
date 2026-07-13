@@ -436,7 +436,7 @@ export function FeaturesManagement() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-muted/30 border-b border-border">
+                      <tr className="bg-muted/20 border-b border-border/40">
                         <th className="px-6 py-5 text-[10px] font-black text-muted-foreground uppercase tracking-widest w-16">
                           Sel.
                         </th>

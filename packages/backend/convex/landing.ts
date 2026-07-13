@@ -51,6 +51,8 @@ export const listProperties = query({
         isFavorite: p.isFavorite ?? false,
         catalogFilterTags: p.catalogFilterTags ?? null,
         allowsEventsContent: p.allowsEventsContent ?? false,
+        marketplaceForSale: p.marketplaceForSale ?? false,
+        salePriceCop: p.salePriceCop ?? null,
         features: featuresByProperty.get(String(p._id)) ?? [],
       };
     });
@@ -110,6 +112,10 @@ export const getPropertyBySlug = query({
       lat: property.lat,
       lng: property.lng,
       zoneOrder: property.zoneOrder ?? [],
+      marketplaceForSale: property.marketplaceForSale ?? false,
+      salePriceCop: property.salePriceCop ?? null,
+      saleSquareMeters: property.saleSquareMeters ?? null,
+      saleDescription: property.saleDescription ?? null,
       features: features.map((f) => {
         const icon = f.iconId ? iconsById.get(f.iconId) : undefined;
         return {
@@ -121,5 +127,46 @@ export const getPropertyBySlug = query({
         };
       }),
     };
+  },
+});
+
+/** Fincas publicadas en /marketplace (modo venta). */
+export const listMarketplaceProperties = query({
+  args: {},
+  handler: async (ctx) => {
+    const properties = await ctx.db.query('properties').collect();
+    const forSale = properties.filter(
+      (p) => p.visible !== false && p.marketplaceForSale === true,
+    );
+
+    const allImages = await ctx.db.query('propertyImages').collect();
+    const imagesByProperty = new Map<string, { url: string; order: number }[]>();
+    for (const img of allImages) {
+      const key = String(img.propertyId);
+      if (!imagesByProperty.has(key)) imagesByProperty.set(key, []);
+      imagesByProperty.get(key)!.push({ url: img.url, order: img.order ?? 0 });
+    }
+
+    return forSale.map((p) => {
+      const imgs = (imagesByProperty.get(String(p._id)) ?? [])
+        .sort((a, b) => a.order - b.order)
+        .map((i) => i.url);
+      return {
+        id: String(p._id),
+        title: p.title,
+        description: p.saleDescription ?? p.description,
+        location: p.location,
+        capacity: p.capacity,
+        rating: p.rating ?? null,
+        reviewsCount: p.reviewsCount ?? 0,
+        priceBase: p.salePriceCop ?? p.priceBase,
+        priceOriginal: p.priceOriginal ?? null,
+        code: p.code ?? null,
+        slug: p.slug ?? null,
+        images: imgs,
+        saleSquareMeters: p.saleSquareMeters ?? null,
+        marketplaceForSale: true,
+      };
+    });
   },
 });

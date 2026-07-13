@@ -97,7 +97,7 @@ export function StepEnRevision({ data, onViewStep }: Props) {
         </div>
       </div>
 
-      <div className="rounded-xl border bg-card p-4 space-y-3 text-sm">
+      <div className="rounded-xl bg-card p-4 space-y-3 text-sm shadow-sm">
         <div className="flex items-start gap-3">
           <ShieldCheck className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
           <p className="text-muted-foreground">
@@ -130,7 +130,7 @@ export function StepEnRevision({ data, onViewStep }: Props) {
       </div>
 
       {data.clientData?.email ? (
-        <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+        <div className="rounded-xl bg-muted/20 p-4 text-sm text-muted-foreground shadow-sm">
           <div className="flex items-start gap-3">
             <Mail className="w-4 h-4 mt-0.5 shrink-0" />
             <p>
@@ -142,7 +142,7 @@ export function StepEnRevision({ data, onViewStep }: Props) {
         </div>
       ) : null}
 
-      <div className="rounded-xl border bg-card p-4 space-y-3">
+      <div className="rounded-xl bg-card p-4 space-y-3 shadow-sm">
         <p className="text-sm font-semibold flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-primary" />
           ¿Qué sigue?
@@ -166,7 +166,7 @@ export function StepEnRevision({ data, onViewStep }: Props) {
       </div>
 
       {(data.clientDataFilled || data.clientName) && (
-        <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+        <div className="rounded-xl bg-muted/30 p-4 space-y-3 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
             Datos enviados
           </p>

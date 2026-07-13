@@ -563,7 +563,9 @@ export function UserManagement({
                   Crear Usuario
                 </DialogTitle>
                 <DialogDescription className="text-white/80 font-medium relative z-10">
-                  Completa los datos para crear un nuevo acceso al sistema.
+                  {activeTab === "propietarios"
+                    ? "Cuenta para el dueño de una finca. No entra al panel admin; usa su portal de anfitrión."
+                    : "Completa los datos para crear un nuevo acceso al sistema."}
                 </DialogDescription>
               </DialogHeader>
             </div>
@@ -637,9 +639,6 @@ export function UserManagement({
                         </option>
                         <option value="vendedor" className="bg-background">
                           Vendedor
-                        </option>
-                        <option value="propietario" className="bg-background">
-                          Propietario
                         </option>
                       </select>
                       <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted-foreground">
@@ -792,9 +791,6 @@ export function UserManagement({
                         </option>
                         <option value="vendedor" className="bg-background">
                           Vendedor
-                        </option>
-                        <option value="propietario" className="bg-background">
-                          Propietario
                         </option>
                       </select>
                       <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted-foreground">

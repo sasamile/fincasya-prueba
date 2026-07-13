@@ -32,7 +32,7 @@ function VentaAccountCard({ account }: { account: BankAccount }) {
 
   if (isBreb) {
     return (
-      <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="overflow-hidden rounded-2xl bg-card shadow-sm">
         <div className="flex flex-wrap items-center gap-4 p-4 sm:flex-nowrap">
           <BankLogoBadge bankName={account.bankName || "Bre-B"} />
           <div className="min-w-0 flex-1">
@@ -74,7 +74,7 @@ function VentaAccountCard({ account }: { account: BankAccount }) {
   if (isQrOnly) {
     return (
       <div className="space-y-3">
-        <div className="flex items-center gap-4 overflow-hidden rounded-2xl border bg-card p-4 shadow-sm">
+        <div className="flex items-center gap-4 overflow-hidden rounded-2xl bg-card p-4 shadow-sm">
           <BankLogoBadge bankName={account.bankName} />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold">{account.bankName}</p>
@@ -102,7 +102,7 @@ function VentaAccountCard({ account }: { account: BankAccount }) {
 
   return (
     <div className="space-y-3">
-      <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="overflow-hidden rounded-2xl bg-card shadow-sm">
         <div className="flex flex-wrap items-center gap-4 p-4 sm:flex-nowrap">
           <BankLogoBadge bankName={account.bankName} />
           <div className="min-w-0 flex-1">
@@ -164,7 +164,7 @@ export function VentaBankAccounts({
   if (accounts.length === 0) return null;
 
   return (
-    <div className="rounded-xl border bg-card p-4 space-y-3">
+    <div className="rounded-xl bg-card p-4 space-y-3 shadow-sm">
       <div className="flex items-center gap-2 text-sm font-semibold">
         <Banknote className="h-4 w-4 text-primary" />
         Cuentas para el pago

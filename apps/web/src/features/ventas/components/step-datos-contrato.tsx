@@ -819,7 +819,7 @@ export function StepDatosContrato({
           </p>
         </div>
 
-        <div className="rounded-xl border bg-card p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+        <div className="rounded-xl bg-card p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm shadow-sm">
           <div>
             <p className="text-muted-foreground text-xs">Nombre</p>
             <p className="font-medium">{c?.nombre ?? data.clientName ?? "—"}</p>
@@ -1208,7 +1208,7 @@ export function StepDatosContrato({
                 {pendingFiles.map((pending, index) => (
                   <div
                     key={`${pending.name}-${index}`}
-                    className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-sm"
+                    className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2 text-sm shadow-sm"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
