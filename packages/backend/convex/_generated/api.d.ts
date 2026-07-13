@@ -14,6 +14,7 @@ import type * as adminContractSettings from "../adminContractSettings.js";
 import type * as adminContractSnapshots from "../adminContractSnapshots.js";
 import type * as adminProperties from "../adminProperties.js";
 import type * as adminSessionLogs from "../adminSessionLogs.js";
+import type * as advisorDocuments from "../advisorDocuments.js";
 import type * as agent from "../agent.js";
 import type * as agentSettings from "../agentSettings.js";
 import type * as auth from "../auth.js";
@@ -96,6 +97,7 @@ declare const fullApi: ApiFromModules<{
   adminContractSnapshots: typeof adminContractSnapshots;
   adminProperties: typeof adminProperties;
   adminSessionLogs: typeof adminSessionLogs;
+  advisorDocuments: typeof advisorDocuments;
   agent: typeof agent;
   agentSettings: typeof agentSettings;
   auth: typeof auth;

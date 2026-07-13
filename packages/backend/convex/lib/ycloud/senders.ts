@@ -479,3 +479,39 @@ export async function sendCatalogToYcloud(args: {
 
   return rows;
 }
+
+/** Envía un documento (PDF, etc.) por link público (S3). */
+export async function sendDocumentToYcloud(args: {
+  to: string;
+  documentUrl: string;
+  filename: string;
+  caption?: string;
+}): Promise<{ wamid?: string; status?: string }> {
+  const { apiKey, wabaNumber } = requireYcloudEnv();
+
+  const body: Record<string, unknown> = {
+    from: wabaNumber,
+    to: args.to,
+    type: "document",
+    document: {
+      link: args.documentUrl,
+      filename: args.filename,
+      ...(args.caption?.trim() ? { caption: args.caption.trim() } : {}),
+    },
+  };
+
+  const res = await fetch(SEND_DIRECTLY, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-API-Key": apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+  const textRes = await res.text();
+  if (!res.ok) {
+    throw new Error(`YCloud document send failed: ${res.status}: ${textRes}`);
+  }
+  const parsed = textRes ? JSON.parse(textRes) : {};
+  return { wamid: wamidFromYcloudSendResponse(parsed) };
+}

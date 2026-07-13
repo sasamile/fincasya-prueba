@@ -7,8 +7,9 @@
  * editado (html-to-pdf).
  */
 import { useMemo, useRef, useState } from 'react';
-import { useQuery } from 'convex/react';
+import { useAction, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
+import type { ConversationRow } from '@/features/inbox/types';
 import { toast } from 'sonner';
 import { FileText, Loader2, Send, X } from 'lucide-react';
 import Image from 'next/image';
@@ -64,12 +65,14 @@ export function ContractPreviewModal({
   draft,
   settings,
   selectedBankIds,
+  conversation,
   onClose,
 }: {
   draft: PreviewDraft;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   settings: any;
   selectedBankIds: string[];
+  conversation: ConversationRow | null;
   onClose: () => void;
 }) {
   const finca = useQuery(api.adminProperties.getById, { id: draft.fincaId }) as
@@ -84,6 +87,8 @@ export function ContractPreviewModal({
     | undefined;
   const rootRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+  const sendDocument = useAction(api.advisorDocuments.sendDocumentToConversation);
 
   const html = useMemo(() => {
     if (!finca) return '';
@@ -152,28 +157,32 @@ export function ContractPreviewModal({
     );
   }, [finca, draft, settings, selectedBankIds]);
 
-  async function handleDownload() {
+  const pdfName = `contrato-${draft.contractCode || 'fincasya'}.pdf`;
+
+  /** PDF del HTML tal como quedó editado en la hoja. */
+  async function makePdfBlob(): Promise<Blob> {
     const edited = rootRef.current?.innerHTML ?? html;
-    if (!edited.trim()) return;
+    if (!edited.trim()) throw new Error('El contrato está vacío.');
+    const res = await fetch('/api/fincas/contract-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html: edited, filename: pdfName }),
+    });
+    if (!res.ok) {
+      const e = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(e.error || 'No se pudo generar el PDF.');
+    }
+    return res.blob();
+  }
+
+  async function handleDownload() {
     setBusy(true);
     try {
-      const res = await fetch('/api/fincas/contract-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          html: edited,
-          filename: `contrato-${draft.contractCode || 'fincasya'}`,
-        }),
-      });
-      if (!res.ok) {
-        const e = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(e.error || 'No se pudo generar el PDF.');
-      }
-      const blob = await res.blob();
+      const blob = await makePdfBlob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `contrato-${draft.contractCode || 'fincasya'}.pdf`;
+      a.download = pdfName;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success('PDF generado y descargado.');
@@ -181,6 +190,44 @@ export function ContractPreviewModal({
       toast.error(err instanceof Error ? err.message : 'Error al generar el PDF.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleSend() {
+    if (!conversation) {
+      toast.error('Abre la conversación del cliente para enviar.');
+      return;
+    }
+    setSending(true);
+    try {
+      // 1) PDF del HTML editado.
+      const blob = await makePdfBlob();
+      // 2) Subir a S3 (link público que WhatsApp puede descargar).
+      const fd = new FormData();
+      fd.append('file', new File([blob], pdfName, { type: 'application/pdf' }));
+      fd.append('folder', 'documents');
+      const up = await fetch('/api/admin/upload', { method: 'POST', body: fd });
+      const upData = (await up.json().catch(() => ({}))) as {
+        url?: string;
+        error?: string;
+      };
+      if (!up.ok || !upData.url) {
+        throw new Error(upData.error || 'No se pudo subir el PDF.');
+      }
+      // 3) Enviarlo al chat por WhatsApp.
+      const result = await sendDocument({
+        conversationId: conversation.conversationId,
+        documentUrl: upData.url,
+        filename: pdfName,
+        caption: `Contrato ${draft.contractCode || ''}`.trim(),
+      });
+      if (!result.ok) throw new Error(result.error || 'No se pudo enviar.');
+      toast.success(`Contrato enviado a ${conversation.name || conversation.phone}.`);
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al enviar.');
+    } finally {
+      setSending(false);
     }
   }
 
@@ -251,11 +298,21 @@ export function ContractPreviewModal({
           </button>
           <button
             type="button"
-            disabled
-            title="Próxima parte"
+            onClick={() => void handleSend()}
+            disabled={sending || busy || !finca || !conversation}
+            title={
+              conversation
+                ? `Enviar a ${conversation.name || conversation.phone}`
+                : 'Abre una conversación para enviar'
+            }
             className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
           >
-            <Send className="h-4 w-4" /> Enviar por WhatsApp
+            {sending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            Enviar por WhatsApp
           </button>
         </footer>
       </div>

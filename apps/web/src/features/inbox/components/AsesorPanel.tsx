@@ -663,6 +663,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           draft={draft}
           settings={settings}
           selectedBankIds={selectedBankIds}
+          conversation={conversation}
           onClose={() => setShowPreview(false)}
         />
       ) : null}
