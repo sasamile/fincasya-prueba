@@ -1486,6 +1486,38 @@ export default defineSchema(
       videoBadge: v.optional(v.string()),
       updatedAt: v.number(),
     }),
+
+    /** Solicitudes públicas de Habeas Data (Ley 1581) desde /habeas-data */
+    habeas_data_requests: defineTable({
+      fullName: v.string(),
+      documentType: v.string(),
+      documentNumber: v.string(),
+      email: v.string(),
+      phone: v.optional(v.string()),
+      requestType: v.union(
+        v.literal('acceso'),
+        v.literal('rectificacion'),
+        v.literal('cancelacion'),
+        v.literal('oposicion'),
+        v.literal('revocatoria'),
+        v.literal('queja'),
+      ),
+      description: v.string(),
+      status: v.union(
+        v.literal('pending'),
+        v.literal('in_progress'),
+        v.literal('resolved'),
+        v.literal('rejected'),
+      ),
+      submittedAt: v.number(),
+      userAgent: v.optional(v.string()),
+      ipAddress: v.optional(v.string()),
+      resolvedAt: v.optional(v.number()),
+      adminNotes: v.optional(v.string()),
+    })
+      .index('by_status', ['status'])
+      .index('by_submittedAt', ['submittedAt'])
+      .index('by_email', ['email']),
   },
   // Tablas importadas aun sin declarar (contracts, payments, reviews, ...)
   { strictTableNameTypes: false },

@@ -1,14 +1,7 @@
 import { NextResponse } from 'next/server';
+import { getConvexHttpClient, api } from '@/lib/convex-server';
 
-function getBackendBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
-    return process.env.NEXT_PUBLIC_BACKEND_URL;
-  }
-  if (process.env.NODE_ENV === 'development') {
-    return 'http://localhost:3001';
-  }
-  return 'https://app.fincasya.cloud';
-}
+export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
   let body: unknown;
@@ -18,49 +11,34 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'JSON inválido.' }, { status: 400 });
   }
 
-  const backendUrl = `${getBackendBaseUrl().replace(/\/$/, '')}/api/habeas-data`;
+  const payload = body as Record<string, unknown>;
+  const userAgent = req.headers.get('user-agent') ?? undefined;
+  const ipAddress =
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    req.headers.get('x-real-ip') ??
+    undefined;
 
   try {
-    const userAgent = req.headers.get('user-agent') ?? '';
-    const forwardedFor =
-      req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '';
-
-    const res = await fetch(backendUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': userAgent,
-        ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}),
-      },
-      body: JSON.stringify(body),
+    const client = getConvexHttpClient();
+    const result = await client.mutation(api.habeasData.submit, {
+      fullName: String(payload.fullName ?? ''),
+      documentType: String(payload.documentType ?? 'CC'),
+      documentNumber: String(payload.documentNumber ?? ''),
+      email: String(payload.email ?? ''),
+      phone: payload.phone ? String(payload.phone) : undefined,
+      requestType: String(payload.requestType ?? ''),
+      description: String(payload.description ?? ''),
+      userAgent,
+      ipAddress,
     });
 
-    const text = await res.text();
-    let data: unknown;
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { error: 'Respuesta inesperada del servidor.' };
-    }
-
-    if (!res.ok) {
-      const msg =
-        (data as { message?: string | string[]; error?: string }).message ??
-        (data as { error?: string }).error ??
-        'No pudimos procesar tu solicitud.';
-      const flatMsg = Array.isArray(msg) ? msg.join('. ') : msg;
-      return NextResponse.json({ error: flatMsg }, { status: res.status });
-    }
-
-    return NextResponse.json(data, { status: 200 });
+    return NextResponse.json(result, { status: 201 });
   } catch (err) {
-    console.error('[habeas-data proxy] Error:', err);
-    return NextResponse.json(
-      {
-        error:
-          'No pudimos contactar el servidor. Por favor escríbenos directamente a comercial@fincasya.com.',
-      },
-      { status: 502 },
-    );
+    const message =
+      err instanceof Error
+        ? err.message
+        : 'No pudimos procesar tu solicitud. Intenta de nuevo.';
+    console.error('[api/habeas-data POST]', message, err);
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

@@ -37,6 +37,7 @@ import type * as features from "../features.js";
 import type * as fincas from "../fincas.js";
 import type * as globalPricing from "../globalPricing.js";
 import type * as googleCalendar from "../googleCalendar.js";
+import type * as habeasData from "../habeasData.js";
 import type * as http from "../http.js";
 import type * as inbound from "../inbound.js";
 import type * as inbox from "../inbox.js";
@@ -122,6 +123,7 @@ declare const fullApi: ApiFromModules<{
   fincas: typeof fincas;
   globalPricing: typeof globalPricing;
   googleCalendar: typeof googleCalendar;
+  habeasData: typeof habeasData;
   http: typeof http;
   inbound: typeof inbound;
   inbox: typeof inbox;
