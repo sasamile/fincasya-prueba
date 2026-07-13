@@ -175,7 +175,7 @@ function ConfirmPane({
       </div>
       <p className="mb-4 text-[12px] leading-snug text-muted-foreground">
         {isDelete
-          ? 'El chat desaparecerá del panel. Esta acción no se puede deshacer.'
+          ? 'El chat y sus mensajes se borrarán del panel. Si el contacto escribe de nuevo, aparecerá como conversación nueva.'
           : 'Se borrarán todos los mensajes del chat. Esta acción no se puede deshacer.'}
       </p>
       <div className="flex gap-2">

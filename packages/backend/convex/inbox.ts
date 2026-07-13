@@ -593,7 +593,13 @@ export const setConversationArchived = mutation({
 export const deleteConversation = mutation({
   args: { conversationId: v.id('conversations') },
   handler: async (ctx, { conversationId }) => {
-    await ctx.db.patch(conversationId, { deletedAt: Date.now() });
+    const now = Date.now();
+    await ctx.db.patch(conversationId, { deletedAt: now });
+    const msgs = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation', (q) => q.eq('conversationId', conversationId))
+      .collect();
+    await Promise.all(msgs.map((m) => ctx.db.patch(m._id, { deletedAt: now })));
   },
 });
 

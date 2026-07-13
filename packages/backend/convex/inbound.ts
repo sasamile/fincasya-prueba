@@ -178,11 +178,13 @@ export const ingestInboundMessage = internalMutation({
       .query('conversations')
       .withIndex('by_contact', (q) => q.eq('contactId', contact._id))
       .collect();
-    let conversation = conversations.sort(
+    const sorted = conversations.sort(
       (a, b) => (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt),
-    )[0];
+    );
+    // Activa = no eliminada del panel ni resuelta (como WhatsApp: eliminar abre hilo nuevo al volver).
+    let conversation = sorted.find((c) => !c.deletedAt && c.status !== 'resolved');
 
-    if (!conversation || conversation.status === 'resolved') {
+    if (!conversation) {
       const conversationId = await ctx.db.insert('conversations', {
         contactId: contact._id,
         channel: 'whatsapp',
@@ -208,12 +210,9 @@ export const ingestInboundMessage = internalMutation({
       metadata: { source: 'ycloud_inbound_webhook' },
       createdAt: now,
     });
-    // Si el Experto eliminó o archivó el chat, vuelve a mostrarse al escribir de nuevo
-    // (el mensaje ya se guardó en Convex; YCloud sigue teniendo el hilo).
     await ctx.db.patch(conversation._id, {
       lastMessageAt: now,
       inboxUnreadCount: (conversation.inboxUnreadCount ?? 0) + 1,
-      ...(conversation.deletedAt ? { deletedAt: undefined } : {}),
       ...(conversation.archived ? { archived: false } : {}),
     });
 
@@ -284,30 +283,5 @@ export const ingestInboundMessage = internalMutation({
       }
     }
     return { duplicate: false };
-  },
-});
-
-/** Repara chats eliminados en el panel que recibieron mensajes después (one-shot / mantenimiento). */
-export const repairDeletedConversationsWithNewInbound = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const conversations = await ctx.db.query('conversations').collect();
-    let fixed = 0;
-    for (const c of conversations) {
-      if (!c.deletedAt) continue;
-      const lastMsg = await ctx.db
-        .query('messages')
-        .withIndex('by_conversation', (q) => q.eq('conversationId', c._id))
-        .order('desc')
-        .first();
-      if (!lastMsg || lastMsg.sender !== 'user' || lastMsg.createdAt <= c.deletedAt) continue;
-      await ctx.db.patch(c._id, {
-        deletedAt: undefined,
-        archived: false,
-        lastMessageAt: lastMsg.createdAt,
-      });
-      fixed++;
-    }
-    return { fixed };
   },
 });

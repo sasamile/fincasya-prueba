@@ -13,6 +13,7 @@
     "@aws-sdk/client-s3": "^3.700.0",
     "@convex-dev/better-auth": "^0.12.5",
     "@fincasya/backend": "workspace:*",
+    "@harbour-enterprises/superdoc": "^1.44.1",
     "@hookform/resolvers": "^5.4.0",
     "@ilovepdf/ilovepdf-nodejs": "^0.3.1",
     "@radix-ui/react-accordion": "^1.2.11",
