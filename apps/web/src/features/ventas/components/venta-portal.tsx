@@ -253,13 +253,15 @@ export function VentaPortal({ token }: { token: string }) {
   ];
 
   return (
-    <div className="landing min-h-dvh bg-background pb-16">
+    <div className="landing min-h-dvh bg-gradient-to-b from-[#fff6f2] via-background to-background pb-16">
       {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-4">
-          <div className="flex items-center gap-3">
-            <img src="/gml/Logo.png" alt="FincasYa" className="h-8 w-auto" />
-          </div>
+      <header className="sticky top-0 z-20 border-b border-border/70 bg-card/85 backdrop-blur-md">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3.5">
+          <img
+            src="/dark-logo.svg"
+            alt="FincasYa"
+            className="h-8 w-auto object-contain sm:h-9"
+          />
           <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-primary">
             Reserva {link.contractCode || link.bookingReference || ""}
           </span>
@@ -299,19 +301,43 @@ export function VentaPortal({ token }: { token: string }) {
 
         {/* Resumen de la reserva */}
         <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-          <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
-              <Building2 className="h-4 w-4" />
+          {link.property?.images?.[0] ? (
+            <div className="relative h-44 w-full sm:h-52">
+              <img
+                src={link.property.images[0]}
+                alt={link.property?.title ?? "Finca"}
+                className="h-full w-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 flex items-end gap-2 p-4">
+                <div className="min-w-0">
+                  <h1 className="truncate text-base font-bold text-white drop-shadow-sm">
+                    {link.property?.title ?? "Tu finca"}
+                  </h1>
+                  {link.property?.location ? (
+                    <p className="flex items-center gap-1 truncate text-xs font-medium text-white/85">
+                      <Building2 className="h-3 w-3 shrink-0" />
+                      {link.property.location}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h1 className="truncate text-sm font-bold">
-                {link.property?.title ?? "Tu finca"}
-              </h1>
-              <p className="truncate text-xs text-muted-foreground">
-                {link.property?.location ?? ""}
-              </p>
+          ) : (
+            <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+              <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
+                <Building2 className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="truncate text-sm font-bold">
+                  {link.property?.title ?? "Tu finca"}
+                </h1>
+                <p className="truncate text-xs text-muted-foreground">
+                  {link.property?.location ?? ""}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
           <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-4">
             {[
               { icon: CalendarDays, k: "Entrada", v: `${fdate(link.checkIn)}${link.checkInTime ? ` · ${link.checkInTime}` : ""}` },
@@ -606,6 +632,19 @@ export function VentaPortal({ token }: { token: string }) {
             </section>
           </>
         ) : null}
+
+        {/* Confianza / cierre */}
+        <footer className="flex flex-col items-center gap-2 pt-4 text-center">
+          <img
+            src="/dark-logo.svg"
+            alt="FincasYa"
+            className="h-7 w-auto opacity-70"
+          />
+          <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+            Tus datos están protegidos · Los expertos en alquiler
+          </p>
+        </footer>
       </main>
     </div>
   );
