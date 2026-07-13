@@ -1435,6 +1435,7 @@ export const getPublicByToken = query({
       petSurcharge: link.petSurcharge,
       petCount: link.petCount,
       bankAccounts,
+      selectedBankAccountIds: link.selectedBankAccountIds,
       clientDataFilled: !!link.clientData,
       clientName: link.clientData?.nombre,
       clientData: link.clientData
@@ -1564,6 +1565,7 @@ export const getForPortal = internalQuery({
       petSurcharge: link.petSurcharge,
       petCount: link.petCount,
       bankAccounts,
+      selectedBankAccountIds: link.selectedBankAccountIds,
       clientDataFilled: !!link.clientData,
       clientName: link.clientData?.nombre,
       clientData: link.clientData

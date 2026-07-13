@@ -11,7 +11,7 @@
  * / submitSignedContract); esta página solo la consume.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import { toast } from "sonner";
@@ -96,6 +96,21 @@ export function VentaPortal({ token }: { token: string }) {
   const [sending, setSending] = useState(false);
   const [sendingSigned, setSendingSigned] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
+  const [genTried, setGenTried] = useState(false);
+
+  // Cuando el pago está validado pero aún no hay contrato, dispara su
+  // generación en el servidor (una sola vez). Al terminar, la query reactiva
+  // de Convex actualiza contractUrl y aparece el botón de descarga.
+  useEffect(() => {
+    if (!link || genTried) return;
+    if (!link.paymentValidated || link.contractUrl || !link.clientDataFilled) {
+      return;
+    }
+    setGenTried(true);
+    void fetch(`/api/sale-links/${token}/generate-contract`, {
+      method: "POST",
+    }).catch(() => {});
+  }, [link, token, genTried]);
 
   // Precarga con datos ya enviados (reabre el link en otro momento/dispositivo).
   const clientData = link?.clientData;
@@ -397,9 +412,12 @@ export function VentaPortal({ token }: { token: string }) {
                 <Download className="h-4 w-4" /> Descargar contrato
               </a>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                Estamos generando tu contrato; vuelve en unos minutos.
-              </p>
+              <div className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                <span>
+                  Estamos generando tu contrato… aparecerá aquí en unos segundos.
+                </span>
+              </div>
             )}
             {link.crUrl ? (
               <a
