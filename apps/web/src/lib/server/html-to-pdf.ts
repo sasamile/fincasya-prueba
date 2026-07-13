@@ -1,68 +1,46 @@
 import "server-only";
-import type { Browser } from "puppeteer";
+import { spawn } from "node:child_process";
+import path from "node:path";
 
 /**
- * Genera un PDF a partir de HTML con Puppeteer. Réplica de la lógica del
- * PdfService de fincasya-new (A4, márgenes 20mm, printBackground), adaptada a
- * un route handler Next en runtime Node.
+ * Genera un PDF a partir de HTML con Puppeteer.
  *
- * Resuelve Chromium del sistema vía PUPPETEER_EXECUTABLE_PATH/CHROME_BIN si
- * están definidos; si no, usa el Chromium que trae puppeteer.
+ * La generación corre en un PROCESO HIJO (scripts/html-to-pdf.mjs) con el
+ * runtime real (bun/node), no dentro del bundle de Next. Turbopack en dev no
+ * logra externalizar puppeteer/puppeteer-core en este monorepo bun (falla la
+ * resolución del shim), así que se ejecuta fuera de su alcance: se pasa el HTML
+ * por stdin y se recibe el PDF binario por stdout.
+ *
+ * Chromium se resuelve vía PUPPETEER_EXECUTABLE_PATH/CHROME_BIN si están
+ * definidos; si no, el que trae puppeteer.
  */
-async function launchBrowser(): Promise<Browser> {
-  const puppeteer = (await import("puppeteer")).default;
-  const executablePath =
-    process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || undefined;
-  return puppeteer.launch({
-    headless: true,
-    executablePath,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-    ],
+export function htmlToPdf(html: string): Promise<Buffer> {
+  const scriptPath = path.join(process.cwd(), "scripts", "html-to-pdf.mjs");
+
+  return new Promise<Buffer>((resolve, reject) => {
+    // process.execPath = el runtime que corre Next (bun en este proyecto).
+    const child = spawn(process.execPath, [scriptPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
+
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    child.stdout.on("data", (d: Buffer) => out.push(d));
+    child.stderr.on("data", (d: Buffer) => err.push(d));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0 && out.length > 0) {
+        resolve(Buffer.concat(out));
+      } else {
+        const message =
+          Buffer.concat(err).toString().trim() ||
+          `El generador de PDF terminó con código ${code}.`;
+        reject(new Error(message));
+      }
+    });
+
+    child.stdin.write(html);
+    child.stdin.end();
   });
-}
-
-export async function htmlToPdf(html: string): Promise<Buffer> {
-  const browser = await launchBrowser();
-  try {
-    const page = await browser.newPage();
-    page.setDefaultTimeout(60_000);
-    page.setDefaultNavigationTimeout(60_000);
-
-    // `domcontentloaded` a propósito: `networkidle0` cuelga con fuentes/CDN.
-    await page.setContent(html, {
-      waitUntil: "domcontentloaded",
-      timeout: 60_000,
-    });
-
-    // Espera a que carguen imágenes pendientes (firma, logos), con tope de 5 s.
-    await Promise.race([
-      page.evaluate(async () => {
-        const imgs = Array.from(document.images);
-        await Promise.all(
-          imgs.map((img) =>
-            img.complete
-              ? Promise.resolve()
-              : new Promise((resolve) => {
-                  img.addEventListener("load", resolve, { once: true });
-                  img.addEventListener("error", resolve, { once: true });
-                }),
-          ),
-        );
-      }),
-      new Promise((resolve) => setTimeout(resolve, 5_000)),
-    ]);
-
-    const pdfBytes = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      margin: { top: "20mm", right: "20mm", bottom: "20mm", left: "20mm" },
-    });
-    return Buffer.from(pdfBytes);
-  } finally {
-    await browser.close();
-  }
 }
