@@ -18,6 +18,26 @@ export const authComponent = createClient<DataModel, typeof schema>(components.b
   verbose: false,
 });
 
+function buildTrustedOrigins(): string[] {
+  const origins = new Set([
+    'http://localhost:3789',
+    'https://modest-husky-871.convex.site',
+    'https://fincasya.com',
+    'https://www.fincasya.com',
+    'https://fincasya-prueba-web.vercel.app',
+  ]);
+
+  const siteUrl = process.env.SITE_URL?.trim().replace(/\/$/, '');
+  if (siteUrl) origins.add(siteUrl);
+
+  const extra = process.env.TRUSTED_ORIGINS?.split(',')
+    .map((o) => o.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  if (extra) extra.forEach((o) => origins.add(o));
+
+  return [...origins];
+}
+
 export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
   const database = authComponent.adapter(ctx);
 
@@ -29,12 +49,7 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
     basePath: '/api/auth',
     secret: process.env.BETTER_AUTH_SECRET,
     database,
-    trustedOrigins: [
-      'http://localhost:3789',
-      'https://modest-husky-871.convex.site',
-      'https://fincasya.com',
-      'https://www.fincasya.com',
-    ],
+    trustedOrigins: buildTrustedOrigins(),
     emailAndPassword: {
       enabled: true,
     },
