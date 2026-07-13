@@ -387,6 +387,34 @@ export const setContractUrl = internalMutation({
   },
 });
 
+/**
+ * Público (panel del asesor): adjunta el contrato ya generado (PDF subido a S3)
+ * al link por token, para que el cliente lo vea/descargue en su portal. La
+ * generación del PDF ocurre en el navegador del asesor (reutiliza la plantilla
+ * QUINTA OLAYA vía /api/fincas/[id]/direct-booking-contract).
+ */
+export const attachContract = mutation({
+  args: {
+    token: v.string(),
+    contractUrl: v.string(),
+  },
+  handler: async (ctx, { token, contractUrl }) => {
+    const url = contractUrl.trim();
+    if (!url) return { ok: false as const, reason: 'no_url' as const };
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    await ctx.db.patch(link._id, {
+      contractUrl: url,
+      contractGeneratedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { ok: true as const, contractUrl: url };
+  },
+});
+
 export const setCrUrl = internalMutation({
   args: {
     id: v.id('saleLinks'),
@@ -973,6 +1001,56 @@ export const listForAdmin = query({
       }),
     );
     return rows;
+  },
+});
+
+/** URL del documento de un link (panel admin / proxy de previsualización). */
+export const getDocumentForAdmin = query({
+  args: {
+    token: v.string(),
+    type: v.union(
+      v.literal('payment-proof'),
+      v.literal('signed-contract'),
+      v.literal('cedula-photo'),
+    ),
+  },
+  handler: async (ctx, { token, type }) => {
+    const trimmed = token.trim();
+    if (!trimmed) return null;
+
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', trimmed))
+      .unique();
+    if (!link) return null;
+
+    if (type === 'payment-proof') {
+      const url = link.paymentProofUrl?.trim();
+      if (!url) return null;
+      return {
+        url,
+        fileName: link.paymentProofFileName?.trim() || 'comprobante',
+        mimeType: link.paymentProofMimeType?.trim() || undefined,
+      };
+    }
+
+    if (type === 'signed-contract') {
+      const url = link.signedContractUrl?.trim();
+      if (!url) return null;
+      return {
+        url,
+        fileName: link.signedContractFileName?.trim() || 'contrato-firmado.pdf',
+        mimeType: 'application/pdf',
+      };
+    }
+
+    const url = link.clientData?.cedulaPhotoUrl?.trim();
+    if (!url) return null;
+    return {
+      url,
+      fileName: link.clientData?.cedulaPhotoFileName?.trim() || 'cedula',
+      mimeType: link.clientData?.cedulaPhotoMimeType?.trim() || undefined,
+    };
   },
 });
 

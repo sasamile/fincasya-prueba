@@ -152,13 +152,101 @@ export async function deleteSaleLink(id: string): Promise<{ ok: boolean }> {
   return { ok: true };
 }
 
-/** Generación de contrato: requiere acción server-side (pendiente de migrar). */
+/** Fecha ms → "YYYY-MM-DD" en zona horaria de Colombia (evita off-by-one). */
+function toYmd(ms: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms));
+}
+
+/**
+ * Genera el contrato del link (plantilla QUINTA OLAYA → PDF vía iLovePDF),
+ * lo sube a S3 y lo adjunta al link para que el cliente lo vea en su portal.
+ * Corre en el navegador del asesor (reutiliza /api/fincas/[id]/direct-booking-contract
+ * y /api/admin/upload, ambos con la sesión autenticada del panel).
+ */
 export async function generateSaleLinkContract(
-  token: string,
-): Promise<{ ok: boolean; contractUrl: string }> {
-  throw new Error(
-    `generateSaleLinkContract(${token}) aún no está migrado a Convex actions`,
+  link: SaleLink,
+): Promise<{ ok: boolean; contractUrl: string; reason?: string }> {
+  const client = link.clientData;
+  if (!client?.nombre) {
+    return { ok: false, contractUrl: '', reason: 'sin_datos_cliente' };
+  }
+
+  const nights = Math.max(1, link.nights || 1);
+  const nightlyPrice = Math.round((link.rentalValue || 0) / nights);
+
+  // 1) Generar el PDF desde la plantilla.
+  const res = await fetch(
+    `/api/fincas/${link.propertyId}/direct-booking-contract`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        propertyId: link.propertyId,
+        contractNumber: link.contractCode ?? '',
+        nightlyPrice: String(nightlyPrice),
+        // Solo el arriendo va como "valor" del contrato (igual que reservas).
+        totalPrice: String(link.rentalValue || nightlyPrice * nights),
+        clientName: client.nombre,
+        clientId: client.cedula ?? '',
+        clientEmail: client.email ?? '',
+        clientPhone: client.telefono ?? '',
+        clientCity: client.ciudad ?? '',
+        clientAddress: client.direccion ?? '',
+        checkInDate: toYmd(link.checkIn),
+        checkOutDate: toYmd(link.checkOut),
+        checkInTime: link.checkInTime ?? '',
+        checkOutTime: link.checkOutTime ?? '',
+        guests: link.guests || 1,
+        petCount: link.petCount ?? 0,
+        cleaningFee: link.cleaningFee ?? 0,
+        refundableDeposit: link.depositAmount ?? 0,
+        otherCharges: 0,
+        manillaCondominio: 0,
+        bankAccountIds: link.selectedBankAccountIds,
+      }),
+    },
   );
+  const data = (await res.json().catch(() => ({}))) as {
+    fileBase64?: string;
+    filename?: string;
+    mimeType?: string;
+    error?: string;
+  };
+  if (!res.ok || !data.fileBase64) {
+    throw new Error(data.error || 'No se pudo generar el contrato.');
+  }
+
+  // 2) Subir el PDF a S3.
+  const bytes = Uint8Array.from(atob(data.fileBase64), (c) => c.charCodeAt(0));
+  const mime = data.mimeType || 'application/pdf';
+  const filename = data.filename || `Contrato_${link.contractCode ?? 'FincasYa'}.pdf`;
+  const fd = new FormData();
+  fd.append('file', new File([bytes], filename, { type: mime }));
+  fd.append('folder', 'documents');
+  const up = await fetch('/api/admin/upload', { method: 'POST', body: fd });
+  const upData = (await up.json().catch(() => ({}))) as {
+    url?: string;
+    error?: string;
+  };
+  if (!up.ok || !upData.url) {
+    throw new Error(upData.error || 'No se pudo subir el contrato.');
+  }
+
+  // 3) Adjuntar al link (visible para el cliente).
+  const result = (await convex.mutation(api.saleLinks.attachContract, {
+    token: link.token,
+    contractUrl: upData.url,
+  })) as { ok: boolean; contractUrl?: string; reason?: string };
+  if (!result.ok) {
+    throw new Error(result.reason || 'No se pudo adjuntar el contrato.');
+  }
+  return { ok: true, contractUrl: upData.url };
 }
 
 export async function resetSaleLinkPayment(

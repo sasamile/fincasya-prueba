@@ -119,18 +119,20 @@ function formatCOP(n: number) {
   }).format(n);
 }
 
-const CLIENT_STEP_LABELS: Record<number, { label: string; color: string }> = {
-  1: { label: "Esperando cliente", color: "bg-zinc-100 text-zinc-600" },
-  2: { label: "Llenando datos", color: "bg-blue-100 text-blue-700" },
-  3: { label: "En revisión", color: "bg-amber-100 text-amber-700" },
-  4: { label: "Firmando contrato", color: "bg-purple-100 text-purple-700" },
-  5: { label: "CR pendiente", color: "bg-indigo-100 text-indigo-700" },
-  6: { label: "Check-in", color: "bg-teal-100 text-teal-700" },
+type StatusTone = "default" | "info" | "warning" | "success" | "muted" | "danger";
+
+const CLIENT_STEP_LABELS: Record<number, { label: string; tone: StatusTone }> = {
+  1: { label: "Esperando cliente", tone: "muted" },
+  2: { label: "Llenando datos", tone: "info" },
+  3: { label: "En revisión", tone: "warning" },
+  4: { label: "Firmando contrato", tone: "info" },
+  5: { label: "CR pendiente", tone: "info" },
+  6: { label: "Check-in", tone: "success" },
 };
 
-const OWNER_STEP_LABELS: Record<number, { label: string; color: string }> = {
-  7: { label: "Propuesta propietario", color: "bg-orange-100 text-orange-800" },
-  8: { label: "Pagar al propietario", color: "bg-emerald-100 text-emerald-800" },
+const OWNER_STEP_LABELS: Record<number, { label: string; tone: StatusTone }> = {
+  7: { label: "Propuesta propietario", tone: "warning" },
+  8: { label: "Pagar al propietario", tone: "success" },
 };
 
 function getClientStatusLabel(link: SaleLink): string {
@@ -153,29 +155,28 @@ function getOwnerStatus(link: SaleLink): string | null {
   return null;
 }
 
-function StatusPill({
-  label,
-  variant = "default",
-}: {
-  label: string;
-  variant?: "default" | "client" | "owner" | "success" | "muted" | "danger" | "warning";
-}) {
-  const styles = {
-    default: "bg-muted text-foreground",
-    client: "bg-sky-50 text-sky-800 border border-sky-100",
-    owner: "bg-amber-50 text-amber-900 border border-amber-100",
-    success: "bg-emerald-50 text-emerald-800 border border-emerald-100",
-    muted: "bg-muted/60 text-muted-foreground border border-border/60",
-    danger: "bg-red-50 text-red-700 border border-red-100",
-    warning: "bg-amber-50 text-amber-900 border border-amber-200",
+function StatusPill({ label, tone = "default" }: { label: string; tone?: StatusTone }) {
+  const styles: Record<StatusTone, string> = {
+    default: "bg-muted/80 text-foreground",
+    info: "bg-primary/10 text-primary",
+    warning: "bg-amber-500/10 text-amber-800 dark:text-amber-300",
+    success: "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
+    muted: "bg-muted/50 text-muted-foreground",
+    danger: "bg-destructive/10 text-destructive",
   };
   return (
     <span
-      className={`inline-flex max-w-full items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[10px] font-semibold leading-none ${styles[variant]}`}
+      className={`inline-flex max-w-full items-center whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-semibold leading-none ${styles[tone]}`}
     >
       {label}
     </span>
   );
+}
+
+function clientStatusTone(link: SaleLink): StatusTone {
+  if (link.status === "cancelled") return "danger";
+  if (link.clientStep >= 7 || link.checkinCompleted) return "success";
+  return CLIENT_STEP_LABELS[link.clientStep]?.tone ?? "muted";
 }
 
 export function SaleLinksManager() {
@@ -229,13 +230,21 @@ export function SaleLinksManager() {
   const handleGenerateContract = async (link: SaleLink) => {
     setGeneratingContract(link._id);
     try {
-      const res = await generateSaleLinkContract(link.token);
+      const res = await generateSaleLinkContract(link);
       if (res.ok) {
         toast.success("Contrato generado y disponible para el cliente");
         qc.invalidateQueries({ queryKey: ["sale-links"] });
+      } else {
+        toast.error(
+          res.reason === "sin_datos_cliente"
+            ? "El cliente aún no ha enviado sus datos."
+            : "No se pudo generar el contrato.",
+        );
       }
-    } catch {
-      toast.error("Error al generar el contrato");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Error al generar el contrato",
+      );
     } finally {
       setGeneratingContract(null);
     }
@@ -280,9 +289,13 @@ export function SaleLinksManager() {
         toast.success(
           res.alreadyValidated
             ? "El pago ya estaba validado"
-            : "Pago validado — contrato y CR en proceso",
+            : "Pago validado — generando el contrato…",
         );
         qc.invalidateQueries({ queryKey: ["sale-links"] });
+        // Genera y adjunta el contrato para que el cliente lo vea en su portal.
+        if (!res.alreadyValidated && !link.contractUrl) {
+          await handleGenerateContract(link);
+        }
       } else {
         toast.error(res.reason ?? "No se pudo validar el pago");
       }
@@ -422,13 +435,14 @@ export function SaleLinksManager() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Links de Venta</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Crea links para compartir con clientes y gestiona todo el proceso de reserva
+          <h1 className="text-2xl font-bold tracking-tight">Links de Venta</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Crea links para compartir con clientes y gestiona todo el proceso de
+            reserva
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -436,31 +450,64 @@ export function SaleLinksManager() {
             variant="outline"
             size="sm"
             onClick={() => refetch()}
-            className="gap-1.5"
+            className="gap-1.5 rounded-xl"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className="h-3.5 w-3.5" />
             Actualizar
           </Button>
-          <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
-            <Plus className="w-4 h-4" />
+          <Button onClick={() => setCreateOpen(true)} className="gap-1.5 rounded-xl">
+            <Plus className="h-4 w-4" />
             Nuevo Link
           </Button>
         </div>
       </div>
 
+      {/* Resumen rápido */}
+      {!isLoading && rows.length > 0 ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-border/60 bg-card px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Total links
+            </p>
+            <p className="mt-0.5 text-2xl font-bold tabular-nums">{rows.length}</p>
+          </div>
+          <div className="rounded-xl border border-border/60 bg-card px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Pagos por validar
+            </p>
+            <p className="mt-0.5 text-2xl font-bold tabular-nums text-amber-600">
+              {pendingValidationCount}
+            </p>
+          </div>
+          <div className="col-span-2 rounded-xl border border-border/60 bg-card px-4 py-3 sm:col-span-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Valor en lista
+            </p>
+            <p className="mt-0.5 truncate text-lg font-bold tabular-nums">
+              {formatCOP(rows.reduce((s, r) => s + (r.totalValue || 0), 0))}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       {pendingValidationCount > 0 ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-amber-950">
-            <strong>{pendingValidationCount}</strong>{" "}
-            {pendingValidationCount === 1 ? "reserva tiene" : "reservas tienen"}{" "}
-            soporte de pago pendiente de validar. No necesitas el correo de
-            comercial: revisa el comprobante y aprueba desde aquí.
-          </p>
+        <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-500/10">
+              <Receipt className="h-4 w-4 text-amber-600" />
+            </span>
+            <p className="text-sm text-foreground">
+              <strong>{pendingValidationCount}</strong>{" "}
+              {pendingValidationCount === 1 ? "reserva tiene" : "reservas tienen"}{" "}
+              soporte de pago pendiente. Revisa el comprobante y aprueba desde
+              aquí.
+            </p>
+          </div>
           <Button
             type="button"
             size="sm"
             variant={paymentFilter === "pending" ? "default" : "outline"}
-            className="shrink-0"
+            className="shrink-0 rounded-xl"
             onClick={() =>
               setPaymentFilter((f) => (f === "pending" ? "all" : "pending"))
             }
@@ -470,17 +517,17 @@ export function SaleLinksManager() {
         </div>
       ) : null}
 
-      {/* Table */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
+      {/* Lista */}
+      <div className="space-y-2">
         {isLoading ? (
-          <div className="p-6 space-y-3">
+          <div className="space-y-2">
             {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="h-14 w-full" />
+              <Skeleton key={i} className="h-28 w-full rounded-xl" />
             ))}
           </div>
         ) : visibleRows.length === 0 ? (
-          <div className="py-20 flex flex-col items-center gap-3 text-muted-foreground">
-            <Link2 className="w-10 h-10 opacity-30" />
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card py-16 text-muted-foreground">
+            <Link2 className="h-10 w-10 opacity-30" />
             <p className="text-sm">
               {paymentFilter === "pending"
                 ? "No hay pagos pendientes de validar"
@@ -490,441 +537,399 @@ export function SaleLinksManager() {
               <Button
                 variant="outline"
                 size="sm"
+                className="rounded-xl"
                 onClick={() => setPaymentFilter("all")}
               >
                 Ver todos los links
               </Button>
             ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCreateOpen(true)}
-              className="gap-1.5 mt-1"
-            >
-              <Plus className="w-4 h-4" />
-              Crear primer link
-            </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCreateOpen(true)}
+                className="mt-1 gap-1.5 rounded-xl"
+              >
+                <Plus className="h-4 w-4" />
+                Crear primer link
+              </Button>
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[920px] text-sm table-fixed">
-              <colgroup>
-                <col className="w-[28%]" />
-                <col className="w-[14%]" />
-                <col className="w-[12%]" />
-                <col className="w-[18%]" />
-                <col className="w-[24%]" />
-                <col className="w-[4%]" />
-              </colgroup>
-              <thead>
-                <tr className="border-b bg-muted/30">
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Reserva
-                  </th>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Fechas
-                  </th>
-                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Valor
-                  </th>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Oferta propietario
-                  </th>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Progreso
-                  </th>
-                  <th className="px-2 py-2.5" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/70">
-                {visibleRows.map((link) => {
-                  const clientStatusLabel = getClientStatusLabel(link);
-                  const ownerStatusLabel = getOwnerStatus(link);
-                  const isCancelled = link.status === "cancelled";
-                  const crLabel =
-                    link.bookingReference ?? link.contractCode ?? "—";
+          visibleRows.map((link) => {
+            const clientStatusLabel = getClientStatusLabel(link);
+            const ownerStatusLabel = getOwnerStatus(link);
+            const isCancelled = link.status === "cancelled";
+            const crLabel = link.bookingReference ?? link.contractCode ?? "—";
+            const pendingPayment = needsPaymentValidation(link);
 
-                  return (
-                    <tr
-                      key={link._id}
-                      className="align-middle hover:bg-muted/15 transition-colors"
-                    >
-                      {/* Reserva */}
-                      <td className="px-4 py-3">
-                        <div className="space-y-1">
-                          <p className="font-semibold text-[13px] leading-snug line-clamp-2">
-                            {link.propertyTitle ?? "Sin finca asignada"}
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate">
-                            {link.clientData?.nombre ?? "Sin cliente aún"}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-0.5">
-                            <span className="inline-flex items-center rounded bg-primary/10 px-1.5 py-px text-[10px] font-bold text-primary">
-                              CR {crLabel}
-                            </span>
-                            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                              <Users className="w-3 h-3 shrink-0" />
-                              {link.guests} pax · {link.nights}{" "}
-                              {link.nights === 1 ? "noche" : "noches"}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Fechas */}
-                      <td className="px-4 py-3">
-                        <div className="text-xs font-medium whitespace-nowrap">
-                          {format(new Date(link.checkIn), "d MMM", { locale: es })}
-                          <ChevronRight className="inline w-3 h-3 mx-0.5 text-muted-foreground" />
-                          {format(new Date(link.checkOut), "d MMM yyyy", {
-                            locale: es,
-                          })}
-                        </div>
-                        <p className="text-[10px] text-muted-foreground mt-1">
-                          Creado {format(new Date(link.createdAt), "d MMM", { locale: es })}
-                        </p>
-                      </td>
-
-                      {/* Valor */}
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-bold tabular-nums text-sm">
-                          {formatCOP(link.totalValue)}
-                        </span>
-                      </td>
-
-                      {/* Oferta propietario */}
-                      <td className="px-4 py-3">
-                        {canManageOwnerOffer(link) ? (
-                          hasSavedOwnerOffer(link) &&
-                          editingOwnerOfferId !== link._id ? (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-9 gap-1.5 px-3 text-xs font-semibold tabular-nums"
-                                >
-                                  {formatPriceInput(link.ownerOfferAmount!)}
-                                  <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="start" className="w-56">
-                                  <DropdownMenuItem
-                                    onClick={() => void copyOwnerMessage(link)}
-                                  >
-                                    <Copy className="w-4 h-4 mr-2" />
-                                    Copiar mensaje propietario
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => void sendOwnerWhatsApp(link)}
-                                  >
-                                    <MessageCircle className="w-4 h-4 mr-2 text-[#25D366]" />
-                                    Enviar por WhatsApp
-                                  </DropdownMenuItem>
-                                  {link.bookingReference ? (
-                                    <DropdownMenuItem
-                                      onClick={() => void copyAnfitrionLink(link)}
-                                    >
-                                      <Link2 className="w-4 h-4 mr-2" />
-                                      Copiar link /anfitrion
-                                    </DropdownMenuItem>
-                                  ) : null}
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    onClick={() => startEditOwnerOffer(link)}
-                                  >
-                                    <Pencil className="w-4 h-4 mr-2" />
-                                    Editar precio
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
+            return (
+              <article
+                key={link._id}
+                className={`relative rounded-xl border bg-card transition-colors hover:bg-muted/20 ${
+                  pendingPayment
+                    ? "border-amber-500/30 shadow-sm"
+                    : "border-border/60"
+                }`}
+              >
+                <div className="absolute right-2 top-2 z-10">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 rounded-lg p-0"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuItem onClick={() => copyLink(link.token)}>
+                        <Copy className="mr-2 h-4 w-4" />
+                        Copiar link del cliente
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => openLink(link.token)}>
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        Abrir link del cliente
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setEditLink(link)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Editar link
+                      </DropdownMenuItem>
+                      {link.signedContractUrl ? (
+                        <DropdownMenuItem
+                          onClick={() =>
+                            setDocumentPreview({
+                              title: "Contrato firmado",
+                              url: link.signedContractUrl,
+                              fileName: link.signedContractFileName,
+                              previewSrc: saleLinkDocumentPreviewSrc(
+                                link.token,
+                                "signed-contract",
+                              ),
+                            })
+                          }
+                        >
+                          <FileText className="mr-2 h-4 w-4" />
+                          Ver contrato firmado
+                        </DropdownMenuItem>
+                      ) : null}
+                      {link.clientData?.cedulaPhotoUrl ? (
+                        <DropdownMenuItem
+                          onClick={() =>
+                            setDocumentPreview({
+                              title: "Foto de cédula",
+                              url: link.clientData?.cedulaPhotoUrl,
+                              fileName: link.clientData?.cedulaPhotoFileName,
+                              mimeType: link.clientData?.cedulaPhotoMimeType,
+                              previewSrc: saleLinkDocumentPreviewSrc(
+                                link.token,
+                                "cedula-photo",
+                              ),
+                            })
+                          }
+                        >
+                          <IdCard className="mr-2 h-4 w-4" />
+                          Ver foto de cédula
+                        </DropdownMenuItem>
+                      ) : null}
+                      {needsPaymentValidation(link) ? (
+                        <DropdownMenuItem
+                          onClick={() =>
+                            openPaymentProofPreview(link, setDocumentPreview)
+                          }
+                        >
+                          <Receipt className="mr-2 h-4 w-4" />
+                          Ver comprobante
+                        </DropdownMenuItem>
+                      ) : null}
+                      {needsPaymentValidation(link) ? (
+                        <DropdownMenuItem
+                          onClick={() => void handleValidatePayment(link)}
+                          disabled={validatingPayment === link._id}
+                        >
+                          {validatingPayment === link._id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           ) : (
-                            <div className="space-y-1">
-                              <div className="inline-flex w-full max-w-[168px] items-stretch overflow-hidden rounded-md border border-border bg-background">
-                                <div className="flex min-w-0 flex-1 items-center gap-1 border-r border-border bg-muted/20 px-2">
-                                  <span className="text-[11px] text-muted-foreground">
-                                    $
-                                  </span>
-                                  <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    value={getOwnerOfferDisplay(link)}
-                                    onChange={(e) => {
-                                      const parsed = parseCOP(e.target.value);
-                                      setOwnerOfferDrafts((prev) => ({
-                                        ...prev,
-                                        [link._id]:
-                                          parsed > 0
-                                            ? formatPriceInput(parsed)
-                                            : "",
-                                      }));
-                                    }}
-                                    placeholder="1.000.000"
-                                    className="min-w-0 flex-1 border-0 bg-transparent py-2 text-right text-xs font-semibold tabular-nums outline-none focus:ring-0"
-                                  />
-                                </div>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-auto shrink-0 rounded-none px-2.5 hover:bg-primary/10"
-                                  title="Guardar oferta"
-                                  disabled={savingOwnerOffer === link._id}
-                                  onClick={() => void saveOwnerOffer(link)}
-                                >
-                                  {savingOwnerOffer === link._id ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <Check className="h-3.5 w-3.5" />
-                                  )}
-                                </Button>
-                              </div>
-                              {hasSavedOwnerOffer(link) ? (
-                                <button
-                                  type="button"
-                                  className="text-[10px] text-muted-foreground hover:text-foreground"
-                                  onClick={() => setEditingOwnerOfferId(null)}
-                                >
-                                  Cancelar
-                                </button>
-                              ) : (
-                                <p className="text-[10px] text-muted-foreground">
-                                  Valor al propietario
-                                </p>
-                              )}
-                            </div>
-                          )
-                        ) : link.clientStep >= 8 && hasSavedOwnerOffer(link) ? (
-                          <span className="text-sm font-semibold tabular-nums">
-                            {formatPriceInput(link.ownerOfferAmount!)}
-                          </span>
-                        ) : isOwnerPortalReady(link) ? (
-                          <span className="text-xs text-muted-foreground">
-                            Listo tras CR
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            Tras validar pago
-                          </span>
+                            <CheckCircle2 className="mr-2 h-4 w-4 text-emerald-600" />
+                          )}
+                          Aprobar pago
+                        </DropdownMenuItem>
+                      ) : null}
+                      {needsPaymentValidation(link) ? (
+                        <DropdownMenuSeparator />
+                      ) : null}
+                      {link.clientStep >= 3 && !link.paymentValidated && (
+                        <DropdownMenuItem
+                          onClick={() => handleResetPayment(link)}
+                          disabled={resettingPayment === link._id}
+                        >
+                          {resettingPayment === link._id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                          )}
+                          Reiniciar comprobante
+                        </DropdownMenuItem>
+                      )}
+                      {link.clientStep >= 3 &&
+                        link.paymentValidated &&
+                        !link.contractUrl && (
+                          <DropdownMenuItem
+                            onClick={() => handleGenerateContract(link)}
+                            disabled={generatingContract === link._id}
+                          >
+                            {generatingContract === link._id ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <FileText className="mr-2 h-4 w-4" />
+                            )}
+                            Generar contrato
+                          </DropdownMenuItem>
                         )}
-                      </td>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => setDeleteId(link._id)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Eliminar link
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
 
-                      {/* Progreso */}
-                      <td className="px-4 py-3">
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-1">
-                            <StatusPill
-                              label={clientStatusLabel}
-                              variant={
-                                isCancelled
-                                  ? "danger"
-                                  : link.clientStep >= 7
-                                    ? "success"
-                                    : "client"
-                              }
-                            />
-                            {ownerStatusLabel ? (
-                              <StatusPill
-                                label={ownerStatusLabel}
-                                variant={
-                                  link.ownerOfferRejectedAt ? "danger" : "owner"
-                                }
-                              />
-                            ) : null}
-                            {link.clientStep >= 8 && link.ownerOfferAcceptedAt ? (
-                              <StatusPill label="Confirmó" variant="success" />
-                            ) : null}
-                          </div>
+                <div className="flex flex-col gap-4 p-4 pr-12 lg:flex-row lg:items-start lg:gap-6">
+                  {/* Reserva + fechas */}
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="text-[15px] font-semibold leading-snug line-clamp-2">
+                          {link.propertyTitle ?? "Sin finca asignada"}
+                        </h3>
+                        <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                          {link.clientData?.nombre ?? "Sin cliente aún"}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-right text-base font-bold tabular-nums lg:hidden">
+                        {formatCOP(link.totalValue)}
+                      </p>
+                    </div>
 
-                          {link.ownerOfferRejectedReason ? (
-                            <p className="text-[11px] leading-snug text-red-700">
-                              Rechazo: {link.ownerOfferRejectedReason}
-                            </p>
-                          ) : null}
-                          {link.ownerOfferComment ? (
-                            <p className="text-[11px] leading-snug text-sky-800">
-                              Obs. propietario: {link.ownerOfferComment}
-                            </p>
-                          ) : null}
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="rounded-md bg-primary/10 px-1.5 py-0.5 font-bold text-primary">
+                        CR {crLabel}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <Users className="h-3 w-3" />
+                        {link.guests} pax · {link.nights}{" "}
+                        {link.nights === 1 ? "noche" : "noches"}
+                      </span>
+                      <span className="hidden sm:inline">·</span>
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                        {format(new Date(link.checkIn), "d MMM", { locale: es })}
+                        <ChevronRight className="h-3 w-3" />
+                        {format(new Date(link.checkOut), "d MMM yyyy", {
+                          locale: es,
+                        })}
+                      </span>
+                      <span className="text-[10px]">
+                        · Creado{" "}
+                        {format(new Date(link.createdAt), "d MMM", { locale: es })}
+                      </span>
+                    </div>
+                  </div>
 
-                          {needsPaymentValidation(link) ? (
-                            <div className="rounded-lg border border-amber-200/90 bg-gradient-to-br from-amber-50 to-orange-50/40 p-2.5 shadow-sm">
-                              <p className="mb-2 text-[11px] font-semibold text-amber-950">
-                                Pago por validar
-                              </p>
-                              <div className="flex flex-wrap gap-1.5">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-8 border-amber-200 bg-white/90 text-xs hover:bg-white"
-                                  onClick={() =>
-                                    openPaymentProofPreview(link, setDocumentPreview)
-                                  }
-                                >
-                                  <Receipt className="mr-1.5 h-3.5 w-3.5" />
-                                  Comprobante
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  className="h-8 bg-emerald-600 text-xs hover:bg-emerald-700"
-                                  disabled={validatingPayment === link._id}
-                                  onClick={() => void handleValidatePayment(link)}
-                                >
-                                  {validatingPayment === link._id ? (
-                                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
-                                  )}
-                                  Aprobar
-                                </Button>
-                              </div>
-                            </div>
-                          ) : link.paymentValidated && link.paymentValidatedBy ? (
-                            <p className="text-[11px] leading-snug text-muted-foreground">
-                              Validado por{" "}
-                              <span className="font-medium text-foreground">
-                                {link.paymentValidatedBy}
-                              </span>
-                              {link.paymentValidatedAt
-                                ? ` · ${format(new Date(link.paymentValidatedAt), "d MMM HH:mm", { locale: es })}`
-                                : ""}
-                            </p>
-                          ) : null}
-                        </div>
-                      </td>
+                  {/* Valor (desktop) */}
+                  <div className="hidden shrink-0 text-right lg:block lg:w-28">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Valor
+                    </p>
+                    <p className="mt-0.5 text-base font-bold tabular-nums">
+                      {formatCOP(link.totalValue)}
+                    </p>
+                  </div>
 
-                      {/* Acciones */}
-                      <td className="px-2 py-3 text-right">
+                  {/* Oferta propietario */}
+                  <div className="shrink-0 lg:w-44">
+                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Oferta propietario
+                    </p>
+                    {canManageOwnerOffer(link) ? (
+                      hasSavedOwnerOffer(link) &&
+                      editingOwnerOfferId !== link._id ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                              <MoreHorizontal className="h-4 w-4" />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 w-full justify-between gap-1 rounded-lg px-2.5 text-xs font-semibold tabular-nums"
+                            >
+                              {formatPriceInput(link.ownerOfferAmount!)}
+                              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-52">
-                            <DropdownMenuItem onClick={() => copyLink(link.token)}>
-                              <Copy className="w-4 h-4 mr-2" />
-                              Copiar link del cliente
+                          <DropdownMenuContent align="end" className="w-56">
+                            <DropdownMenuItem
+                              onClick={() => void copyOwnerMessage(link)}
+                            >
+                              <Copy className="mr-2 h-4 w-4" />
+                              Copiar mensaje propietario
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openLink(link.token)}>
-                              <ExternalLink className="w-4 h-4 mr-2" />
-                              Abrir link del cliente
+                            <DropdownMenuItem
+                              onClick={() => void sendOwnerWhatsApp(link)}
+                            >
+                              <MessageCircle className="mr-2 h-4 w-4 text-[#25D366]" />
+                              Enviar por WhatsApp
                             </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => setEditLink(link)}>
-                              <Pencil className="w-4 h-4 mr-2" />
-                              Editar link
-                            </DropdownMenuItem>
-                            {link.signedContractUrl ? (
+                            {link.bookingReference ? (
                               <DropdownMenuItem
-                                onClick={() =>
-                                  setDocumentPreview({
-                                    title: "Contrato firmado",
-                                    url: link.signedContractUrl,
-                                    fileName: link.signedContractFileName,
-                                    previewSrc: saleLinkDocumentPreviewSrc(
-                                      link.token,
-                                      "signed-contract",
-                                    ),
-                                  })
-                                }
+                                onClick={() => void copyAnfitrionLink(link)}
                               >
-                                <FileText className="w-4 h-4 mr-2" />
-                                Ver contrato firmado
+                                <Link2 className="mr-2 h-4 w-4" />
+                                Copiar link /anfitrion
                               </DropdownMenuItem>
                             ) : null}
-                            {link.clientData?.cedulaPhotoUrl ? (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  setDocumentPreview({
-                                    title: "Foto de cédula",
-                                    url: link.clientData?.cedulaPhotoUrl,
-                                    fileName: link.clientData?.cedulaPhotoFileName,
-                                    mimeType: link.clientData?.cedulaPhotoMimeType,
-                                    previewSrc: saleLinkDocumentPreviewSrc(
-                                      link.token,
-                                      "cedula-photo",
-                                    ),
-                                  })
-                                }
-                              >
-                                <IdCard className="w-4 h-4 mr-2" />
-                                Ver foto de cédula
-                              </DropdownMenuItem>
-                            ) : null}
-                            {needsPaymentValidation(link) ? (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  openPaymentProofPreview(link, setDocumentPreview)
-                                }
-                              >
-                                <Receipt className="w-4 h-4 mr-2" />
-                                Ver comprobante
-                              </DropdownMenuItem>
-                            ) : null}
-                            {needsPaymentValidation(link) ? (
-                              <DropdownMenuItem
-                                onClick={() => void handleValidatePayment(link)}
-                                disabled={validatingPayment === link._id}
-                              >
-                                {validatingPayment === link._id ? (
-                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="w-4 h-4 mr-2 text-emerald-600" />
-                                )}
-                                Aprobar pago
-                              </DropdownMenuItem>
-                            ) : null}
-                            {needsPaymentValidation(link) ? (
-                              <DropdownMenuSeparator />
-                            ) : null}
-                            {link.clientStep >= 3 && !link.paymentValidated && (
-                              <DropdownMenuItem
-                                onClick={() => handleResetPayment(link)}
-                                disabled={resettingPayment === link._id}
-                              >
-                                {resettingPayment === link._id ? (
-                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                ) : (
-                                  <RefreshCw className="w-4 h-4 mr-2" />
-                                )}
-                                Reiniciar comprobante
-                              </DropdownMenuItem>
-                            )}
-                            {link.clientStep >= 3 && link.paymentValidated && !link.contractUrl && (
-                              <DropdownMenuItem
-                                onClick={() => handleGenerateContract(link)}
-                                disabled={generatingContract === link._id}
-                              >
-                                {generatingContract === link._id ? (
-                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                ) : (
-                                  <FileText className="w-4 h-4 mr-2" />
-                                )}
-                                Generar contrato
-                              </DropdownMenuItem>
-                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
-                              onClick={() => setDeleteId(link._id)}
-                              className="text-destructive focus:text-destructive"
+                              onClick={() => startEditOwnerOffer(link)}
                             >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Eliminar link
+                              <Pencil className="mr-2 h-4 w-4" />
+                              Editar precio
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      ) : (
+                        <div className="flex h-8 items-stretch overflow-hidden rounded-lg border border-border bg-background">
+                          <div className="flex min-w-0 flex-1 items-center gap-1 px-2">
+                            <span className="text-[11px] text-muted-foreground">
+                              $
+                            </span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={getOwnerOfferDisplay(link)}
+                              onChange={(e) => {
+                                const parsed = parseCOP(e.target.value);
+                                setOwnerOfferDrafts((prev) => ({
+                                  ...prev,
+                                  [link._id]:
+                                    parsed > 0
+                                      ? formatPriceInput(parsed)
+                                      : "",
+                                }));
+                              }}
+                              placeholder="1.000.000"
+                              className="min-w-0 flex-1 border-0 bg-transparent py-1 text-right text-xs font-semibold tabular-nums outline-none"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 shrink-0 rounded-none px-2 hover:bg-primary/10"
+                            title="Guardar oferta"
+                            disabled={savingOwnerOffer === link._id}
+                            onClick={() => void saveOwnerOffer(link)}
+                          >
+                            {savingOwnerOffer === link._id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Check className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </div>
+                      )
+                    ) : link.clientStep >= 8 && hasSavedOwnerOffer(link) ? (
+                      <p className="text-sm font-semibold tabular-nums">
+                        {formatPriceInput(link.ownerOfferAmount!)}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        {isOwnerPortalReady(link)
+                          ? "Listo tras CR"
+                          : "Tras validar pago"}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Pie: estado + acciones de pago */}
+                <div className="flex flex-col gap-2 border-t border-border/40 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <StatusPill
+                      label={clientStatusLabel}
+                      tone={isCancelled ? "danger" : clientStatusTone(link)}
+                    />
+                    {ownerStatusLabel ? (
+                      <StatusPill
+                        label={ownerStatusLabel}
+                        tone={
+                          link.ownerOfferRejectedAt ? "danger" : "warning"
+                        }
+                      />
+                    ) : null}
+                    {link.clientStep >= 8 && link.ownerOfferAcceptedAt ? (
+                      <StatusPill label="Confirmó" tone="success" />
+                    ) : null}
+                    {link.ownerOfferRejectedReason ? (
+                      <span className="text-[11px] text-destructive">
+                        {link.ownerOfferRejectedReason}
+                      </span>
+                    ) : null}
+                    {link.ownerOfferComment ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        Obs. propietario: {link.ownerOfferComment}
+                      </span>
+                    ) : null}
+                    {link.paymentValidated && link.paymentValidatedBy ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        Validado por {link.paymentValidatedBy}
+                        {link.paymentValidatedAt
+                          ? ` · ${format(new Date(link.paymentValidatedAt), "d MMM HH:mm", { locale: es })}`
+                          : ""}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {pendingPayment ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                        Pago por validar
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 rounded-lg px-2.5 text-xs"
+                        onClick={() =>
+                          openPaymentProofPreview(link, setDocumentPreview)
+                        }
+                      >
+                        <Receipt className="mr-1.5 h-3.5 w-3.5" />
+                        Comprobante
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 rounded-lg px-2.5 text-xs"
+                        disabled={validatingPayment === link._id}
+                        onClick={() => void handleValidatePayment(link)}
+                      >
+                        {validatingPayment === link._id ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        Aprobar
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })
         )}
       </div>
 

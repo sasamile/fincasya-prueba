@@ -447,16 +447,29 @@ export function VentaPortal({ token }: { token: string }) {
 
         {/* Estado: comprobante en revisión */}
         {inReview ? (
-          <section className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
-            <Clock className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <p className="font-bold">Comprobante en revisión</p>
-              <p className="mt-0.5">
-                Recibimos tu comprobante
-                {link.paymentProofAmount ? ` por ${money(link.paymentProofAmount)}` : ""}.
-                Te confirmamos apenas lo validemos. Si necesitas enviar otro
-                abono, puedes hacerlo abajo.
-              </p>
+          <section className="overflow-hidden rounded-2xl border border-sky-200 bg-sky-50 shadow-sm">
+            <div className="flex flex-col items-center gap-3 px-4 py-7 text-center">
+              <div className="relative grid h-14 w-14 place-items-center rounded-full bg-sky-100">
+                <span className="absolute inset-0 animate-ping rounded-full bg-sky-300/40" />
+                <Clock className="h-6 w-6 text-sky-600" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-sky-900">
+                  ¡Recibimos tu pago! Estamos validándolo
+                </h2>
+                <p className="mx-auto mt-1 max-w-md text-sm text-sky-800/90">
+                  Recibimos tu comprobante
+                  {link.paymentProofAmount
+                    ? ` por ${money(link.paymentProofAmount)}`
+                    : ""}
+                  . Tu asesor lo revisa y, apenas lo confirme, aquí mismo
+                  aparecerá tu <b>contrato</b> para descargar. No cierres este
+                  link — te avisamos por WhatsApp.
+                </p>
+              </div>
+              <span className="rounded-full bg-white/70 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-sky-700">
+                Paso 2 de 3 · Validación
+              </span>
             </div>
           </section>
         ) : null}
@@ -464,6 +477,7 @@ export function VentaPortal({ token }: { token: string }) {
         {/* Formulario: datos + pago (mientras no esté validado y el link viva) */}
         {!validated && !inactive ? (
           <>
+            {!inReview && (
             <section className="rounded-2xl border border-border bg-card p-4 shadow-sm">
               <h2 className="mb-3 text-sm font-bold">1 · Tus datos</h2>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -544,9 +558,12 @@ export function VentaPortal({ token }: { token: string }) {
                 </div>
               </div>
             </section>
+            )}
 
             <section className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-              <h2 className="mb-1 text-sm font-bold">2 · Realiza el pago</h2>
+              <h2 className="mb-1 text-sm font-bold">
+                {inReview ? "¿Necesitas enviar otro comprobante?" : "2 · Realiza el pago"}
+              </h2>
               <p className="mb-3 text-xs text-muted-foreground">
                 Consigna o transfiere a una de estas cuentas y sube el
                 comprobante.
