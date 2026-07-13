@@ -2,53 +2,108 @@
 
 import { useState } from "react";
 
-type BankLogoKey =
-  | "bancolombia"
-  | "bbva"
-  | "nequi"
-  | "davivienda"
-  | "daviplata"
-  | "bogota"
-  | "occidente"
-  | "breb"
-  | "default";
+/** Marca de un banco/cartera: imagen en /public/banks/<slug>.png + respaldo. */
+type BankBrand = {
+  key: string;
+  /** Substrings (en minúscula) que identifican el banco por nombre. */
+  tokens: string[];
+  /** Nombre de archivo en /public/banks/<slug>.png. */
+  slug: string;
+  /** Iniciales cortas para el badge de respaldo si el PNG no existe. */
+  label: string;
+  /** Color de marca del badge de respaldo. */
+  bg: string;
+  /** Color del texto del badge de respaldo. */
+  text: string;
+};
 
-export function resolveBankLogoKey(
+/**
+ * Catálogo de marcas, alineado con COLOMBIAN_BANKS. El orden importa:
+ * los tokens más específicos van primero (bre-b, daviplata antes de davivienda).
+ */
+const BANK_BRANDS: BankBrand[] = [
+  { key: "breb", tokens: ["bre-b", "breb"], slug: "logobreb", label: "Bre-B", bg: "#32005F", text: "#5DCAA5" },
+  { key: "bancolombia", tokens: ["bancolombia"], slug: "bancolombia", label: "BC", bg: "#FDDA24", text: "#0B0B0B" },
+  { key: "bbva", tokens: ["bbva"], slug: "bbva", label: "BBVA", bg: "#072146", text: "#ffffff" },
+  { key: "nequi", tokens: ["nequi"], slug: "nequi", label: "NEQUI", bg: "#200020", text: "#ffffff" },
+  { key: "daviplata", tokens: ["daviplata"], slug: "daviplata", label: "DP", bg: "#E1251B", text: "#ffffff" },
+  { key: "davivienda", tokens: ["davivienda"], slug: "davivienda", label: "DAV", bg: "#ED1C24", text: "#ffffff" },
+  { key: "bogota", tokens: ["bogotá", "bogota"], slug: "bogota", label: "BdB", bg: "#003DA5", text: "#ffffff" },
+  { key: "occidente", tokens: ["occidente"], slug: "occidente", label: "BO", bg: "#00529B", text: "#ffffff" },
+  { key: "avvillas", tokens: ["av villas", "avvillas", "villas"], slug: "avvillas", label: "AV", bg: "#E30613", text: "#ffffff" },
+  { key: "colpatria", tokens: ["colpatria", "scotiabank"], slug: "colpatria", label: "SC", bg: "#EC111A", text: "#ffffff" },
+  { key: "agrario", tokens: ["agrario"], slug: "agrario", label: "BA", bg: "#00843D", text: "#ffffff" },
+  { key: "cajasocial", tokens: ["caja social"], slug: "cajasocial", label: "BCS", bg: "#005CA9", text: "#ffffff" },
+  { key: "itau", tokens: ["itaú", "itau"], slug: "itau", label: "Itaú", bg: "#FF6200", text: "#ffffff" },
+  { key: "popular", tokens: ["popular"], slug: "popular", label: "BP", bg: "#00953B", text: "#ffffff" },
+  { key: "falabella", tokens: ["falabella"], slug: "falabella", label: "BF", bg: "#009B3A", text: "#ffffff" },
+  { key: "pichincha", tokens: ["pichincha"], slug: "pichincha", label: "PICH", bg: "#FCD300", text: "#111111" },
+  { key: "gnb", tokens: ["gnb", "sudameris"], slug: "gnb", label: "GNB", bg: "#003087", text: "#ffffff" },
+  { key: "bancoomeva", tokens: ["bancoomeva", "coomeva"], slug: "bancoomeva", label: "CM", bg: "#00A650", text: "#ffffff" },
+  { key: "finandina", tokens: ["finandina"], slug: "finandina", label: "FIN", bg: "#0067B1", text: "#ffffff" },
+  { key: "bancow", tokens: ["banco w", "bancow"], slug: "bancow", label: "W", bg: "#E4002B", text: "#ffffff" },
+  { key: "lulo", tokens: ["lulo"], slug: "lulo", label: "LULO", bg: "#FF2D6C", text: "#ffffff" },
+  { key: "nu", tokens: ["nu colombia", "nubank"], slug: "nu", label: "NU", bg: "#820AD1", text: "#ffffff" },
+];
+
+/** Marca del banco por nombre (o `brebKey`). `null` si no hay marca conocida. */
+export function resolveBankBrand(
   bankName: string,
   brebKey?: boolean,
-): BankLogoKey {
-  if (brebKey) return "breb";
+): BankBrand | null {
+  if (brebKey) return BANK_BRANDS[0];
   const n = bankName.trim().toLowerCase();
-  if (n.includes("bre-b") || n.includes("breb")) return "breb";
-  if (n.includes("bancolombia")) return "bancolombia";
-  if (n.includes("bbva")) return "bbva";
-  if (n.includes("nequi")) return "nequi";
-  if (n.includes("daviplata")) return "daviplata";
-  if (n.includes("davivienda")) return "davivienda";
-  if (n.includes("bogotá") || n.includes("bogota")) return "bogota";
-  if (n.includes("occidente")) return "occidente";
-  return "default";
+  if (!n) return null;
+  return BANK_BRANDS.find((brand) => brand.tokens.some((t) => n.includes(t))) ?? null;
 }
 
-function TextLogo({
+/** Retrocompatibilidad: clave de marca (o "default"). */
+export function resolveBankLogoKey(bankName: string, brebKey?: boolean): string {
+  return resolveBankBrand(bankName, brebKey)?.key ?? "default";
+}
+
+function initialsFrom(bankName: string): string {
+  return (
+    bankName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? "")
+      .join("") || "BAN"
+  );
+}
+
+/** Badge de respaldo con color de marca + iniciales (cuando no hay PNG). */
+function BrandBadge({
   label,
-  className,
+  bg,
+  text,
+  alt,
 }: {
   label: string;
-  className: string;
+  bg: string;
+  text: string;
+  alt: string;
 }) {
   return (
-    <span
-      className={`text-[10px] font-extrabold leading-none tracking-tight ${className}`}
+    <div
+      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl px-1"
+      style={{ backgroundColor: bg }}
+      aria-label={alt}
     >
-      {label}
-    </span>
+      <span
+        className="text-[10px] font-extrabold leading-none tracking-tight"
+        style={{ color: text }}
+      >
+        {label}
+      </span>
+    </div>
   );
 }
 
 /**
- * Logo del banco como imagen (app-icon). Si la imagen falla en cargar (p. ej.
- * el archivo aún no existe en /public/banks), muestra el `fallback`.
+ * Logo del banco: intenta la imagen /public/banks/<slug>.png y, si aún no
+ * existe (o falla), cae al `fallback`.
  */
 function ImageLogo({
   src,
@@ -63,13 +118,13 @@ function ImageLogo({
   if (failed) return <>{fallback}</>;
   return (
     <div
-      className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-gray-200 bg-white"
+      className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white p-1"
       aria-label={alt}
     >
       <img
         src={src}
         alt={alt}
-        className="h-full w-full object-cover"
+        className="h-full w-full object-contain"
         onError={() => setFailed(true)}
       />
     </div>
@@ -83,125 +138,33 @@ export function BankLogoBadge({
   bankName: string;
   brebKey?: boolean;
 }) {
-  const key = resolveBankLogoKey(bankName, brebKey);
+  const brand = resolveBankBrand(bankName, brebKey);
 
-  if (key === "bancolombia") {
+  if (!brand) {
+    // Banco desconocido: badge genérico con iniciales.
     return (
-      <div
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white px-1.5"
-        aria-label="Bancolombia"
-      >
-        <img
-          src="/banks/bancolombia.png"
-          alt="Bancolombia"
-          className="h-9 w-9 object-contain"
-        />
-      </div>
-    );
-  }
-
-  if (key === "bbva") {
-    return (
-      <div
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#072146]"
-        aria-label="BBVA"
-      >
-        <TextLogo label="BBVA" className="text-white" />
-      </div>
-    );
-  }
-
-  if (key === "nequi") {
-    return (
-      <div
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#200020]"
-        aria-label="Nequi"
-      >
-        <TextLogo label="NEQUI" className="text-white" />
-      </div>
-    );
-  }
-
-  if (key === "davivienda") {
-    return (
-      <ImageLogo
-        src="/banks/davivienda.png"
-        alt="Davivienda"
-        fallback={
-          <div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#ED1C24]"
-            aria-label="Davivienda"
-          >
-            <TextLogo label="DAV" className="text-white" />
-          </div>
-        }
+      <BrandBadge
+        label={initialsFrom(bankName)}
+        bg="#047857"
+        text="#ffffff"
+        alt={bankName || "Banco"}
       />
     );
   }
 
-  if (key === "daviplata") {
-    return (
-      <div
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#E1251B]"
-        aria-label="Daviplata"
-      >
-        <TextLogo label="DP" className="text-white" />
-      </div>
-    );
-  }
-
-  if (key === "bogota") {
-    return (
-      <div
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#003DA5]"
-        aria-label="Banco de Bogotá"
-      >
-        <TextLogo label="BdB" className="text-[9px] text-white" />
-      </div>
-    );
-  }
-
-  if (key === "occidente") {
-    return (
-      <div
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#00529B]"
-        aria-label="Banco de Occidente"
-      >
-        <TextLogo label="BO" className="text-white" />
-      </div>
-    );
-  }
-
-  if (key === "breb") {
-    return (
-      <ImageLogo
-        src="/banks/logobreb.png"
-        alt="Bre-B"
-        fallback={
-          <div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#32005F]"
-            aria-label="Bre-B"
-          >
-            <TextLogo label="Bre-B" className="text-[#5DCAA5]" />
-          </div>
-        }
-      />
-    );
-  }
-
-  const initials = bankName
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
-
+  const alt = brand.key === "breb" ? "Bre-B" : bankName || brand.label;
   return (
-    <div
-      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-700"
-      aria-label={bankName}
-    >
-      <TextLogo label={initials || "BAN"} className="text-white" />
-    </div>
+    <ImageLogo
+      src={`/banks/${brand.slug}.png`}
+      alt={alt}
+      fallback={
+        <BrandBadge
+          label={brand.label}
+          bg={brand.bg}
+          text={brand.text}
+          alt={alt}
+        />
+      }
+    />
   );
 }

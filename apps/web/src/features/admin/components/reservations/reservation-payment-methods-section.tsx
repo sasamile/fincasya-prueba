@@ -736,6 +736,20 @@ export function ReservationPaymentMethodsSection({
     return () => window.clearTimeout(timer);
   }, [selectedAccountIds, boldLink, boldSurcharge, persistPortalConfig]);
 
+  // Flush del guardado pendiente al desmontar (cerrar el detalle de la reserva
+  // o navegar): evita perder la última cuenta creada —p.ej. una llave Bre-B—
+  // si el editor se cierra antes de que corra el debounce de 400ms.
+  const persistPortalConfigRef = useRef(persistPortalConfig);
+  useEffect(() => {
+    persistPortalConfigRef.current = persistPortalConfig;
+  }, [persistPortalConfig]);
+  useEffect(
+    () => () => {
+      void persistPortalConfigRef.current();
+    },
+    [],
+  );
+
   const toggleAccount = (id: string, checked: boolean) => {
     setSelectedAccountIds((prev) =>
       checked ? [...new Set([...prev, id])] : prev.filter((x) => x !== id),
