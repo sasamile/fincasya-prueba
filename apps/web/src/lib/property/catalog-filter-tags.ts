@@ -1,4 +1,4 @@
-import type { PropertyResponse } from "../types";
+import type { PropertyResponse } from "@/features/landing/types";
 
 /** IDs de pestañas del home (RegionFilter), excepto "todas" y "favoritas". */
 export const CATALOG_GEO_TAB_IDS = [

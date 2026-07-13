@@ -11,7 +11,7 @@ import {
 import {
   CANONICAL_PROPERTY_LOCATIONS,
   canonicalLocationDisplay,
-} from "@/lib/property-locations";
+} from "@/lib/property/property-locations";
 
 interface PropertyLocationSelectProps {
   value: string;

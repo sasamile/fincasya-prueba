@@ -7,7 +7,7 @@ import {
   useUpdateTabOrder,
 } from "@/features/fincas/queries/fincas.queries";
 import { PropertyResponse } from "@/features/fincas/types/fincas.types";
-import { propertyMatchesSearchQuery } from "@/features/home/lib/property-search";
+import { propertyMatchesSearchQuery } from "@/lib/property/property-search";
 import {
   Reorder,
   useDragControls,
@@ -41,7 +41,7 @@ import {
   propertyMatchesEventosTab,
   propertyMatchesGeoTab,
   propertyMatchesLuxuryTab,
-} from "@/features/home/lib/catalog-filter-tags";
+} from "@/lib/property/catalog-filter-tags";
 
 const HighlightMatch = memo(function HighlightMatch({
   text,

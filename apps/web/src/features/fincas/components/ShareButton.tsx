@@ -4,7 +4,7 @@ import { Share } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 import { ShareModal } from './ShareModal';
-import type { PropertyDetail } from '../types';
+import type { PropertyDetail } from '../types/fincas.types';
 
 interface ShareButtonProps {
   finca: PropertyDetail;

@@ -71,7 +71,7 @@ import { BankAccountDialog } from "@/features/admin/components/contracts/bank-ac
 import { BankLogoBadge } from "@/features/checkin/components/bank-logo-badge";
 import { splitGlobalHolders } from "../utils/payment-holder-groups";
 import { createSaleLink } from "../api/sale-links.api";
-import { propertyMatchesSearchQuery } from "@/features/home/lib/property-search";
+import { propertyMatchesSearchQuery } from "@/lib/property/property-search";
 
 type BankDialogTarget = "fincasya" | "hernan" | "owner" | "other";
 

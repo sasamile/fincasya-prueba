@@ -184,7 +184,7 @@ export default function ContractsManagerPage() {
   const isLoading = rawContracts === undefined;
   const isFetching = rawContracts === undefined;
   const isError = false;
-  const error: Error | null = null;
+  const error = null as Error | null;
   const refetch = () => {
     /* Convex es reactivo */
   };
@@ -401,7 +401,7 @@ export default function ContractsManagerPage() {
           <div>
             <p className="font-semibold">No se pudieron cargar los contratos</p>
             <p className="text-xs mt-0.5 opacity-80">
-              {(error as Error)?.message || "Error de conexión con el servidor."}
+              {error?.message || "Error de conexión con el servidor."}
             </p>
             <Button
               variant="outline"

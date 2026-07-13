@@ -17,7 +17,7 @@ import {
 } from 'react-icons/fa6';
 import { getSeededRating, slugify } from '@/lib/utils';
 import { useState } from 'react';
-import type { PropertyDetail } from '../types';
+import type { PropertyDetail } from '../types/fincas.types';
 
 interface ShareModalProps {
   isOpen: boolean;

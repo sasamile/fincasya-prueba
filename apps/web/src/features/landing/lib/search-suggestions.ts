@@ -2,14 +2,14 @@ import {
   CANONICAL_PROPERTY_LOCATIONS,
   canonicalLocationDisplay,
   normalizeLocationKey,
-} from "./property-locations";
+} from "@/lib/property/property-locations";
 import {
   normalizeSearchText,
   propertyMatchesNamePrefix,
   propertySearchRelevanceScore,
   SEARCH_SUGGESTION_MIN_CHARS,
   type PropertySearchFields,
-} from "./property-search";
+} from "@/lib/property/property-search";
 
 function uniqueSorted(values: string[]): string[] {
   const seen = new Set<string>();

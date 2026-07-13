@@ -24,7 +24,7 @@ import {
   CATALOG_TAG_LABELS,
   formatCatalogTabLabel,
   isBuiltInCatalogTagId,
-} from "@/features/home/lib/catalog-filter-tags";
+} from "@/lib/property/catalog-filter-tags";
 
 const PRESETS_STORAGE_KEY = "fincasya-catalog-filter-tag-presets";
 const HIDDEN_STORAGE_KEY = "fincasya-catalog-filter-tag-hidden";

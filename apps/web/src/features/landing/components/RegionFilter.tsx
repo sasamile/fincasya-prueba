@@ -2,7 +2,7 @@
 import { cn } from '@/lib/utils';
 import { ScrollFade } from '@/components/ui/scroll-fade';
 import { ChevronDown, MapPin } from 'lucide-react';
-import { HOME_TAB_ROWS } from '../lib/catalog-filter-tags';
+import { HOME_TAB_ROWS } from '@/lib/property/catalog-filter-tags';
 
 interface RegionFilterProps {
   selectedRegion: string;

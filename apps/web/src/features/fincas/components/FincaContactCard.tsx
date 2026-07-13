@@ -2,7 +2,7 @@
 
 import { Star } from 'lucide-react';
 import { cn, getSeededRating } from '@/lib/utils';
-import type { PropertyDetail } from '../types';
+import type { PropertyDetail } from '../types/fincas.types';
 
 const WHATSAPP_NUMBER = '573157773937';
 

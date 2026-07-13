@@ -69,7 +69,7 @@ import { getGuestCapacityWarning } from "@/features/admin/utils/guest-capacity-w
 import { GuestCapacityWarningAlert } from "@/features/admin/components/shared/guest-capacity-warning-alert";
 import { computePetFees } from "@/lib/pet-fees";
 import { toClientFieldUpper } from "@/lib/client-field-normalize";
-import { propertyMatchesSearchQuery } from "@/features/home/lib/property-search";
+import { propertyMatchesSearchQuery } from "@/lib/property/property-search";
 
 /** IA / CRM pueden mandar yyyy-MM-dd, ISO completo, dd/MM/yyyy, etc. */
 function toReservationIsoDate(value: unknown): string {

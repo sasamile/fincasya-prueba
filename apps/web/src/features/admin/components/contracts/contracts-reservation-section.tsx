@@ -76,7 +76,7 @@ import { normalizeContractLookupQuery } from "@/lib/normalize-contract-lookup";
 import { toClientFieldUpper } from "@/lib/client-field-normalize";
 import { getGuestCapacityWarning } from "@/features/admin/utils/guest-capacity-warning";
 import { GuestCapacityWarningAlert } from "@/features/admin/components/shared/guest-capacity-warning-alert";
-import { propertyMatchesSearchQuery } from "@/features/home/lib/property-search";
+import { propertyMatchesSearchQuery } from "@/lib/property/property-search";
 import {
   CopMoneyInput,
   copDigitsOnly as digits,

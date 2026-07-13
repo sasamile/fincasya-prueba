@@ -85,7 +85,7 @@ import {
   cn,
   tidyDescriptionText,
 } from "@/lib/utils";
-import { canonicalLocationDisplay } from "@/lib/property-locations";
+import { canonicalLocationDisplay } from "@/lib/property/property-locations";
 import { mergeDepositIntoPropertyDescription } from "@/lib/property-description-deposits";
 import { useRouter } from "next/navigation";
 import { Switch } from "@/components/ui/switch";

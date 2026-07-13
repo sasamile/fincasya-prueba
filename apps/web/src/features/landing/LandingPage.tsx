@@ -30,12 +30,12 @@ import {
   propertyMatchesEventosTab,
   propertyMatchesGeoTab,
   propertyMatchesLuxuryTab,
-} from './lib/catalog-filter-tags';
+} from '@/lib/property/catalog-filter-tags';
 import { filterPropertiesByGuests } from './lib/guest-capacity-filter';
 import {
   propertyMatchesSearchQuery,
   propertySearchRelevanceScore,
-} from './lib/property-search';
+} from '@/lib/property/property-search';
 import type { PropertyResponse } from './types';
 
 /** Mientras el web-chat no está portado, el asistente abre WhatsApp. */

@@ -134,7 +134,7 @@ import {
   RESERVATION_CALENDAR_LEGEND,
 } from "@/features/admin/utils/reservation-calendar-semaphore";
 import { ReservationCalendarMobile } from "@/features/admin/components/reservations/reservation-calendar-mobile";
-import { normalizedIncludes } from "@/features/home/lib/property-search";
+import { normalizedIncludes } from "@/lib/property/property-search";
 import { useIsMobile } from "@/hooks/shared/use-mobile";
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useState, useRef, useMemo } from "react";

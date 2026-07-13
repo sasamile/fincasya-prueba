@@ -9,8 +9,8 @@ import { Search, RefreshCw, Filter, Plus } from "lucide-react";
 import {
   buildAdminRegionOptions,
   propertyMatchesAdminRegion,
-} from "@/lib/property-locations";
-import { propertyMatchesSearchQuery } from "@/features/home/lib/property-search";
+} from "@/lib/property/property-locations";
+import { propertyMatchesSearchQuery } from "@/lib/property/property-search";
 import {
   Pagination,
   PaginationContent,
