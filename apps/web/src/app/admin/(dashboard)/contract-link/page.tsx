@@ -6,7 +6,9 @@ import { ContractsReservationSection } from "@/features/admin/components/contrac
 export default function ContractLinkPage() {
   return (
     <Suspense fallback={null}>
-      <ContractsReservationSection variant="link" />
+      <div className="flex h-[calc(100dvh-7rem)] min-h-0 flex-col">
+        <ContractsReservationSection variant="link" />
+      </div>
     </Suspense>
   );
 }

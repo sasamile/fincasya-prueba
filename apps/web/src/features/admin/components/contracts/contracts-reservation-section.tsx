@@ -7,18 +7,14 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   CheckCircle2,
-  Clock3,
   CreditCard,
   Download,
-  Eye,
   FileText,
   Home,
   Loader2,
   Minus,
   Plus,
   Search,
-  Sparkles,
-  User,
   ChevronUp,
   FileCheck,
   Link2,
@@ -28,7 +24,6 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import { FormSection } from "../shared/form-section";
 import {
   useCalculateStayPrice,
   useProperties,
@@ -49,6 +44,7 @@ import {
   buildReservationPreviewFincaData,
 } from "@/features/admin/utils/contract-preview-helpers";
 import { ContractGlobalSetupSections } from "@/features/admin/components/contracts/contract-global-setup-sections";
+import { ContractDocumentPreview } from "@/features/admin/components/contracts/contract-document-preview";
 import { ContractCodeHistoryModal } from "@/features/admin/components/contracts/contract-code-history-modal";
 import {
   generateContractDocxAction,
@@ -491,7 +487,15 @@ export function ContractsReservationSection({
     "Cargos",
     "Cliente",
     "Revisar",
-  ];
+  ] as const;
+  const CONTRACT_STEP_HINTS: Record<(typeof CONTRACT_STEPS)[number], string> = {
+    Finca: "Busca y selecciona la finca para este contrato.",
+    Propietario: "Nombre y documento del propietario en el contrato.",
+    Estadía: "Fechas, horas, huéspedes y valores del arrendamiento.",
+    Cargos: "Mascotas, servicio, manilla, otros cobros y evento.",
+    Cliente: "Datos de quien firma el contrato.",
+    Revisar: "Vista previa del contrato antes de generar.",
+  };
   const selectedFirmante = useMemo(
     () =>
       firmantes.find((f) => f.id === selectedFirmanteId) ??
@@ -1649,12 +1653,7 @@ export function ContractsReservationSection({
       if (hasPropertyPdfTemplate) {
         const contractResponse = await axios.post(
           `/api/fincas/${effectiveForm.propertyId}/direct-booking-contract`,
-          {
-            ...buildContractPayload(effectiveForm, generatedContractNumber),
-            // El servidor genera el PDF desde este HTML ya renderizado (WYSIWYG
-            // con la vista previa) vía Puppeteer.
-            customHtml: contractPreviewHtml,
-          },
+          buildContractPayload(effectiveForm, generatedContractNumber),
           { withCredentials: true },
         );
         contractUrlResult = contractResponse.data?.url || "";
@@ -1690,6 +1689,9 @@ export function ContractsReservationSection({
             `Contrato_${generatedContractNumber}.${isDocxArtifact ? "docx" : "pdf"}`;
           download(contractLocalBlob, downloadName);
           contractDocxDownloadedEarly = true;
+          if (!isDocxArtifact) {
+            toast.success("Contrato PDF descargado.", { duration: 4000 });
+          }
         } else {
           setContractUrl(contractUrlResult);
           setContractArtifactKind(
@@ -2054,22 +2056,36 @@ export function ContractsReservationSection({
 
   const fieldLabelClass = (field: keyof FormState) =>
     cn(
-      "ml-1 text-[11px] font-black uppercase tracking-[0.18em]",
+      "ml-1 text-[10px] font-black uppercase tracking-[0.16em]",
       errors[field] ? "text-red-500" : "text-zinc-400",
     );
 
+  const helperTextClass = "ml-1 text-[11px] leading-snug text-zinc-500";
+
+  const formControlClass =
+    "h-11 w-full rounded-xl border border-zinc-100 bg-zinc-50/80 text-sm shadow-sm transition-all";
+
   const fieldClass = (field: keyof FormState) =>
     cn(
-      "h-14 rounded-2xl border bg-zinc-50/80 shadow-sm transition-all",
+      formControlClass,
       errors[field]
         ? "border-red-500 focus-visible:ring-2 focus-visible:ring-red-200"
-        : "border-zinc-100 focus-visible:ring-2 focus-visible:ring-zinc-900/10",
+        : "focus-visible:ring-2 focus-visible:ring-zinc-900/10",
+    );
+
+  const formButtonClass =
+    "h-11 shrink-0 rounded-xl border border-zinc-200 bg-white px-4 text-xs font-bold text-zinc-700 hover:bg-zinc-50";
+
+  const ownerFieldClass = (hasError?: boolean) =>
+    cn(
+      formControlClass,
+      hasError ? "border-red-500" : "border-zinc-100",
     );
 
   const sectionTitleClass = "text-lg font-bold tracking-tight text-zinc-950";
 
   return (
-    <div className="space-y-4 p-4 md:p-6 lg:flex lg:h-[calc(100dvh-3.75rem)] lg:flex-col lg:gap-0 lg:overflow-hidden lg:p-3">
+    <div className="flex h-full min-h-0 flex-col">
 
       {/* ── CONFIRMAR PAGO (modal) ─────────────────────────────────────── */}
       {!isLinkMode && (
@@ -2077,10 +2093,10 @@ export function ContractsReservationSection({
       <Dialog open={confModalOpen} onOpenChange={setConfModalOpen}>
         <DialogContent
           showCloseButton
-          className="flex max-h-[min(90vh,760px)] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden border-emerald-100 bg-white p-0 sm:max-w-xl"
+          className="flex max-h-[min(90vh,760px)] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden border-orange-100 bg-white p-0 sm:max-w-xl"
         >
-          <DialogHeader className="shrink-0 border-b border-emerald-100 bg-emerald-50/90 px-5 py-4 text-left dark:border-zinc-800 dark:bg-zinc-900">
-            <DialogTitle className="text-lg font-bold text-emerald-950 dark:text-zinc-50">
+          <DialogHeader className="shrink-0 border-b border-orange-100 bg-orange-50/90 px-5 py-4 text-left dark:border-zinc-800 dark:bg-zinc-900">
+            <DialogTitle className="text-lg font-bold text-orange-950 dark:text-zinc-50">
               Confirmar pago
             </DialogTitle>
           </DialogHeader>
@@ -2105,7 +2121,7 @@ export function ContractsReservationSection({
                   type="button"
                   onClick={() => void searchContractBooking()}
                   disabled={confSearchLoading || !confSearchNumber.trim()}
-                  className="h-12 rounded-xl bg-emerald-600 px-5 font-bold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400"
+                  className="h-12 rounded-xl bg-orange-600 px-5 font-bold text-white hover:bg-orange-700 dark:bg-orange-500 dark:hover:bg-orange-400"
                 >
                   {confSearchLoading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -2116,6 +2132,18 @@ export function ContractsReservationSection({
                 </Button>
               </div>
             </div>
+
+            {!confFoundBooking && !confSearchLoading && (
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-orange-200 bg-orange-50/60 px-4 py-8 text-center dark:border-zinc-700 dark:bg-zinc-900/40">
+                <Search className="h-7 w-7 text-orange-300" />
+                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  Ingresa el número de contrato y presiona <span className="text-orange-600">Buscar</span>
+                </p>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                  Ej: FY-2005, DIR-VILLA-PALMA-… o el número asignado al contrato
+                </p>
+              </div>
+            )}
 
             {confFoundBooking && (
               <motion.div
@@ -2128,7 +2156,7 @@ export function ContractsReservationSection({
                     Borrador del contrato (aún no hay reserva en el calendario). Al generar la confirmación PDF se creará la reserva con el pago indicado.
                   </p>
                 ) : null}
-                <div className="flex flex-wrap gap-2 rounded-xl border border-emerald-100 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900/80">
+                <div className="flex divide-x divide-orange-100 overflow-hidden rounded-xl border border-orange-100 bg-orange-50 dark:divide-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/80">
                   {[
                     { label: "Cliente", value: confFoundBooking.nombreCompleto },
                     { label: "Finca", value: confFoundBooking.propertyTitle },
@@ -2151,11 +2179,11 @@ export function ContractsReservationSection({
                         : "-",
                     },
                   ].map(({ label, value }) => (
-                    <div key={label} className="rounded-lg bg-emerald-50 px-3 py-1.5 dark:bg-emerald-950/50">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                        {label}:{" "}
-                      </span>
-                      <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">{value}</span>
+                    <div key={label} className="min-w-0 flex-1 px-3 py-2" title={value ?? ""}>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">
+                        {label}
+                      </p>
+                      <p className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">{value}</p>
                     </div>
                   ))}
                 </div>
@@ -2231,7 +2259,7 @@ export function ContractsReservationSection({
                       value={confForm.paymentMethod}
                       onValueChange={(v) => setConfForm((p) => ({ ...p, paymentMethod: v }))}
                     >
-                      <SelectTrigger className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+                      <SelectTrigger className="h-12! w-full rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -2252,7 +2280,7 @@ export function ContractsReservationSection({
                       value={confForm.paymentStatus}
                       onValueChange={(v) => setConfForm((p) => ({ ...p, paymentStatus: v }))}
                     >
-                      <SelectTrigger className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+                      <SelectTrigger className="h-12! w-full rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -2267,7 +2295,7 @@ export function ContractsReservationSection({
                   type="button"
                   onClick={() => void generateConfirmationPdf()}
                   disabled={loadingConfirmation}
-                  className="h-14 w-full rounded-2xl bg-emerald-600 text-base font-bold text-white shadow hover:bg-emerald-700"
+                  className="h-14 w-full rounded-2xl bg-orange-600 text-base font-bold text-white shadow hover:bg-orange-700"
                 >
                   {loadingConfirmation ? (
                     <>
@@ -2288,20 +2316,17 @@ export function ContractsReservationSection({
       )}
 
       {/* ── CONTRATOS ─────────────────────────────────────────────────── */}
-      <div className="rounded-2xl lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
-        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
-          <div
-            className="border-r border-zinc-100 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden"
-            ref={formTopRef}
-          >
-            <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-zinc-100 px-4 py-3 md:px-5">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-sm">
+        <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="flex min-h-0 flex-col" ref={formTopRef}>
+            <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-zinc-100 px-5 py-3.5 md:px-6 md:py-4">
               <div className="rounded-xl bg-zinc-900 p-2 text-white shadow-md">
                 <FileText className="h-4 w-4" />
               </div>
-              <h2 className="text-base font-bold tracking-tight text-zinc-950">
+              <h2 className="text-sm font-bold tracking-tight text-zinc-950 md:text-base">
                 {isLinkMode ? "Link de Contrato" : "Generar Contrato"}
               </h2>
-              <span className="hidden text-xs text-zinc-400 lg:inline">
+              <span className="hidden text-[11px] text-zinc-400 lg:inline">
                 · Completa los pasos y genera el PDF
               </span>
               {!isLinkMode && (
@@ -2309,7 +2334,7 @@ export function ContractsReservationSection({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="ml-auto h-9 rounded-xl border-emerald-200 bg-emerald-50/90 font-bold text-emerald-900 shadow-sm hover:bg-emerald-100"
+                  className="ml-auto h-8 rounded-lg border-orange-200 bg-orange-50/90 px-3 text-[11px] font-bold text-orange-900 shadow-sm hover:bg-orange-100"
                   onClick={() => setConfModalOpen(true)}
                 >
                   <FileCheck className="mr-1.5 h-4 w-4" />
@@ -2318,9 +2343,8 @@ export function ContractsReservationSection({
               )}
             </div>
 
-            {/* ── Stepper (fijo arriba, fuera del scroll) ───────────────── */}
-            <div className="shrink-0 px-3 pt-3 md:px-4 md:pt-4">
-            <div className="flex gap-1 rounded-xl border border-border bg-card p-1 shadow-sm">
+            <div className="shrink-0 px-5 pt-3 pb-3 md:px-6">
+            <div className="flex gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50/80 p-1">
               {CONTRACT_STEPS.map((label, i) => (
                 <button
                   key={label}
@@ -2344,7 +2368,7 @@ export function ContractsReservationSection({
                   </span>
                   <span
                     className={cn(
-                      "truncate text-[11px] font-semibold",
+                      "truncate text-[10px] font-semibold",
                       i === step ? "text-primary" : "text-muted-foreground",
                       // En pantallas angostas solo se lee el paso activo.
                       i === step ? "inline" : "hidden sm:inline",
@@ -2357,23 +2381,19 @@ export function ContractsReservationSection({
             </div>
             </div>
 
-            {/* ── Contenido del paso (única zona con scroll) ────────────── */}
-            <div className="space-y-4 p-3 md:p-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto scrollbar-hide">
+            <div className="shrink-0 border-b border-zinc-100 px-5 py-2.5 md:px-6">
+              <p className="text-xs font-bold text-zinc-950">
+                {CONTRACT_STEPS[step]}
+              </p>
+              <p className="text-[11px] leading-snug text-zinc-500">
+                {CONTRACT_STEP_HINTS[CONTRACT_STEPS[step]]}
+              </p>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5 md:p-6 scrollbar-hide">
             {step === 0 && (
             <>
-            <FormSection
-              title="Finca"
-              description="Selecciona la finca. Un PDF en Propiedades es opcional si quieres descargar el mismo texto en plantilla."
-              icon={Home}
-              gradientFrom="from-blue-500/10"
-              iconBg="bg-blue-100 text-blue-600"
-              iconShadow="shadow-blue-500/20"
-              textColor="text-blue-500"
-              compact
-              defaultOpen={true}
-              className="bg-zinc-50/50"
-            >
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="space-y-2">
                   <Label className={fieldLabelClass("propertyId")}>
                     Buscar finca
@@ -2392,11 +2412,23 @@ export function ContractsReservationSection({
                     />
                   </div>
                   {errors.propertyId && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.propertyId}
                     </p>
                   )}
                 </div>
+
+                {!isSearchFocused && !selectedProperty && (
+                  <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 py-8 text-center">
+                    <Home className="h-7 w-7 text-zinc-300" />
+                    <p className="text-[13px] font-medium text-zinc-400">
+                      Escribe el nombre o código de la finca
+                    </p>
+                    <p className="text-[11px] text-zinc-300">
+                      El campo de búsqueda está arriba
+                    </p>
+                  </div>
+                )}
 
                 <AnimatePresence>
                   {isSearchFocused && (
@@ -2406,8 +2438,8 @@ export function ContractsReservationSection({
                       exit={{ height: 0, opacity: 0 }}
                       className="overflow-hidden"
                     >
-                      <ScrollArea className="h-[200px] rounded-xl border border-zinc-100 bg-white p-2">
-                        <div className="space-y-2">
+                      <ScrollArea className="h-[240px] rounded-xl border border-zinc-100 bg-white p-2.5">
+                        <div className="space-y-2.5">
                           {isLoading ? (
                             <div className="p-4 text-sm text-zinc-500">
                               Cargando inventario de fincas...
@@ -2428,13 +2460,13 @@ export function ContractsReservationSection({
                                     setIsSearchFocused(false);
                                   }}
                                   className={cn(
-                                    "flex w-full items-center gap-3 rounded-xl border p-2 text-left transition-all",
+                                    "flex w-full items-center gap-3.5 rounded-xl border px-3 py-3 text-left transition-all",
                                     active
                                       ? "border-zinc-900 bg-zinc-900 text-white shadow-sm"
                                       : "border-zinc-100 bg-white hover:border-zinc-300 hover:bg-zinc-50",
                                   )}
                                 >
-                                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-black/5 bg-zinc-100">
+                                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-black/5 bg-zinc-100">
                                     {property.images?.[0] ? (
                                       <img
                                         src={property.images[0]}
@@ -2455,7 +2487,7 @@ export function ContractsReservationSection({
                                     )}
                                   </div>
                                   <div className="min-w-0">
-                                    <p className="truncate text-sm font-bold">
+                                    <p className="truncate text-xs font-bold">
                                       {property.title}
                                     </p>
                                     <p
@@ -2511,47 +2543,21 @@ export function ContractsReservationSection({
                               "Ubicacion no definida"}
                           </span>
                         </div>
-                        <h4 className="truncate text-base font-bold text-zinc-950 leading-tight">
+                        <h4 className="truncate text-sm font-bold text-zinc-950 leading-tight">
                           {selectedProperty.title}
                         </h4>
                       </div>
                     </div>
-
-                    {selectedProperty.contractTemplateUrl?.trim() ? (
-                      <div className="rounded-xl border border-zinc-100 bg-zinc-50/90 p-3">
-                        <a
-                          href={selectedProperty.contractTemplateUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex text-xs font-semibold text-blue-700 hover:underline"
-                        >
-                          Abrir plantilla del contrato (PDF/Word) de esta finca
-                        </a>
-                      </div>
-                    ) : null}
                   </div>
                 )}
               </div>
-            </FormSection>
             </>
             )}
 
             {step === 1 && (
             <>
             {selectedProperty && form.propertyId ? (
-              <FormSection
-                title="Propietario de la finca (contrato)"
-                description="Datos legales del propietario en el contrato. Al seleccionar la finca se precargan si están registrados; solo el nombre es obligatorio."
-                icon={User}
-                gradientFrom="from-violet-500/10"
-                iconBg="bg-violet-100 text-violet-700"
-                iconShadow="shadow-violet-500/20"
-                textColor="text-violet-600"
-                compact
-              defaultOpen={true}
-                className="bg-zinc-50/50"
-              >
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="space-y-2 md:col-span-2">
                     <Label className="ml-1 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
                       Nombre completo del propietario *
@@ -2571,15 +2577,10 @@ export function ContractsReservationSection({
                           ? ownerResolved.name
                           : "Ej. María Pérez"
                       }
-                      className={cn(
-                        "h-14 rounded-2xl border bg-zinc-50/80 shadow-sm",
-                        errors.propertyOwnerName
-                          ? "border-red-500"
-                          : "border-zinc-100",
-                      )}
+                      className={ownerFieldClass(Boolean(errors.propertyOwnerName))}
                     />
                     {errors.propertyOwnerName && (
-                      <p className="ml-1 text-xs font-semibold text-red-500">
+                      <p className="ml-1 text-[11px] font-semibold text-red-500">
                         {errors.propertyOwnerName}
                       </p>
                     )}
@@ -2599,7 +2600,7 @@ export function ContractsReservationSection({
                         })
                       }
                       placeholder="Número de documento"
-                      className="h-14 rounded-2xl border border-zinc-100 bg-zinc-50/80 shadow-sm"
+                      className={ownerFieldClass()}
                     />
                   </div>
                   <div className="space-y-2">
@@ -2617,35 +2618,26 @@ export function ContractsReservationSection({
                         })
                       }
                       placeholder="Ej. Bogotá D.C."
-                      className="h-14 rounded-2xl border border-zinc-100 bg-zinc-50/80 shadow-sm"
+                      className={ownerFieldClass()}
                     />
                   </div>
                 </div>
-              </FormSection>
-            ) : null}
+            ) : (
+              <p className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-4 text-sm text-zinc-500">
+                Primero selecciona una finca en el paso anterior.
+              </p>
+            )}
             </>
             )}
 
             {step === 2 && (
             <>
-            <FormSection
-              title="Estadia y Logistica"
-              description="Fechas, horas y valores del contrato"
-              icon={Clock3}
-              gradientFrom="from-amber-500/10"
-              iconBg="bg-amber-100 text-amber-600"
-              iconShadow="shadow-amber-500/20"
-              textColor="text-amber-500"
-              compact
-              defaultOpen={true}
-              className="bg-zinc-50/50"
-            >
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div className="space-y-2 md:col-span-2">
                   <Label className={fieldLabelClass("contractNumber")}>
                     Codigo contrato
                   </Label>
-                  <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <Input
                       value={form.contractNumber}
                       onChange={(event) =>
@@ -2657,7 +2649,7 @@ export function ContractsReservationSection({
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-14 shrink-0 rounded-2xl border-zinc-200 bg-white px-4 text-xs font-bold text-zinc-700 hover:bg-zinc-50"
+                      className={formButtonClass}
                       onClick={() => setCodeHistoryOpen(true)}
                     >
                       <History className="mr-2 h-4 w-4" />
@@ -2682,7 +2674,7 @@ export function ContractsReservationSection({
                     editado manualmente.
                   </p>
                   {errors.nightlyPrice && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.nightlyPrice}
                     </p>
                   )}
@@ -2702,7 +2694,7 @@ export function ContractsReservationSection({
                     className={fieldClass("checkInDate")}
                   />
                   {errors.checkInDate && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.checkInDate}
                     </p>
                   )}
@@ -2723,7 +2715,7 @@ export function ContractsReservationSection({
                     className={fieldClass("checkOutDate")}
                   />
                   {errors.checkOutDate && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.checkOutDate}
                     </p>
                   )}
@@ -2746,7 +2738,7 @@ export function ContractsReservationSection({
                     Puedes escribir la hora o elegir una sugerencia.
                   </p>
                   {errors.checkInTime && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.checkInTime}
                     </p>
                   )}
@@ -2769,7 +2761,7 @@ export function ContractsReservationSection({
                     Puedes escribir la hora o elegir una sugerencia.
                   </p>
                   {errors.checkOutTime && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.checkOutTime}
                     </p>
                   )}
@@ -2787,7 +2779,7 @@ export function ContractsReservationSection({
                     className={fieldClass("guests")}
                   />
                   {errors.guests && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.guests}
                     </p>
                   )}
@@ -2829,7 +2821,7 @@ export function ContractsReservationSection({
                     </SelectContent>
                   </Select>
                   {errors.temporada && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.temporada}
                     </p>
                   )}
@@ -2853,35 +2845,22 @@ export function ContractsReservationSection({
                     </SelectContent>
                   </Select>
                   {errors.groupType && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.groupType}
                     </p>
                   )}
                 </div>
               </div>
-            </FormSection>
             </>
             )}
 
             {step === 3 && (
             <>
-            <FormSection
-              title="Adicionales y Cargos"
-              description="Mascotas, servicio y extras del contrato"
-              icon={Sparkles}
-              gradientFrom="from-emerald-500/10"
-              iconBg="bg-emerald-100 text-emerald-600"
-              iconShadow="shadow-emerald-500/20"
-              textColor="text-emerald-500"
-              compact
-              defaultOpen={true}
-              className="bg-zinc-50/50"
-            >
-              <div className="grid gap-4">
-                <div className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-4">
-                  <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="grid gap-3">
+                <div className="rounded-xl border border-zinc-100 bg-white p-3">
+                  <div className="mb-2.5 flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-bold text-zinc-950">
+                      <p className="text-xs font-bold text-zinc-950">
                         Cargos por Mascotas
                       </p>
                       <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
@@ -2901,12 +2880,12 @@ export function ContractsReservationSection({
                     </Badge>
                   </div>
 
-                  <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-zinc-100 bg-white p-4">
-                    <div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0 flex-1">
                       <Label className={fieldLabelClass("petCount")}>
                         Numero de mascotas
                       </Label>
-                      <p className="mt-1 text-sm text-zinc-500">
+                      <p className="mt-0.5 text-[11px] leading-snug text-zinc-500">
                         {canConfigurePetCharges
                           ? propertyAllowsPets
                             ? "Define aqui el cargo que debe entrar al contrato antes de generar el PDF."
@@ -2914,17 +2893,17 @@ export function ContractsReservationSection({
                           : "Esta finca no permite mascotas. Los cargos de mascotas se mantienen en 0."}
                       </p>
                       {errors.petCount && (
-                        <p className="mt-1 text-xs font-semibold text-red-500">
+                        <p className="mt-1 text-[11px] font-semibold text-red-500">
                           {errors.petCount}
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex shrink-0 items-center gap-2">
                       <Button
                         type="button"
                         variant="outline"
                         size="icon"
-                        className="h-10 w-10 rounded-full"
+                        className="h-9 w-9 rounded-full"
                         disabled={
                           !canConfigurePetCharges ||
                           Number(form.petCount || 0) <= 0
@@ -2938,7 +2917,7 @@ export function ContractsReservationSection({
                       >
                         <Minus className="h-4 w-4" />
                       </Button>
-                      <div className="min-w-10 text-center text-lg font-bold">
+                      <div className="min-w-8 text-center text-sm font-bold">
                         {form.petCount || "0"}
                       </div>
                       <Button
@@ -2961,10 +2940,10 @@ export function ContractsReservationSection({
                 </div>
 
                 {propertyServiceAvailable && (
-                  <div className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-4">
-                    <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="rounded-xl border border-zinc-100 bg-white p-3">
+                    <div className="mb-2.5 flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-bold text-zinc-950">
+                        <p className="text-xs font-bold text-zinc-950">
                           Personal de aseo / cocina
                         </p>
                         <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
@@ -2978,13 +2957,13 @@ export function ContractsReservationSection({
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:items-end">
                       <Button
                         type="button"
                         variant={
                           form.serviceStaffIncluded ? "default" : "outline"
                         }
-                        className="h-12 rounded-xl"
+                        className="h-11 w-full rounded-xl"
                         disabled={propertyServiceMandatory}
                         onClick={() =>
                           setField(
@@ -2998,7 +2977,7 @@ export function ContractsReservationSection({
                           : "Incluir servicio"}
                       </Button>
 
-                      <div className="space-y-2">
+                      <div className="space-y-1.5">
                         <Label className={fieldLabelClass("serviceStaffFee")}>
                           Valor servicio
                         </Label>
@@ -3020,7 +2999,7 @@ export function ContractsReservationSection({
                           className={fieldClass("serviceStaffFee")}
                         />
                         {errors.serviceStaffFee && (
-                          <p className="ml-1 text-xs font-semibold text-red-500">
+                          <p className="ml-1 text-[11px] font-semibold text-red-500">
                             {errors.serviceStaffFee}
                           </p>
                         )}
@@ -3029,17 +3008,17 @@ export function ContractsReservationSection({
                   </div>
                 )}
 
-                <div className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-4">
-                  <div className="mb-3">
-                    <p className="text-sm font-bold text-zinc-950">
+                <div className="rounded-xl border border-zinc-100 bg-white p-3">
+                  <div className="mb-2.5">
+                    <p className="text-xs font-bold text-zinc-950">
                       Cargos adicionales al total del contrato
                     </p>
                     <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
                       Manilla y otros cobros se suman al resumen de cobro y aparecen en el contrato antes de las firmas. El aseo se edita abajo en «Configuración del contrato».
                     </p>
                   </div>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
                       <Label className={fieldLabelClass("manillaCondominio")}>
                         Manilla condominio
                       </Label>
@@ -3052,7 +3031,7 @@ export function ContractsReservationSection({
                         En el contrato: bloque «Cargos adicionales acordados».
                       </p>
                     </div>
-                    <div className="space-y-2 md:col-span-2">
+                    <div className="space-y-1.5 md:col-span-2">
                       <Label className={fieldLabelClass("otherCharges")}>
                         Otros cobros (no alojamiento)
                       </Label>
@@ -3069,10 +3048,10 @@ export function ContractsReservationSection({
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-orange-400/40 bg-orange-500 p-4 text-white">
-                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="rounded-xl border border-orange-400/40 bg-orange-500 p-3 text-white">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-sm font-bold text-white">
+                      <p className="text-xs font-bold text-white">
                         ¿Es un Evento?
                       </p>
                       <p className="text-[10px] font-medium uppercase tracking-wider text-white/70">
@@ -3097,7 +3076,7 @@ export function ContractsReservationSection({
                             type="button"
                             aria-pressed={selected}
                             className={cn(
-                              "rounded-lg px-3 py-2 text-[10px] font-bold transition-all sm:text-xs",
+                              "flex h-11 items-center rounded-lg px-3 text-[10px] font-bold transition-all sm:px-4 sm:text-xs",
                               selected
                                 ? "bg-white text-orange-700 shadow-md"
                                 : "text-white/55 hover:text-white",
@@ -3114,7 +3093,7 @@ export function ContractsReservationSection({
                   </div>
 
                   {form.isEvento && (
-                    <div className="mt-4 grid grid-cols-1 gap-4 rounded-xl border border-white/25 bg-orange-600/40 p-4 md:grid-cols-2">
+                    <div className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-white/25 bg-orange-600/40 p-3 md:grid-cols-2">
                       {[
                         { id: "extraSound", label: "¿Sonido adicional?" },
                         { id: "liveMusic", label: "¿Música en vivo?" },
@@ -3163,26 +3142,13 @@ export function ContractsReservationSection({
                   )}
                 </div>
               </div>
-            </FormSection>
             </>
             )}
 
             {step === 4 && (
             <>
             {!isLinkMode && (
-            <FormSection
-              title="Informacion del Cliente"
-              description="Todos estos datos son obligatorios para diligenciar el contrato"
-              icon={User}
-              gradientFrom="from-zinc-500/10"
-              iconBg="bg-zinc-100 text-zinc-700"
-              iconShadow="shadow-zinc-500/20"
-              textColor="text-zinc-500"
-              compact
-              defaultOpen={true}
-              className="bg-zinc-50/50"
-            >
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className={fieldLabelClass("clientName")}>
                     Nombre completo
@@ -3195,7 +3161,7 @@ export function ContractsReservationSection({
                     className={fieldClass("clientName")}
                   />
                   {errors.clientName && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.clientName}
                     </p>
                   )}
@@ -3212,7 +3178,7 @@ export function ContractsReservationSection({
                     className={fieldClass("clientId")}
                   />
                   {errors.clientId && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.clientId}
                     </p>
                   )}
@@ -3229,7 +3195,7 @@ export function ContractsReservationSection({
                     className={fieldClass("clientPhone")}
                   />
                   {errors.clientPhone && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.clientPhone}
                     </p>
                   )}
@@ -3246,7 +3212,7 @@ export function ContractsReservationSection({
                     className={fieldClass("clientEmail")}
                   />
                   {errors.clientEmail && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.clientEmail}
                     </p>
                   )}
@@ -3279,13 +3245,12 @@ export function ContractsReservationSection({
                     className={fieldClass("clientAddress")}
                   />
                   {errors.clientAddress && (
-                    <p className="ml-1 text-xs font-semibold text-red-500">
+                    <p className="ml-1 text-[11px] font-semibold text-red-500">
                       {errors.clientAddress}
                     </p>
                   )}
                 </div>
               </div>
-            </FormSection>
             )}
 
             <ContractGlobalSetupSections
@@ -3315,18 +3280,6 @@ export function ContractsReservationSection({
 
             {step === 5 && (
             <>
-            <FormSection
-              title="Vista previa del contrato"
-              description="Vista del documento tal como se generará en PDF (texto justificado y logo). Los datos salen del formulario y de las cláusulas."
-              icon={Eye}
-              gradientFrom="from-indigo-500/10"
-              iconBg="bg-indigo-100 text-indigo-700"
-              iconShadow="shadow-indigo-500/20"
-              textColor="text-indigo-600"
-              compact
-              defaultOpen={true}
-              className="bg-zinc-50/50"
-            >
               {!form.propertyId ? (
                 <p className="text-sm text-zinc-500">
                   Selecciona una finca para armar la vista previa.
@@ -3338,7 +3291,7 @@ export function ContractsReservationSection({
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="rounded-xl text-xs font-bold"
+                      className="rounded-xl text-[11px] font-bold"
                       onClick={() =>
                         formTopRef.current?.scrollIntoView({
                           behavior: "smooth",
@@ -3350,36 +3303,29 @@ export function ContractsReservationSection({
                       Volver al inicio del formulario
                     </Button>
                   </div>
-                  <ScrollArea className="h-[min(70vh,720px)] rounded-2xl border border-zinc-200 bg-white">
-                    <div
-                      className="prose prose-sm max-w-none p-6 text-zinc-900 leading-relaxed [&_p]:my-2 [&_p[align=center]]:text-center! [&_p[style*='text-align:center']]:text-center! [&_p]:text-justify! [&_.contract-amenities]:text-left! [&_.contract-amenities_*]:text-left!"
-                      style={{ fontFamily: "Arial, Helvetica, sans-serif" }}
-                      dangerouslySetInnerHTML={{
-                        __html: contractPreviewHtml,
-                      }}
-                    />
+                  <ScrollArea className="h-[min(60vh,640px)] rounded-xl border border-zinc-200">
+                    <ContractDocumentPreview html={contractPreviewHtml} />
                   </ScrollArea>
                 </div>
               )}
-            </FormSection>
             </>
             )}
 
             </div>
 
-            {/* ── Navegación (footer fijo al fondo de la columna) ───────── */}
-            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-background px-3 py-3 md:px-4">
+            {/* ── Navegación (siempre al fondo) ──────────────────────── */}
+            <div className="mt-auto flex shrink-0 items-center justify-between gap-3 border-t border-zinc-200 bg-zinc-50/70 px-5 py-3.5 md:px-6">
               <Button
                 type="button"
                 variant="outline"
                 disabled={step === 0}
                 onClick={() => setStep((s) => Math.max(0, s - 1))}
-                className="rounded-xl"
+                className="h-10 rounded-xl px-3 text-xs"
               >
-                <ChevronLeft className="mr-1 h-4 w-4" />
+                <ChevronLeft className="mr-1 h-3.5 w-3.5" />
                 Atrás
               </Button>
-              <span className="text-xs font-semibold text-muted-foreground">
+              <span className="text-[11px] font-semibold text-muted-foreground">
                 Paso {step + 1} de {CONTRACT_STEPS.length}
               </span>
               {step < CONTRACT_STEPS.length - 1 ? (
@@ -3388,39 +3334,36 @@ export function ContractsReservationSection({
                   onClick={() =>
                     setStep((s) => Math.min(CONTRACT_STEPS.length - 1, s + 1))
                   }
-                  className="rounded-xl"
+                  className="h-10 rounded-xl px-3 text-xs"
                 >
                   Siguiente
-                  <ChevronRight className="ml-1 h-4 w-4" />
+                  <ChevronRight className="ml-1 h-3.5 w-3.5" />
                 </Button>
               ) : (
-                <span className="text-xs font-semibold text-primary">
+                <span className="text-[11px] font-semibold text-primary">
                   Último paso · genera abajo
                 </span>
               )}
             </div>
           </div>
 
-          <div className="bg-zinc-50/50 lg:border-l lg:border-zinc-100 lg:overflow-y-auto scrollbar-hide">
-            <div className="p-3 md:p-4">
-              <div className="rounded-2xl border border-zinc-200/60 bg-white p-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+          <div className="flex min-h-0 flex-col border-t border-zinc-100 bg-zinc-50/40 lg:border-l lg:border-t-0">
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 md:p-4 scrollbar-hide">
+              <div className="flex flex-col rounded-xl border border-zinc-200/60 bg-white p-3 shadow-sm md:p-4">
                 <div>
-                  <h3 className="text-base font-bold tracking-tight text-zinc-950">
+                  <h3 className="text-xs font-bold tracking-tight text-zinc-950">
                     Resumen de Cobro
                   </h3>
-                  <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  <p className="mt-0.5 truncate text-[9px] font-bold uppercase tracking-wider text-zinc-400">
                     {selectedProperty
                       ? selectedProperty.title
                       : "SELECCIONA UNA FINCA"}
                   </p>
                 </div>
 
-                <div className="space-y-6 pt-6 mt-4 border-t border-zinc-100/60 pb-1">
-                  <p className="text-[11px] font-medium text-zinc-400">
-                    El total se calcula automáticamente según las partidas.
-                  </p>
-                  <div className="space-y-0 text-sm">
-                        <div className="flex items-center justify-between gap-3 border-b border-dashed border-zinc-100 pb-4">
+                <div className="mt-2 space-y-2 border-t border-zinc-100/60 pt-2">
+                  <div className="space-y-0 text-[11px]">
+                        <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                           <span className="font-medium text-zinc-500">
                             Finca ({nochesResumenEs(nights)})
                           </span>
@@ -3430,7 +3373,7 @@ export function ContractsReservationSection({
                         </div>
 
                         {petDepositTotal > 0 && (
-                          <div className="flex items-center justify-between gap-3 border-b border-dashed border-zinc-100 pb-4">
+                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                             <span className="font-bold text-emerald-600">
                               Deposito mascotas
                             </span>
@@ -3441,7 +3384,7 @@ export function ContractsReservationSection({
                         )}
 
                         {petSurchargeTotal > 0 && (
-                          <div className="flex items-center justify-between gap-3 border-b border-dashed border-zinc-100 pb-4">
+                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                             <span className="font-medium italic text-zinc-500">
                               Tarifa ingreso mascotas (3ª+)
                             </span>
@@ -3452,7 +3395,7 @@ export function ContractsReservationSection({
                         )}
 
                         {petCleaningTotal > 0 && (
-                          <div className="flex items-center justify-between gap-3 border-b border-dashed border-zinc-100 pb-4">
+                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                             <span className="font-medium text-zinc-500">
                               Aseo por mascotas (3+)
                             </span>
@@ -3463,7 +3406,7 @@ export function ContractsReservationSection({
                         )}
 
                         {serviceStaffTotal > 0 && (
-                          <div className="flex items-center justify-between gap-3 border-b border-dashed border-zinc-100 pb-4">
+                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                             <span className="font-medium text-indigo-600">
                               Personal de servicio (sujeto a disponibilidad)
                             </span>
@@ -3474,7 +3417,7 @@ export function ContractsReservationSection({
                         )}
 
                         {Number(form.cleaningFee || 0) > 0 && (
-                          <div className="flex items-center justify-between gap-3 border-b border-dashed border-zinc-100 pb-4">
+                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                             <span className="font-medium text-zinc-500">
                               Aseo final (propiedad)
                             </span>
@@ -3485,7 +3428,7 @@ export function ContractsReservationSection({
                         )}
 
                         {Number(form.refundableDeposit || 0) > 0 && (
-                          <div className="flex items-center justify-between gap-3 border-b border-dashed border-zinc-100 pb-4">
+                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                             <span className="font-medium text-zinc-500">
                               Depósito por daños
                             </span>
@@ -3496,7 +3439,7 @@ export function ContractsReservationSection({
                         )}
 
                         {Number(form.manillaCondominio || 0) > 0 && (
-                          <div className="flex items-center justify-between gap-3 border-b border-dashed border-zinc-100 pb-4">
+                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                             <span className="font-medium text-zinc-500">
                               Manilla condominio
                             </span>
@@ -3507,7 +3450,7 @@ export function ContractsReservationSection({
                         )}
 
                         {Number(form.otherCharges || 0) > 0 && (
-                          <div className="flex items-center justify-between gap-3 border-b border-dashed border-zinc-100 pb-4">
+                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                             <span className="font-medium text-zinc-500">
                               Otros cobros
                             </span>
@@ -3518,42 +3461,40 @@ export function ContractsReservationSection({
                         )}
                       </div>
 
-                      <div className="rounded-2xl bg-zinc-950 p-5 text-white shadow-xl">
-                        <div className="flex items-end justify-between gap-3">
+                      <div className="rounded-xl bg-zinc-950 p-2.5 text-white shadow-lg">
+                        <div className="flex items-center justify-between gap-2">
                           <div>
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-white/60">
+                            <p className="text-[8px] font-bold uppercase tracking-wider text-white/60">
                               Total contrato
                             </p>
-                            <p className="mt-1 text-2xl font-semibold tracking-tight text-white">
+                            <p className="mt-0.5 text-lg font-semibold tracking-tight text-white">
                               {contractTotal > 0
                                 ? money(contractTotal)
                                 : "—"}
                             </p>
                           </div>
-                          <div className="rounded-xl bg-white/10 p-2 text-white backdrop-blur-sm">
-                            <CreditCard className="h-6 w-6" />
+                          <div className="rounded-lg bg-white/10 p-1 text-white">
+                            <CreditCard className="h-4 w-4" />
                           </div>
                         </div>
                       </div>
                 </div>
 
-                <div
-                  className="space-y-3 border-t border-zinc-100/60 mt-4 pt-6"
-                >
+                <div className="mt-3 shrink-0 space-y-2 border-t border-zinc-100/60 pt-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge
                       variant="outline"
-                      className="rounded-full border-zinc-200 bg-zinc-50 px-3 py-1 text-[11px] font-bold text-zinc-600"
+                      className="rounded-full border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-bold text-zinc-600"
                     >
                       {nochesResumenEs(nights)}
                     </Badge>
                     {!isLinkMode && contractSnapshotSaved && (
-                      <Badge className="rounded-full border-0 bg-emerald-500/10 px-3 py-1 text-[11px] font-bold text-emerald-700">
+                      <Badge className="rounded-full border-0 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
                         <CheckCircle2 className="mr-1 h-3 w-3" /> Borrador guardado (confirmar pago)
                       </Badge>
                     )}
                     {isLinkMode && generatedLink && (
-                      <Badge className="rounded-full border-0 bg-orange-500/10 px-3 py-1 text-[11px] font-bold text-orange-700">
+                      <Badge className="rounded-full border-0 bg-orange-500/10 px-2 py-0.5 text-[10px] font-bold text-orange-700">
                         <Link2 className="mr-1 h-3 w-3" /> Link activo (48 h)
                       </Badge>
                     )}
@@ -3567,7 +3508,7 @@ export function ContractsReservationSection({
                       <select
                         value={selectedFirmante?.id ?? ""}
                         onChange={(e) => setSelectedFirmanteId(e.target.value)}
-                        className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                        className={cn(formControlClass, "h-10 border-zinc-200 bg-white px-2.5 text-xs dark:border-zinc-700 dark:bg-zinc-900")}
                       >
                         {firmantes.map((f) => (
                           <option key={f.id} value={f.id}>
@@ -3584,7 +3525,7 @@ export function ContractsReservationSection({
                       ) : null}
                     </div>
                   ) : (
-                    <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] leading-snug text-amber-700">
                       No hay firmantes configurados. Agrégalos en Ajustes del
                       contrato → Firmantes.
                     </p>
@@ -3614,7 +3555,7 @@ export function ContractsReservationSection({
                           </>
                         )}
                       </Button>
-                      <p className="text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                      <p className="text-center text-[9px] font-bold uppercase leading-snug tracking-wider text-zinc-400">
                         El cliente completará sus datos y descargará el PDF para firmarlo
                       </p>
                     </>
@@ -3622,7 +3563,7 @@ export function ContractsReservationSection({
                     <>
                   <Button
                     type="button"
-                    className="h-12 w-full rounded-xl bg-blue-600 font-bold text-white shadow-md transition-all hover:bg-blue-700 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
+                    className="h-10 w-full rounded-xl bg-blue-600 text-xs font-bold text-white shadow-md transition-all hover:bg-blue-700 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -3640,7 +3581,7 @@ export function ContractsReservationSection({
                     )}
                   </Button>
 
-                  <p className="text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                  <p className="text-center text-[9px] font-bold uppercase leading-snug tracking-wider text-zinc-400">
                     Revisa la vista previa del contrato abajo antes de generar.
                     Usa «Confirmar pago» cuando el cliente haya abonado.
                   </p>

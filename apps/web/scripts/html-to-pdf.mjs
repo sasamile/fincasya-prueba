@@ -10,6 +10,22 @@
  * printBackground, espera breve de imágenes.
  */
 import puppeteer from "puppeteer";
+import fs from "node:fs";
+
+function resolveChromeExecutable() {
+  const fromEnv =
+    process.env.PUPPETEER_EXECUTABLE_PATH?.trim() ||
+    process.env.CHROME_BIN?.trim();
+  if (fromEnv) return fromEnv;
+
+  const macChrome =
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  if (process.platform === "darwin" && fs.existsSync(macChrome)) {
+    return macChrome;
+  }
+
+  return undefined;
+}
 
 async function readStdin() {
   const chunks = [];
@@ -24,8 +40,7 @@ async function main() {
     process.exit(2);
   }
 
-  const executablePath =
-    process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || undefined;
+  const executablePath = resolveChromeExecutable();
 
   const browser = await puppeteer.launch({
     headless: true,

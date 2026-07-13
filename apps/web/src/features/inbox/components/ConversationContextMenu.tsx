@@ -1,13 +1,12 @@
 /**
  * Menú de clic derecho sobre una conversación del sidebar (estilo WhatsApp):
- * Fijar, Marcar como no leído, Cambiar de lista y Archivar. Solo acciones que
- * tienen efecto real en el CRM.
+ * Fijar, Marcar como no leído, Cambiar de lista, Archivar, Vaciar y Eliminar.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
-import { Archive, Check, ListChecks, Mail, Pin, PinOff } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveX, Check, ListChecks, Mail, Pin, PinOff, Trash2, Eraser } from 'lucide-react';
 
 export type CtxTarget = {
   conversationId: Id<'conversations'>;
@@ -18,19 +17,27 @@ export type CtxTarget = {
   y: number;
 };
 
+type ConfirmState = 'delete' | 'clear' | null;
+
 export function ConversationContextMenu({
   target,
   onClose,
+  onDeleted,
 }: {
   target: CtxTarget;
   onClose: () => void;
+  onDeleted?: () => void;
 }) {
   const setPinned = useMutation(api.inbox.setConversationPinned);
   const setArchived = useMutation(api.inbox.setConversationArchived);
   const markUnread = useMutation(api.inbox.markConversationUnread);
   const toggleLabel = useMutation(api.labels.toggleConversationLabel);
+  const deleteConversation = useMutation(api.inbox.deleteConversation);
+  const clearMessages = useMutation(api.inbox.clearConversationMessages);
   const labels = useQuery(api.labels.listLabels);
+
   const [showLists, setShowLists] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmState>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,7 +55,7 @@ export function ConversationContextMenu({
 
   // No dejar que el menú se salga por abajo/derecha de la pantalla.
   const x = Math.min(target.x, window.innerWidth - 240);
-  const y = Math.min(target.y, window.innerHeight - 240);
+  const y = Math.min(target.y, window.innerHeight - 300);
   const assigned = new Set(target.labelIds);
 
   return (
@@ -57,7 +64,21 @@ export function ConversationContextMenu({
       style={{ left: x, top: y }}
       className="fixed z-[70] w-56 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-2xl"
     >
-      {showLists ? (
+      {confirm ? (
+        <ConfirmPane
+          type={confirm}
+          onCancel={() => setConfirm(null)}
+          onConfirm={async () => {
+            if (confirm === 'delete') {
+              await deleteConversation({ conversationId: target.conversationId });
+              onDeleted?.();
+            } else {
+              await clearMessages({ conversationId: target.conversationId });
+            }
+            onClose();
+          }}
+        />
+      ) : showLists ? (
         <>
           <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             Cambiar de lista
@@ -107,15 +128,78 @@ export function ConversationContextMenu({
           <MenuItem icon={ListChecks} label="Cambiar de lista" onClick={() => setShowLists(true)} />
           <div className="my-1 border-t border-border/70" />
           <MenuItem
-            icon={Archive}
+            icon={target.archived ? ArchiveX : Archive}
             label={target.archived ? 'Desarchivar chat' : 'Archivar chat'}
             onClick={() => {
               void setArchived({ conversationId: target.conversationId, archived: !target.archived });
               onClose();
             }}
           />
+          <MenuItem
+            icon={Eraser}
+            label="Vaciar mensajes"
+            onClick={() => setConfirm('clear')}
+          />
+          <div className="my-1 border-t border-border/70" />
+          <MenuItem
+            icon={Trash2}
+            label="Eliminar chat"
+            danger
+            onClick={() => setConfirm('delete')}
+          />
         </>
       )}
+    </div>
+  );
+}
+
+function ConfirmPane({
+  type,
+  onCancel,
+  onConfirm,
+}: {
+  type: 'delete' | 'clear';
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const [loading, setLoading] = useState(false);
+  const isDelete = type === 'delete';
+
+  return (
+    <div className="px-4 py-3">
+      <div className="mb-3 flex items-center gap-2">
+        <AlertTriangle className={`h-4 w-4 shrink-0 ${isDelete ? 'text-destructive' : 'text-amber-500'}`} />
+        <p className="text-[13px] font-semibold leading-tight">
+          {isDelete ? '¿Eliminar este chat?' : '¿Vaciar mensajes?'}
+        </p>
+      </div>
+      <p className="mb-4 text-[12px] leading-snug text-muted-foreground">
+        {isDelete
+          ? 'El chat desaparecerá del panel. Esta acción no se puede deshacer.'
+          : 'Se borrarán todos los mensajes del chat. Esta acción no se puede deshacer.'}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 rounded-lg border border-border py-1.5 text-[13px] font-medium hover:bg-muted"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={async () => {
+            setLoading(true);
+            await onConfirm();
+          }}
+          className={`flex-1 rounded-lg py-1.5 text-[13px] font-semibold text-white transition-colors disabled:opacity-60 ${
+            isDelete ? 'bg-destructive hover:bg-destructive/90' : 'bg-amber-500 hover:bg-amber-600'
+          }`}
+        >
+          {loading ? '…' : isDelete ? 'Eliminar' : 'Vaciar'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -124,18 +208,26 @@ function MenuItem({
   icon: Icon,
   label,
   onClick,
+  danger,
 }: {
   icon: typeof Pin;
   label: string;
   onClick: () => void;
+  danger?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] transition-colors hover:bg-muted"
+      className={`flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] transition-colors hover:bg-muted ${
+        danger ? 'text-destructive' : ''
+      }`}
     >
-      <Icon className="h-[18px] w-[18px] shrink-0 text-muted-foreground" strokeWidth={1.75} /> {label}
+      <Icon
+        className={`h-[18px] w-[18px] shrink-0 ${danger ? 'text-destructive' : 'text-muted-foreground'}`}
+        strokeWidth={1.75}
+      />
+      {label}
     </button>
   );
 }

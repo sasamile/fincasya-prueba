@@ -85,7 +85,7 @@ export function FormSection({
             </h2>
             <p
               className={cn(
-                "mt-0.5 break-words font-semibold uppercase leading-snug tracking-widest transition-colors duration-500",
+                "mt-0.5 wrap-break-word font-semibold uppercase leading-snug tracking-widest transition-colors duration-500",
                 compact
                   ? "line-clamp-1 text-[9px]"
                   : "line-clamp-2 text-[9px] sm:text-[10px] sm:line-clamp-3",
@@ -127,7 +127,7 @@ export function FormSection({
               className={cn(
                 "min-w-0 max-w-full overflow-x-hidden",
                 compact
-                  ? "space-y-4 p-4 sm:p-5"
+                  ? "space-y-3 p-3 sm:p-4"
                   : "space-y-6 p-4 sm:p-6 md:space-y-8 md:p-8"
               )}
             >

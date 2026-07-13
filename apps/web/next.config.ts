@@ -4,7 +4,12 @@ const nextConfig: NextConfig = {
   /** El backend Convex del workspace se importa como TS/JS generado. */
   transpilePackages: ['@fincasya/backend'],
   /** Puppeteer/Chromium no se puede bundlear; se resuelve en runtime Node. */
-  serverExternalPackages: ['puppeteer', 'puppeteer-core'],
+  serverExternalPackages: [
+    "puppeteer",
+    "puppeteer-core",
+    "@ilovepdf/ilovepdf-nodejs",
+    "@ilovepdf/ilovepdf-js-core",
+  ],
   images: {
     formats: ['image/webp'],
     remotePatterns: [

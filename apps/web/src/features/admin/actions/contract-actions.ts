@@ -5,38 +5,20 @@ import {
   buildFincasyaCircularLogoHtml,
   wrapContractHtmlForPdf,
 } from "@/features/admin/utils/contract-pdf-shell";
-
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
+import { htmlToPdf } from "@/lib/server/html-to-pdf";
 
 /**
- * Convierte HTML a PDF llamando al endpoint del backend (puppeteer).
+ * Convierte HTML a PDF con Puppeteer (proceso hijo, fuera del bundle de Next).
  * Devuelve el buffer en base64 para que el cliente lo descargue.
  */
 export async function generateContractPdfAction(
   html: string,
-  filename?: string,
+  _filename?: string,
 ): Promise<{ success: true; base64: string } | { success: false; error: string }> {
   try {
     const fullHtml = wrapContractHtmlForPdf(html);
-
-    const response = await fetch(`${BACKEND_URL}/api/fincas/html-to-pdf`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html: fullHtml, filename }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      return {
-        success: false,
-        error: `Backend respondió ${response.status}: ${text.slice(0, 300)}`,
-      };
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
-    return { success: true, base64 };
+    const pdf = await htmlToPdf(fullHtml);
+    return { success: true, base64: pdf.toString("base64") };
   } catch (err) {
     return { success: false, error: String(err) };
   }

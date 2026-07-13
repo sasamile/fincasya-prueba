@@ -156,6 +156,8 @@ export default defineSchema(
       pinned: v.optional(v.boolean()),
       /** Archivada: oculta del listado principal (clic derecho → Archivar). */
       archived: v.optional(v.boolean()),
+      /** Eliminada desde el panel (soft delete). Oculta definitivamente del inbox. */
+      deletedAt: v.optional(v.number()),
     })
       .index('by_contact', ['contactId'])
       .index('by_status', ['status'])

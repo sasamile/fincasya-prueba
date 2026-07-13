@@ -58,6 +58,7 @@ export const listConversations = query({
 
     const out = [];
     for (const c of conversations) {
+      if (c.deletedAt) continue;
       const contact = await ctx.db.get(c.contactId);
       const lastMsg = await ctx.db
         .query('messages')
@@ -586,6 +587,24 @@ export const setConversationArchived = mutation({
   args: { conversationId: v.id('conversations'), archived: v.boolean() },
   handler: async (ctx, { conversationId, archived }) => {
     await ctx.db.patch(conversationId, { archived });
+  },
+});
+
+export const deleteConversation = mutation({
+  args: { conversationId: v.id('conversations') },
+  handler: async (ctx, { conversationId }) => {
+    await ctx.db.patch(conversationId, { deletedAt: Date.now() });
+  },
+});
+
+export const clearConversationMessages = mutation({
+  args: { conversationId: v.id('conversations') },
+  handler: async (ctx, { conversationId }) => {
+    const msgs = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation', (q) => q.eq('conversationId', conversationId))
+      .collect();
+    await Promise.all(msgs.map((m) => ctx.db.patch(m._id, { deletedAt: Date.now() })));
   },
 });
 

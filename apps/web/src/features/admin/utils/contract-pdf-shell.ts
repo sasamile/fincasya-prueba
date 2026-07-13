@@ -1,9 +1,17 @@
 /**
  * Marca y envoltura HTML para contratos exportados a PDF (Puppeteer).
- * Logo: `public/image.png` (identidad oficial) con fallback a marca vectorial.
+ * Logo: `public/contracts/contract-logo.jpg` (mismo de la plantilla Word).
  */
 import fs from "node:fs";
 import path from "node:path";
+import { CONTRACT_PDF_DOCUMENT_CSS } from "@/features/admin/utils/contract-document-styles";
+
+const LOGO_CANDIDATES = [
+  "contracts/contract-logo.jpg",
+  "contracts/contract-logo.jpeg",
+  "image.png",
+  "fincas-ya-logo.png",
+] as const;
 
 let logoDataUriMemo: string | false | undefined;
 
@@ -11,14 +19,20 @@ function readOfficialLogoDataUri(): string | null {
   if (logoDataUriMemo === false) return null;
   if (logoDataUriMemo !== undefined) return logoDataUriMemo;
   try {
-    const filePath = path.join(process.cwd(), "public", "image.png");
-    if (!fs.existsSync(filePath)) {
-      logoDataUriMemo = false;
-      return null;
+    for (const name of LOGO_CANDIDATES) {
+      const filePath = path.join(process.cwd(), "public", name);
+      if (!fs.existsSync(filePath)) continue;
+      const buf = fs.readFileSync(filePath);
+      const mime = name.endsWith(".png")
+        ? "image/png"
+        : name.endsWith(".jpg") || name.endsWith(".jpeg")
+          ? "image/jpeg"
+          : "image/png";
+      logoDataUriMemo = `data:${mime};base64,${buf.toString("base64")}`;
+      return logoDataUriMemo;
     }
-    const buf = fs.readFileSync(filePath);
-    logoDataUriMemo = `data:image/png;base64,${buf.toString("base64")}`;
-    return logoDataUriMemo;
+    logoDataUriMemo = false;
+    return null;
   } catch {
     logoDataUriMemo = false;
     return null;
@@ -55,63 +69,16 @@ export function buildFincasyaCircularLogoHtml(): string {
   <img
     src="${dataUri}"
     alt="FincasYa"
-    width="120"
-    height="120"
-    style="display:block;width:120px;height:120px;object-fit:contain;-webkit-print-color-adjust:exact;print-color-adjust:exact;"
+    width="97"
+    height="97"
+    style="display:block;width:97px;height:97px;object-fit:contain;-webkit-print-color-adjust:exact;print-color-adjust:exact;"
   />
 </div>`.trim();
   }
   return buildFincasyaCircularLogoSvgFallback();
 }
 
-/** Estilos globales del documento: cuerpo justificado, títulos respetan centrado inline. */
-export const CONTRACT_PDF_DOCUMENT_CSS = `
-  html, body {
-    margin: 0;
-    padding: 0;
-    font-family: Arial, Helvetica, "Segoe UI", sans-serif;
-    font-size: 11pt;
-    color: #111;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  .contract-doc-root {
-    text-align: justify;
-    text-justify: inter-word;
-    hyphens: auto;
-    -webkit-hyphens: auto;
-  }
-  .contract-doc-root p {
-    text-align: justify;
-    text-justify: inter-word;
-    margin: 0 0 10pt 0;
-    line-height: 1.45;
-  }
-  .contract-doc-root p[style*="text-align: center"],
-  .contract-doc-root p[align="center"] {
-    text-align: center !important;
-  }
-  .contract-doc-root div {
-    text-align: inherit;
-  }
-  .contract-doc-root ol,
-  .contract-doc-root ul,
-  .contract-doc-root li {
-    text-align: left;
-    text-justify: auto;
-  }
-  .contract-doc-root .contract-amenities,
-  .contract-doc-root .contract-amenities div {
-    text-align: left !important;
-    text-justify: none !important;
-    font-weight: 700 !important;
-  }
-  .contract-doc-root strong {
-    font-weight: 700;
-  }
-  table { border-collapse: collapse; width: 100%; }
-  td, th { padding: 4pt 8pt; }
-`;
+export { CONTRACT_PDF_DOCUMENT_CSS };
 
 export function wrapContractHtmlForPdf(innerHtml: string): string {
   const header = buildFincasyaCircularLogoHtml();

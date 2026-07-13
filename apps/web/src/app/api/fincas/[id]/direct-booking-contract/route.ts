@@ -13,9 +13,6 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const DOCX_MIME =
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
 function sanitize(name: string): string {
   return name.replace(/[^\w\-]+/g, "_").replace(/_+/g, "_").slice(0, 40);
 }
@@ -108,7 +105,7 @@ export async function POST(
 
     const baseName = `Contrato_${sanitize(finca.title || "FincasYa")}_${sanitize(contractNumber)}`;
 
-    // Se intenta PDF (LibreOffice); si no está disponible, se entrega el .docx.
+    // Plantilla Word → PDF (iLovePDF o LibreOffice), igual que fincasya-new.
     const pdf = await convertDocxToPdf(docx);
     if (pdf) {
       return NextResponse.json({
@@ -120,14 +117,13 @@ export async function POST(
       });
     }
 
-    return NextResponse.json({
-      success: true,
-      fileBase64: docx.toString("base64"),
-      filename: `${baseName}.docx`,
-      mimeType: DOCX_MIME,
-      contractNumber,
-      pdfUnavailable: true,
-    });
+    return NextResponse.json(
+      {
+        error:
+          "No se pudo convertir el contrato a PDF. Revisa las credenciales ILOVEPDF en .env o instala LibreOffice.",
+      },
+      { status: 503 },
+    );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Error generando el contrato.";

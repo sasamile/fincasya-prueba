@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { sileo } from "sileo";
 import { cn } from "@/lib/utils";
+import { ContractDocumentPreview } from "@/features/admin/components/contracts/contract-document-preview";
 import {
   previewContractHtmlFragment,
   type FincaData,
@@ -114,10 +115,11 @@ function ClauseEditorDialog({
                 Vista solo visual; lo pendiente aparece como … (no se guarda así).
               </p>
             </div>
-            <div className="max-h-[min(52vh,480px)] min-h-[200px] overflow-y-auto overscroll-contain px-4 py-3 sm:max-h-[min(56vh,520px)]">
-              <div
-                className="prose prose-sm max-w-none text-foreground leading-relaxed [&_li]:my-1 [&_ol]:my-2 [&_p]:my-2"
-                dangerouslySetInnerHTML={{ __html: clientPreviewHtml }}
+            <div className="max-h-[min(52vh,480px)] min-h-[200px] overflow-y-auto overscroll-contain sm:max-h-[min(56vh,520px)]">
+              <ContractDocumentPreview
+                html={clientPreviewHtml}
+                compact
+                className="py-3"
               />
             </div>
           </div>
@@ -127,7 +129,7 @@ function ClauseEditorDialog({
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 w-full justify-between gap-2 rounded-xl border-dashed px-3 text-xs font-semibold"
+                className="h-11 w-full justify-between gap-2 rounded-xl border-dashed px-3 text-xs font-semibold"
               >
                 Editar plantilla y marcadores
                 <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]/cclause:rotate-180" />
@@ -165,9 +167,9 @@ function ClauseEditorDialog({
 }
 
 const labelClass =
-  "ml-1 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-600 dark:text-zinc-400";
+  "ml-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600 dark:text-zinc-400";
 const inputClass =
-  "h-14 rounded-2xl border border-zinc-200 bg-zinc-50/90 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus-visible:ring-2 focus-visible:ring-zinc-900/10 dark:border-zinc-600 dark:bg-zinc-800/90 dark:text-zinc-50 dark:placeholder:text-zinc-500";
+  "h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50/90 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus-visible:ring-2 focus-visible:ring-zinc-900/10 dark:border-zinc-600 dark:bg-zinc-800/90 dark:text-zinc-50 dark:placeholder:text-zinc-500";
 const sectionShell =
   "rounded-2xl border border-zinc-200 bg-zinc-50/50 shadow-none md:rounded-2xl dark:border-zinc-700 dark:bg-zinc-900/45";
 
