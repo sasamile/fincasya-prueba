@@ -62,7 +62,7 @@ export function ConversationContextMenu({
     <div
       ref={ref}
       style={{ left: x, top: y }}
-      className="fixed z-[70] w-56 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-2xl"
+      className="fixed z-70 w-56 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-2xl"
     >
       {confirm ? (
         <ConfirmPane
