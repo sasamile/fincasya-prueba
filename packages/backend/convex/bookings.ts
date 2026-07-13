@@ -19,6 +19,24 @@ import { resolveRefundableDeposit } from './lib/bookingDeposit';
 import { resolveSaleLinkReference } from './lib/saleLinkReference';
 import { assertBookingDatesAreFuture } from './lib/bookings/dates';
 import { applyBookingListFilters } from './lib/bookings/listFilters';
+import { authComponent } from './betterAuth/auth';
+
+/**
+ * Responsable de un abono/pago: usa el valor explícito del panel; si no llega,
+ * cae al operador autenticado (name → email). Garantiza que ningún abono quede
+ * "sin responsable registrado".
+ */
+async function resolveAbonoResponsible(
+  ctx: Parameters<typeof authComponent.safeGetAuthUser>[0],
+  explicit?: string | null,
+): Promise<string | undefined> {
+  const direct = explicit?.trim();
+  if (direct) return direct;
+  const authUser = (await authComponent.safeGetAuthUser(ctx)) as
+    | { name?: string; email?: string }
+    | null;
+  return authUser?.name?.trim() || authUser?.email?.trim() || undefined;
+}
 
 // ============ QUERIES ============
 
@@ -1186,6 +1204,11 @@ export const createPayment = mutation({
       throw new Error('El monto del pago debe ser mayor a cero.');
     }
 
+    const booking = await ctx.db.get(args.bookingId);
+    // Responsable del abono: quien lo verificó desde el panel; si no llega,
+    // cae al operador autenticado para que nunca quede "sin responsable".
+    const responsable = await resolveAbonoResponsible(ctx, args.verifiedBy);
+
     const paymentId = await ctx.db.insert('payments', {
       bookingId: args.bookingId,
       type: args.type,
@@ -1200,13 +1223,12 @@ export const createPayment = mutation({
       wompiData: args.wompiData,
       boldData: args.boldData,
       receiptUrl: args.receiptUrl?.trim() || undefined,
-      verifiedBy: args.verifiedBy?.trim() || undefined,
+      verifiedBy: responsable,
       verifiedAt: args.verifiedAt,
       createdAt: now,
       updatedAt: now,
     });
 
-    const booking = await ctx.db.get(args.bookingId);
     if (booking) {
       const payments = await ctx.db
         .query('payments')
@@ -1304,6 +1326,7 @@ export const syncReservationAbono = mutation({
   args: {
     bookingId: v.id('bookings'),
     paymentStatus: v.optional(v.string()),
+    verifiedBy: v.optional(v.string()),
     abono: v.optional(
       v.object({
         type: v.union(v.literal('ABONO_50'), v.literal('COMPLETO')),
@@ -1334,6 +1357,9 @@ export const syncReservationAbono = mutation({
 
     const abono = args.abono;
     if (abono && abono.amount > 0) {
+      // Responsable: quien registra desde el panel o, en su defecto, el
+      // operador autenticado. Evita abonos "sin responsable registrado".
+      const responsable = await resolveAbonoResponsible(ctx, args.verifiedBy);
       await ctx.db.insert('payments', {
         bookingId: args.bookingId,
         type: abono.type,
@@ -1342,6 +1368,7 @@ export const syncReservationAbono = mutation({
         paymentMethod: abono.paymentMethod?.trim() || 'Manual',
         status: 'PAID',
         notes: abono.notes?.trim() || undefined,
+        verifiedBy: responsable,
         createdAt: now,
         updatedAt: now,
       });

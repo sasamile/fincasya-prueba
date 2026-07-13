@@ -158,7 +158,7 @@ export function BookingPaymentsSection({
 
   useEffect(() => {
     getCurrentUser()
-      .then((u) => setActor(u?.name || ""))
+      .then((u) => setActor(u?.name || u?.email || ""))
       .catch(() => {});
   }, []);
 
