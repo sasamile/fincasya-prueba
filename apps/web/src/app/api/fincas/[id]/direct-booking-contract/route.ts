@@ -105,6 +105,19 @@ export async function POST(
 
     const baseName = `Contrato_${sanitize(finca.title || "FincasYa")}_${sanitize(contractNumber)}`;
 
+    // Modo edición: devuelve el .docx tal cual para abrirlo en el editor
+    // Word del navegador (SuperDoc). El PDF final se genera al enviar/descargar.
+    if (String(dto.outputFormat ?? "").toLowerCase() === "docx") {
+      return NextResponse.json({
+        success: true,
+        fileBase64: Buffer.from(docx).toString("base64"),
+        filename: `${baseName}.docx`,
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        contractNumber,
+      });
+    }
+
     // Plantilla Word → PDF (iLovePDF o LibreOffice), igual que fincasya-new.
     const pdf = await convertDocxToPdf(docx);
     if (pdf) {

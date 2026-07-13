@@ -1,15 +1,19 @@
 'use client';
 
 /**
- * Modal de vista previa del contrato — genera, muestra y envía la PLANTILLA
- * real (QUINTA OLAYA .docx → PDF vía iLovePDF), igual que fincasya-new. NO usa
- * el HTML de la página de contratos.
+ * Modal de contrato — abre la PLANTILLA real (QUINTA OLAYA .docx) en un editor
+ * Word dentro del navegador (SuperDoc). El asesor puede editar el documento
+ * como en Word manteniendo el formato/tipografía de la plantilla, y luego:
+ *   - Descargarlo (Word o PDF)
+ *   - Enviarlo por WhatsApp (se exporta el docx editado → PDF → se envía)
+ * NO usa el HTML de la página de contratos.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAction } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { toast } from 'sonner';
 import { Download, FileWarning, Loader2, Send, X } from 'lucide-react';
+import '@harbour-enterprises/superdoc/style.css';
 import type { ConversationRow } from '@/features/inbox/types';
 
 export type PreviewDraft = {
@@ -34,13 +38,12 @@ export type PreviewDraft = {
   clientAddress: string;
 };
 
-type GeneratedDoc = {
-  base64: string;
-  mime: string;
-  filename: string;
-  url: string;
-  isPdf: boolean;
-};
+const EDITOR_ID = 'superdoc-contract-editor';
+const TOOLBAR_ID = 'superdoc-contract-toolbar';
+
+// SuperDoc se carga dinámico (solo cliente); su API no está tipada aquí.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SuperDocInstance = any;
 
 export function ContractPreviewModal({
   draft,
@@ -54,18 +57,21 @@ export function ContractPreviewModal({
   onClose: () => void;
 }) {
   const sendDocument = useAction(api.advisorDocuments.sendDocumentToConversation);
-  const [doc, setDoc] = useState<GeneratedDoc | null>(null);
+  const superdocRef = useRef<SuperDocInstance | null>(null);
+  const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  const [busy, setBusy] = useState<null | 'send' | 'pdf' | 'docx'>(null);
+  const [baseName, setBaseName] = useState('contrato');
 
-  // Genera el contrato desde la plantilla al abrir el modal.
+  // 1) Genera el .docx desde la plantilla y 2) lo abre en el editor Word.
   useEffect(() => {
     let cancelled = false;
-    let objectUrl = '';
-    (async () => {
+
+    async function init() {
       setLoading(true);
       setError(null);
+      setReady(false);
       try {
         const nights = (() => {
           const a = new Date(`${draft.checkIn}T12:00:00`).getTime();
@@ -75,12 +81,15 @@ export function ContractPreviewModal({
             : 1;
         })();
         const perNight = Number(draft.pricePerNight) || 0;
+
+        // Pedimos el .docx (outputFormat: docx) para poder editarlo.
         const res = await fetch(
           `/api/fincas/${draft.fincaId}/direct-booking-contract`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              outputFormat: 'docx',
               propertyId: draft.fincaId,
               contractNumber: draft.contractCode,
               nightlyPrice: String(perNight),
@@ -107,62 +116,151 @@ export function ContractPreviewModal({
         );
         const data = (await res.json()) as {
           fileBase64?: string;
-          mimeType?: string;
           filename?: string;
           error?: string;
         };
         if (!res.ok || !data.fileBase64) {
           throw new Error(data.error || 'No se pudo generar el contrato.');
         }
+        if (cancelled) return;
+
+        const filename = data.filename || 'contrato.docx';
+        setBaseName(filename.replace(/\.docx$/i, ''));
         const bytes = Uint8Array.from(atob(data.fileBase64), (c) =>
           c.charCodeAt(0),
         );
-        const mime = data.mimeType || 'application/pdf';
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
-        if (!cancelled) {
-          setDoc({
-            base64: data.fileBase64,
-            mime,
-            filename: data.filename || 'contrato',
-            url: objectUrl,
-            isPdf: mime.includes('pdf'),
-          });
-        }
+        const file = new File([bytes], filename, {
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        });
+
+        // Cargamos SuperDoc + el pack de fuentes solo en el cliente. El pack
+        // sustituye Tahoma/Century Gothic/Verdana (propietarias) por fuentes
+        // libres métricamente compatibles (Liberation, Carlito…) — las mismas
+        // que usa LibreOffice/iLovePDF, así el editor coincide con el PDF final.
+        const [{ SuperDoc }, fontsMod] = await Promise.all([
+          import('@harbour-enterprises/superdoc'),
+          import('@superdoc-dev/fonts'),
+        ]);
+        if (cancelled) return;
+        setLoading(false);
+
+        const fonts = fontsMod.createSuperDocFonts();
+        // Servimos los woff2 desde /public/superdoc-fonts (self-hosted).
+        (fonts as { resolveAssetUrl?: (c: { file: string }) => string }).resolveAssetUrl =
+          (c) => `/superdoc-fonts/${c.file}`;
+
+        const instance = new SuperDoc({
+          selector: `#${EDITOR_ID}`,
+          toolbar: `#${TOOLBAR_ID}`,
+          documentMode: 'editing',
+          fonts,
+          documents: [{ id: 'contract', type: 'docx', data: file }],
+          onReady: () => {
+            if (!cancelled) setReady(true);
+          },
+        });
+        superdocRef.current = instance;
       } catch (e) {
         if (!cancelled) {
+          setLoading(false);
           setError(e instanceof Error ? e.message : 'Error al generar.');
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
-    })();
+    }
+
+    void init();
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      try {
+        superdocRef.current?.destroy?.();
+      } catch {
+        /* noop */
+      }
+      superdocRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, selectedBankIds]);
 
-  function handleDownload() {
-    if (!doc) return;
-    const a = document.createElement('a');
-    a.href = doc.url;
-    a.download = doc.filename;
-    a.click();
+  /** Exporta el docx editado del editor como Blob. */
+  async function exportEditedDocx(): Promise<Blob> {
+    const sd = superdocRef.current;
+    if (!sd) throw new Error('El editor no está listo.');
+    const blob = await sd.export({ exportType: ['docx'], exportedName: baseName });
+    if (!(blob instanceof Blob)) throw new Error('No se pudo exportar el Word.');
+    return blob;
+  }
+
+  async function handleDownloadDocx() {
+    if (!ready) return;
+    setBusy('docx');
+    try {
+      const sd = superdocRef.current;
+      await sd.export({
+        exportType: ['docx'],
+        exportedName: baseName,
+        triggerDownload: true,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al descargar.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Exporta docx editado → PDF (servidor). Devuelve {base64, filename}. */
+  async function exportEditedPdf(): Promise<{ base64: string; filename: string }> {
+    const docxBlob = await exportEditedDocx();
+    const fd = new FormData();
+    fd.append('file', new File([docxBlob], `${baseName}.docx`, { type: docxBlob.type }));
+    const res = await fetch('/api/fincas/contract-docx-to-pdf', {
+      method: 'POST',
+      body: fd,
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      fileBase64?: string;
+      filename?: string;
+      error?: string;
+    };
+    if (!res.ok || !data.fileBase64) {
+      throw new Error(data.error || 'No se pudo convertir a PDF.');
+    }
+    return { base64: data.fileBase64, filename: data.filename || `${baseName}.pdf` };
+  }
+
+  async function handleDownloadPdf() {
+    if (!ready) return;
+    setBusy('pdf');
+    try {
+      const { base64, filename } = await exportEditedPdf();
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(
+        new Blob([bytes], { type: 'application/pdf' }),
+      );
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al generar PDF.');
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function handleSend() {
-    if (!doc) return;
+    if (!ready) return;
     if (!conversation) {
       toast.error('Abre la conversación del cliente para enviar.');
       return;
     }
-    setSending(true);
+    setBusy('send');
     try {
-      // Subir a S3 (link público que WhatsApp puede descargar).
-      const bytes = Uint8Array.from(atob(doc.base64), (c) => c.charCodeAt(0));
+      // Exportar lo EDITADO → PDF → subir a S3 → enviar por WhatsApp.
+      const { base64, filename } = await exportEditedPdf();
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
       const fd = new FormData();
-      fd.append('file', new File([bytes], doc.filename, { type: doc.mime }));
+      fd.append('file', new File([bytes], filename, { type: 'application/pdf' }));
       fd.append('folder', 'documents');
       const up = await fetch('/api/admin/upload', { method: 'POST', body: fd });
       const upData = (await up.json().catch(() => ({}))) as {
@@ -175,7 +273,7 @@ export function ContractPreviewModal({
       const result = await sendDocument({
         conversationId: conversation.conversationId,
         documentUrl: upData.url,
-        filename: doc.filename,
+        filename,
         caption: `Contrato ${draft.contractCode || ''}`.trim(),
       });
       if (!result.ok) throw new Error(result.error || 'No se pudo enviar.');
@@ -186,18 +284,18 @@ export function ContractPreviewModal({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al enviar.');
     } finally {
-      setSending(false);
+      setBusy(null);
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="flex h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-background shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
+      <div className="flex h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-background shadow-2xl">
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
-            <h2 className="text-sm font-bold">Vista previa del contrato</h2>
+            <h2 className="text-sm font-bold">Contrato · editor Word</h2>
             <p className="text-[11px] text-muted-foreground">
-              Plantilla oficial (QUINTA OLAYA) · revísala antes de enviar.
+              Plantilla oficial (QUINTA OLAYA) · edítala como en Word y envíala.
             </p>
           </div>
           <button
@@ -209,49 +307,71 @@ export function ContractPreviewModal({
           </button>
         </header>
 
-        <div className="flex-1 overflow-hidden bg-muted/40">
-          {loading ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3">
+        {/* Barra de herramientas del editor Word (la llena SuperDoc) */}
+        <div
+          id={TOOLBAR_ID}
+          className="shrink-0 overflow-x-auto border-b border-border bg-background"
+        />
+
+        <div className="relative flex-1 overflow-auto bg-muted/40">
+          {/* Contenedor del editor Word (SuperDoc) */}
+          <div id={EDITOR_ID} className="min-h-full" />
+
+          {loading && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/70">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
               <p className="text-xs text-muted-foreground">
-                Generando el contrato desde la plantilla…
+                Abriendo el contrato en el editor Word…
               </p>
             </div>
-          ) : error ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+          )}
+          {!loading && !ready && !error && (
+            <div className="absolute inset-x-0 top-0 flex items-center justify-center gap-2 bg-background/70 py-2">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <span className="text-xs text-muted-foreground">
+                Cargando el documento…
+              </span>
+            </div>
+          )}
+          {error && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
               <FileWarning className="h-7 w-7 text-destructive" />
               <p className="max-w-sm text-sm text-muted-foreground">{error}</p>
-            </div>
-          ) : doc?.isPdf ? (
-            <iframe
-              src={doc.url}
-              title="Contrato"
-              className="h-full w-full"
-            />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-              <FileWarning className="h-7 w-7 text-amber-500" />
-              <p className="max-w-sm text-sm text-muted-foreground">
-                El contrato se generó en Word (.docx) porque la conversión a PDF
-                no estuvo disponible. Puedes descargarlo o enviarlo igual.
-              </p>
             </div>
           )}
         </div>
 
-        <footer className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
           <button
             type="button"
-            onClick={handleDownload}
-            disabled={!doc}
-            className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-bold disabled:opacity-60"
+            onClick={() => void handleDownloadDocx()}
+            disabled={!ready || busy !== null}
+            className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-60"
           >
-            <Download className="h-4 w-4" /> Descargar
+            {busy === 'docx' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Word
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleDownloadPdf()}
+            disabled={!ready || busy !== null}
+            className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-60"
+          >
+            {busy === 'pdf' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            PDF
           </button>
           <button
             type="button"
             onClick={() => void handleSend()}
-            disabled={!doc || sending || !conversation}
+            disabled={!ready || busy !== null || !conversation}
             title={
               conversation
                 ? `Enviar a ${conversation.name || conversation.phone}`
@@ -259,7 +379,7 @@ export function ContractPreviewModal({
             }
             className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
           >
-            {sending ? (
+            {busy === 'send' ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Send className="h-4 w-4" />
