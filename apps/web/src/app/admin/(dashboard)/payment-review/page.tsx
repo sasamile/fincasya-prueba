@@ -10,7 +10,8 @@ import type { Id } from "@fincasya/backend/convex/_generated/dataModel";
 import {
   ShieldCheck,
   Loader2,
-  ExternalLink,
+  ZoomIn,
+  Minimize2,
   Check,
   X,
   RefreshCw,
@@ -82,6 +83,7 @@ function ReceiptReviewCard({
   const [motivo, setMotivo] = useState("");
   const [showReject, setShowReject] = useState(false);
   const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
+  const [zoomed, setZoomed] = useState(false);
 
   const approve = async () => {
     if (isSaleLink) {
@@ -173,12 +175,11 @@ function ReceiptReviewCard({
   return (
     <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
       <div className="flex flex-col sm:flex-row gap-4">
-        <a
-          href={previewUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Ver comprobante en grande"
-          className="relative block shrink-0 overflow-hidden rounded-xl border border-border bg-muted sm:w-40"
+        <button
+          type="button"
+          onClick={() => setZoomed((z) => !z)}
+          title={zoomed ? "Reducir comprobante" : "Ampliar comprobante"}
+          className="group relative block shrink-0 overflow-hidden rounded-xl border border-border bg-muted sm:w-40"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -186,10 +187,10 @@ function ReceiptReviewCard({
             alt={r.fileName || "Comprobante"}
             className="aspect-[4/3] w-full object-contain bg-white"
           />
-          <span className="absolute bottom-1 right-1 inline-flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
-            <ExternalLink className="h-3 w-3" /> Ampliar
+          <span className="absolute bottom-1 right-1 inline-flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100">
+            <ZoomIn className="h-3 w-3" /> Ampliar
           </span>
-        </a>
+        </button>
 
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -301,6 +302,29 @@ function ReceiptReviewCard({
           ) : null}
         </div>
       </div>
+
+      {zoomed ? (
+        <div className="mt-4 rounded-xl border border-border bg-white p-2">
+          <div className="mb-2 flex items-center justify-between px-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              {r.fileName || "Comprobante de pago"}
+            </span>
+            <button
+              type="button"
+              onClick={() => setZoomed(false)}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted"
+            >
+              <Minimize2 className="h-3.5 w-3.5" /> Reducir
+            </button>
+          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewUrl}
+            alt={r.fileName || "Comprobante"}
+            className="mx-auto max-h-[70vh] w-full object-contain"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
