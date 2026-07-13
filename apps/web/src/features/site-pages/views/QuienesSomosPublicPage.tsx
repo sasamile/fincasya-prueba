@@ -31,8 +31,33 @@ const staggerContainer = {
   whileInView: { transition: { staggerChildren: 0.1 } },
 };
 
-function mergeContent(raw: QuienesSomosData | null): QuienesSomosData {
-  return { ...QUIENES_SOMOS_DEFAULT, ...(raw ?? {}) };
+function normalizeStringList(
+  value: string | string[] | undefined,
+  fallback: string[],
+): string[] {
+  if (value === undefined) return fallback;
+  if (Array.isArray(value)) return value.length > 0 ? value : fallback;
+  return value.trim() ? [value] : fallback;
+}
+
+/** Convex puede devolver objetivos/politicas como string o string[] (schema legacy). */
+type QuienesSomosRaw = Omit<Partial<QuienesSomosData>, 'objetivos' | 'politicas'> & {
+  _creationTime?: number;
+  objetivos?: string | string[];
+  politicas?: string | string[];
+};
+
+function mergeContent(raw: QuienesSomosRaw | null): QuienesSomosData {
+  if (!raw) return { ...QUIENES_SOMOS_DEFAULT };
+  const { _creationTime: _ignored, objetivos, politicas, ...rest } = raw;
+  return {
+    ...QUIENES_SOMOS_DEFAULT,
+    ...rest,
+    objetivos: normalizeStringList(objetivos, QUIENES_SOMOS_DEFAULT.objetivos),
+    politicas: normalizeStringList(politicas, QUIENES_SOMOS_DEFAULT.politicas),
+    carouselImages:
+      raw.carouselImages?.length ? raw.carouselImages : QUIENES_SOMOS_DEFAULT.carouselImages,
+  };
 }
 
 export function QuienesSomosPublicPage() {
