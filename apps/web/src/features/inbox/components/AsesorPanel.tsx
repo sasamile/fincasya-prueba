@@ -657,14 +657,13 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           disabled={!draft.fincaId}
           className="flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-50"
         >
-          <FileText className="h-4 w-4" /> Ver / editar
+          <FileText className="h-4 w-4" /> Ver y enviar
         </button>
       </div>
 
       {showPreview ? (
         <ContractPreviewModal
           draft={draft}
-          settings={settings}
           selectedBankIds={selectedBankIds}
           conversation={conversation}
           onClose={() => setShowPreview(false)}
