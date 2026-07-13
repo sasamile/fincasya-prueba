@@ -12,6 +12,8 @@ type BookingForSemaphore = {
   checkinSentManualAt?: number;
   /** Soportes de pago subidos por el turista (portal de pago). */
   paymentPortalReceipts?: Array<{ status?: string }>;
+  /** Estado de la devolución del depósito de garantía (etapa rosado). */
+  depositReturn?: { estado?: string } | null;
 };
 
 const CHECKIN_SENT_KEYS = new Set([
@@ -83,7 +85,9 @@ function isFullyPaid(booking: BookingForSemaphore): boolean {
 
 function isFinishedWithDepositReturned(booking: BookingForSemaphore): boolean {
   return (
-    booking.status === "COMPLETED" || booking.paymentStatus === "REFUNDED"
+    booking.depositReturn?.estado === "devuelto" ||
+    booking.status === "COMPLETED" ||
+    booking.paymentStatus === "REFUNDED"
   );
 }
 
@@ -97,11 +101,12 @@ function hasPendingPaymentReceipt(booking: BookingForSemaphore): boolean {
 export function getReservationCalendarStage(
   booking: BookingForSemaphore,
 ): ReservationCalendarStage {
+  // Naranja: soporte de pago por revisar. Alerta prioritaria que sobrescribe
+  // todas las demás etapas hasta que el asesor lo resuelve.
+  if (hasPendingPaymentReceipt(booking)) return 6;
+  // Resto por avance del ciclo: gana la etapa más avanzada alcanzada.
   if (isFinishedWithDepositReturned(booking)) return 5;
   if (isFullyPaid(booking)) return 4;
-  // Soporte de pago por revisar: prioritario (avisa al asesor) por encima de
-  // "invitados diligenciados", "check-in enviado" y "reserva creada".
-  if (hasPendingPaymentReceipt(booking)) return 6;
   if (hasGuestsFilled(booking)) return 3;
   if (hasCheckinSent(booking)) return 2;
   return 1;
