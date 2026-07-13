@@ -6,6 +6,10 @@
  * fases — ver memoria inbox-asesor-roadmap. Los botones marcados "Fase 1/2" aún
  * no ejecutan.
  */
+import { useState } from 'react';
+import { useAction } from 'convex/react';
+import { api } from '@fincasya/backend/convex/_generated/api';
+import { toast } from 'sonner';
 import {
   CalendarDays,
   CheckCircle2,
@@ -13,6 +17,7 @@ import {
   FileSignature,
   FileText,
   Link2,
+  Loader2,
   Search,
   Send,
   Sparkles,
@@ -23,6 +28,42 @@ import {
 import { cn } from '@/lib/utils';
 import type { AsesorTool } from '@/features/inbox/components/IconRail';
 import type { ConversationRow } from '@/features/inbox/types';
+
+type ContractDraft = {
+  fincaId: string;
+  fincaTitle: string;
+  contractCode: string;
+  checkIn: string;
+  checkOut: string;
+  guests: string;
+  pricePerNight: string;
+  total: string;
+  clientName: string;
+  clientCedula: string;
+  clientPhone: string;
+  clientEmail: string;
+  clientCity: string;
+  clientAddress: string;
+  notes: string;
+};
+
+const EMPTY_DRAFT: ContractDraft = {
+  fincaId: '',
+  fincaTitle: '',
+  contractCode: '',
+  checkIn: '',
+  checkOut: '',
+  guests: '',
+  pricePerNight: '',
+  total: '',
+  clientName: '',
+  clientCedula: '',
+  clientPhone: '',
+  clientEmail: '',
+  clientCity: '',
+  clientAddress: '',
+  notes: '',
+};
 
 const TOOL_META: Record<
   AsesorTool,
@@ -81,17 +122,93 @@ function Section({
   );
 }
 
-/** Contrato IA — protagonista. Muestra el flujo: analizar → datos → preview → enviar. */
-function ContratoTool() {
+/** Contrato IA — protagonista. Flujo: analizar → datos → preview → enviar. */
+function ContratoTool({ conversation }: { conversation: ConversationRow | null }) {
+  const extract = useAction(api.contractAi.extractFromConversation);
+  const [draft, setDraft] = useState<ContractDraft>(EMPTY_DRAFT);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzed, setAnalyzed] = useState(false);
+
+  const set = (k: keyof ContractDraft) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setDraft((d) => ({ ...d, [k]: e.target.value }));
+
+  async function handleAnalyze() {
+    if (!conversation) return;
+    setAnalyzing(true);
+    try {
+      const r = await extract({
+        conversationId: conversation.conversationId,
+      });
+      setDraft({
+        fincaId: r.finca?.id ?? '',
+        fincaTitle: r.finca?.title ?? r.fincaGuess ?? '',
+        contractCode: r.contractCode,
+        checkIn: r.checkIn,
+        checkOut: r.checkOut,
+        guests: r.guests ? String(r.guests) : '',
+        pricePerNight: r.pricePerNight ? String(r.pricePerNight) : '',
+        total: r.total ? String(r.total) : '',
+        clientName: r.client.name,
+        clientCedula: r.client.cedula,
+        clientPhone: r.client.phone,
+        clientEmail: r.client.email,
+        clientCity: r.client.city,
+        clientAddress: r.client.address,
+        notes: r.notes,
+      });
+      setAnalyzed(true);
+      if (!r.finca && r.fincaGuess) {
+        toast.warning(
+          `No encontré la finca "${r.fincaGuess}" en el catálogo. Ajústala manualmente.`,
+        );
+      } else {
+        toast.success('Datos extraídos del chat. Revísalos antes de generar.');
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'No se pudo analizar el chat.',
+      );
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  const field = (
+    label: string,
+    key: keyof ContractDraft,
+    placeholder = '',
+    type = 'text',
+  ) => (
+    <div>
+      <label className={fl}>{label}</label>
+      <input
+        className={input}
+        type={type}
+        value={draft[key]}
+        onChange={set(key)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+
   return (
     <>
       <button
         type="button"
-        disabled
-        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground shadow-sm transition disabled:opacity-90"
+        onClick={() => void handleAnalyze()}
+        disabled={!conversation || analyzing}
+        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground shadow-sm transition disabled:opacity-70"
       >
-        <Wand2 className="h-4 w-4" />
-        Analizar chat y prellenar contrato
+        {analyzing ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Wand2 className="h-4 w-4" />
+        )}
+        {analyzing
+          ? 'Analizando conversación…'
+          : analyzed
+            ? 'Volver a analizar el chat'
+            : 'Analizar chat y prellenar contrato'}
       </button>
       <p className="text-center text-[11px] text-muted-foreground">
         La IA lee la conversación y detecta finca, fechas, personas, precio y
@@ -100,35 +217,22 @@ function ContratoTool() {
 
       <Section title="Datos detectados" hint="editables">
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={fl}>Finca</label>
-            <div className={cn(input, 'flex items-center text-muted-foreground/60')}>
-              Sin analizar
-            </div>
-          </div>
-          <div>
-            <label className={fl}>Código contrato</label>
-            <div className={cn(input, 'flex items-center text-muted-foreground/60')}>
-              —
-            </div>
-          </div>
-          <div>
-            <label className={fl}>Entrada</label>
-            <div className={cn(input, 'flex items-center text-muted-foreground/60')}>dd/mm/aaaa</div>
-          </div>
-          <div>
-            <label className={fl}>Salida</label>
-            <div className={cn(input, 'flex items-center text-muted-foreground/60')}>dd/mm/aaaa</div>
-          </div>
-          <div>
-            <label className={fl}>Cliente</label>
-            <div className={cn(input, 'flex items-center text-muted-foreground/60')}>Del chat</div>
-          </div>
-          <div>
-            <label className={fl}>Valor</label>
-            <div className={cn(input, 'flex items-center text-muted-foreground/60')}>$ —</div>
-          </div>
+          {field('Finca', 'fincaTitle', 'Sin analizar')}
+          {field('Código contrato', 'contractCode', 'Ej. CR 2041')}
+          {field('Entrada', 'checkIn', 'aaaa-mm-dd')}
+          {field('Salida', 'checkOut', 'aaaa-mm-dd')}
+          {field('Personas', 'guests', '0')}
+          {field('Valor / noche', 'pricePerNight', '$ 0')}
+          {field('Cliente', 'clientName', 'Nombre')}
+          {field('Cédula', 'clientCedula', '—')}
+          {field('Teléfono', 'clientPhone', '—')}
+          {field('Ciudad', 'clientCity', '—')}
         </div>
+        {draft.fincaTitle && !draft.fincaId ? (
+          <p className="mt-2 text-[11px] font-medium text-amber-600">
+            ⚠ Finca no vinculada al catálogo — verifica el nombre.
+          </p>
+        ) : null}
       </Section>
 
       <Section title="Vista previa del contrato" hint="editable como Word">
@@ -325,7 +429,7 @@ export function AsesorPanel({
 
       {/* Contenido de la herramienta */}
       <div className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col gap-3 overflow-y-auto p-4">
-        {tool === 'contrato' && <ContratoTool />}
+        {tool === 'contrato' && <ContratoTool conversation={conversation} />}
         {tool === 'calendario' && <CalendarioTool />}
         {tool === 'venta' && <VentaTool />}
         {tool === 'checkin' && <CheckinTool />}
