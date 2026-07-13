@@ -1,3 +1,5 @@
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import type { CheckinGuestsPdfInput } from "@/features/admin/utils/checkin-guests-pdf.types";
 import {
   buildCheckinGuestsPdfFilename,
@@ -8,108 +10,57 @@ import {
   isMinorGuestDocumentType,
 } from "@/features/checkin/utils/guest-document";
 
-const PDF_DOCUMENT_CSS = `
-  html, body {
-    margin: 0;
-    padding: 0;
-    font-family: Arial, Helvetica, "Segoe UI", sans-serif;
-    font-size: 11pt;
-    color: #111;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  .contract-doc-root {
-    text-align: justify;
-    text-justify: inter-word;
-  }
-  table { border-collapse: collapse; width: 100%; }
-  td, th { padding: 4pt 8pt; }
-`;
+type LoadedLogo = { dataUri: string; width: number; height: number };
 
-/** Logo de respaldo (texto) si no se pudo cargar el logo oficial. */
-const LOGO_HTML_FALLBACK = `
-<div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid #e8e8e8;">
-  <div style="width:92px;height:92px;border-radius:50%;background:#1f1f1f;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-family:Arial,sans-serif;text-align:center;padding:8px;box-sizing:border-box;">
-    <div style="font-size:8.5px;font-weight:800;line-height:1.05;">FINCAS<span style="color:#f97316">YA</span>.COM</div>
-    <div style="font-size:6.5px;opacity:0.88;margin-top:4px;">VIVE EL LLANO</div>
-  </div>
-</div>`.trim();
-
-/** Cabecera con el logo oficial en alta resolución (colibrí horizontal). Cae al texto si falla. */
-function buildLogoHtml(logoDataUri: string | null): string {
-  if (!logoDataUri) return LOGO_HTML_FALLBACK;
-  return `
-<div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid #e8e8e8;text-align:center;">
-  <img src="${logoDataUri}" alt="FincasYa" style="display:inline-block;height:58px;width:auto;max-width:320px;" />
-</div>`.trim();
-}
-
-/** Carga el logo oficial en alta resolución como data URI para embeberlo en el PDF. */
-async function fetchOfficialLogoDataUri(): Promise<string | null> {
+/**
+ * Carga el logo oficial (colibrí horizontal) como data URI + sus dimensiones
+ * naturales, para embeberlo en el PDF conservando la relación de aspecto.
+ */
+async function loadOfficialLogo(): Promise<LoadedLogo | null> {
   try {
     const res = await fetch("/gml/Logo.png", { cache: "force-cache" });
     if (!res.ok) return null;
     const blob = await res.blob();
-    return await new Promise<string | null>((resolve) => {
+    const dataUri = await new Promise<string | null>((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () =>
         resolve(typeof reader.result === "string" ? reader.result : null);
       reader.onerror = () => resolve(null);
       reader.readAsDataURL(blob);
     });
+    if (!dataUri) return null;
+    return await new Promise<LoadedLogo | null>((resolve) => {
+      const img = new Image();
+      img.onload = () =>
+        resolve({
+          dataUri,
+          width: img.naturalWidth || 320,
+          height: img.naturalHeight || 58,
+        });
+      img.onerror = () => resolve(null);
+      img.src = dataUri;
+    });
   } catch {
     return null;
   }
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function buildCheckinGuestsPdfHtmlClient(
-  input: CheckinGuestsPdfInput,
-  logoDataUri: string | null,
-): string {
-  const rows = input.guests
-    .map((guest, index) => {
-      const name = guest.nombreCompleto?.trim() || "—";
-      const esMenorEdad =
-        !guest.esMenor && isMinorGuestDocumentType(guest.tipoDocumento);
-      const doc = guest.esMenor
-        ? "Menor de 2 años"
-        : `${formatGuestDocument(guest.tipoDocumento, guest.cedula)}${
-            esMenorEdad ? " · Menor de edad" : ""
-          }`;
-      return `
-        <tr>
-          <td style="border:1px solid #ddd;text-align:center;width:36px;">${index + 1}</td>
-          <td style="border:1px solid #ddd;">${escapeHtml(name)}</td>
-          <td style="border:1px solid #ddd;">${escapeHtml(doc)}</td>
-        </tr>`;
-    })
-    .join("");
-
+/** Filas de metadatos (etiqueta / valor) de la reserva para la cabecera del PDF. */
+function buildMetaRows(input: CheckinGuestsPdfInput): [string, string][] {
   const empleadaLabel = input.needsTeam
     ? "Sí (varias)"
     : input.needsEmpleada
       ? "Sí"
       : "No";
 
-  const metaRows = [
+  const rows: ([string, string] | null)[] = [
     ["Propiedad", input.propertyTitle],
     input.propertyLocation ? ["Ubicación", input.propertyLocation] : null,
     ["Titular de la reserva", input.guestName],
     input.contractNumber ? ["Contrato", input.contractNumber] : null,
     ["Entrada", input.checkInDate],
     ["Salida", input.checkOutDate],
-    [
-      "Estado del check-in",
-      input.checkinCompleted ? "Completado" : "Pendiente",
-    ],
+    ["Estado del check-in", input.checkinCompleted ? "Completado" : "Pendiente"],
     ["Empleada de servicio", empleadaLabel],
     input.petsAllowed
       ? [
@@ -128,53 +79,24 @@ function buildCheckinGuestsPdfHtmlClient(
     input.servicesNote?.trim()
       ? ["Nota de servicios", input.servicesNote.trim()]
       : null,
-  ]
-    .filter(Boolean)
-    .map(
-      (row) => `
-        <tr>
-          <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;width:34%;">${escapeHtml(row![0])}</th>
-          <td style="border:1px solid #ddd;">${escapeHtml(row![1])}</td>
-        </tr>`,
-    )
-    .join("");
+  ];
 
-  const inner = `
-    <h1 style="font-size:16pt;margin:0 0 8pt 0;text-align:center;">Lista de invitados — Check-in</h1>
-    <p style="text-align:center;color:#555;margin:0 0 18pt 0;font-size:10pt;">
-      ${escapeHtml(CHECKIN_GUESTS_PDF_SUBTITLE)}
-    </p>
-    <table style="margin-bottom:18pt;">
-      <tbody>${metaRows}</tbody>
-    </table>
-    <h2 style="font-size:12pt;margin:0 0 8pt 0;">Personas registradas (${input.guests.length})</h2>
-    <table>
-      <thead>
-        <tr>
-          <th style="border:1px solid #ddd;background:#f5f5f5;width:36px;">#</th>
-          <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;">Nombre completo</th>
-          <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;">Documento</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows || `<tr><td colspan="3" style="border:1px solid #ddd;text-align:center;color:#666;">Sin invitados registrados</td></tr>`}
-      </tbody>
-    </table>
-  `;
+  return rows.filter((row): row is [string, string] => row !== null);
+}
 
-  return `<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="utf-8" />
-<style>${PDF_DOCUMENT_CSS}</style>
-</head>
-<body>
-${buildLogoHtml(logoDataUri)}
-<div class="contract-doc-root">
-${inner}
-</div>
-</body>
-</html>`;
+/** Filas (#, nombre, documento) de las personas registradas. */
+function buildGuestRows(input: CheckinGuestsPdfInput): string[][] {
+  return input.guests.map((guest, index) => {
+    const name = guest.nombreCompleto?.trim() || "—";
+    const esMenorEdad =
+      !guest.esMenor && isMinorGuestDocumentType(guest.tipoDocumento);
+    const doc = guest.esMenor
+      ? "Menor de 2 años"
+      : `${formatGuestDocument(guest.tipoDocumento, guest.cedula)}${
+          esMenorEdad ? " · Menor de edad" : ""
+        }`;
+    return [String(index + 1), name, doc];
+  });
 }
 
 function triggerBlobDownload(blob: Blob, filename: string) {
@@ -192,20 +114,8 @@ function triggerBlobDownload(blob: Blob, filename: string) {
   }, 1000);
 }
 
-async function parsePdfError(response: Response): Promise<string> {
-  const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    const data = (await response.json().catch(() => null)) as {
-      message?: string | string[];
-      error?: string;
-    } | null;
-    if (Array.isArray(data?.message)) return data.message.join(", ");
-    if (typeof data?.message === "string") return data.message;
-    if (typeof data?.error === "string") return data.error;
-  }
-  const text = await response.text().catch(() => "");
-  return text.slice(0, 300) || `Error ${response.status}`;
-}
+const MARGIN = 40;
+const ORANGE: [number, number, number] = [249, 115, 22];
 
 export async function downloadCheckinGuestsPdf(
   input: CheckinGuestsPdfInput,
@@ -214,43 +124,106 @@ export async function downloadCheckinGuestsPdf(
     return { ok: false, error: "No hay invitados registrados para exportar." };
   }
 
-  const logoDataUri = await fetchOfficialLogoDataUri();
-  const html = buildCheckinGuestsPdfHtmlClient(input, logoDataUri);
-  const filename = buildCheckinGuestsPdfFilename(
-    input.propertyTitle,
-    input.contractNumber,
-  );
+  try {
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const centerX = pageWidth / 2;
 
-  // Renderizado 100% en el navegador (sin backend Nest): se abre la hoja de
-  // invitados en una ventana y se dispara la impresión, donde el usuario puede
-  // "Guardar como PDF". Evita el "Failed to fetch" del backend inexistente.
-  const printWindow = window.open("", "_blank", "width=900,height=1200");
-  if (!printWindow) {
+    // --- Cabecera: logo oficial (o texto de respaldo) ---
+    const logo = await loadOfficialLogo();
+    let cursorY = MARGIN;
+    if (logo) {
+      const logoHeight = 42;
+      const logoWidth = Math.min(
+        320,
+        (logo.width / logo.height) * logoHeight,
+      );
+      doc.addImage(
+        logo.dataUri,
+        "PNG",
+        centerX - logoWidth / 2,
+        cursorY,
+        logoWidth,
+        logoHeight,
+      );
+      cursorY += logoHeight + 16;
+    } else {
+      doc.setFontSize(15);
+      doc.setFont("helvetica", "bold");
+      doc.text("FINCASYA.COM", centerX, cursorY + 14, { align: "center" });
+      cursorY += 34;
+    }
+
+    // --- Título + subtítulo ---
+    doc.setTextColor(17, 17, 17);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("Lista de invitados — Check-in", centerX, cursorY, {
+      align: "center",
+    });
+    cursorY += 16;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(110, 110, 110);
+    doc.text(CHECKIN_GUESTS_PDF_SUBTITLE, centerX, cursorY, {
+      align: "center",
+      maxWidth: pageWidth - MARGIN * 2,
+    });
+    cursorY += 20;
+
+    // --- Tabla de metadatos de la reserva ---
+    autoTable(doc, {
+      startY: cursorY,
+      margin: { left: MARGIN, right: MARGIN },
+      theme: "grid",
+      styles: { fontSize: 9, cellPadding: 5, textColor: [30, 30, 30] },
+      columnStyles: {
+        0: {
+          cellWidth: (pageWidth - MARGIN * 2) * 0.34,
+          fontStyle: "bold",
+          fillColor: [245, 245, 245],
+        },
+      },
+      body: buildMetaRows(input),
+    });
+
+    // --- Tabla de personas registradas ---
+    const afterMetaY =
+      (doc as unknown as { lastAutoTable?: { finalY: number } })
+        .lastAutoTable?.finalY ?? cursorY;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(17, 17, 17);
+    doc.text(
+      `Personas registradas (${input.guests.length})`,
+      MARGIN,
+      afterMetaY + 24,
+    );
+
+    autoTable(doc, {
+      startY: afterMetaY + 32,
+      margin: { left: MARGIN, right: MARGIN },
+      theme: "grid",
+      headStyles: { fillColor: ORANGE, textColor: [255, 255, 255], fontSize: 10 },
+      styles: { fontSize: 9, cellPadding: 5, textColor: [30, 30, 30] },
+      columnStyles: { 0: { cellWidth: 32, halign: "center" } },
+      head: [["#", "Nombre completo", "Documento"]],
+      body: buildGuestRows(input),
+    });
+
+    const filename = buildCheckinGuestsPdfFilename(
+      input.propertyTitle,
+      input.contractNumber,
+    );
+    triggerBlobDownload(doc.output("blob"), filename);
+    return { ok: true };
+  } catch (error) {
     return {
       ok: false,
       error:
-        "El navegador bloqueó la ventana de impresión. Habilita las ventanas emergentes e inténtalo de nuevo.",
+        error instanceof Error
+          ? error.message
+          : "No se pudo generar el PDF de invitados.",
     };
   }
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
-  try {
-    printWindow.document.title = filename.replace(/\.pdf$/i, "");
-  } catch {
-    /* algunos navegadores restringen el title tras write; no es crítico */
-  }
-
-  const doPrint = () => {
-    printWindow.focus();
-    printWindow.print();
-  };
-  // Espera breve para que carguen el logo y estilos antes de imprimir.
-  if (printWindow.document.readyState === "complete") {
-    window.setTimeout(doPrint, 500);
-  } else {
-    printWindow.addEventListener("load", () => window.setTimeout(doPrint, 500));
-  }
-
-  return { ok: true };
 }
