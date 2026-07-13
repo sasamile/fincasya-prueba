@@ -2074,18 +2074,6 @@ export function ContractsReservationSection({
       {/* ── CONFIRMAR PAGO (modal) ─────────────────────────────────────── */}
       {!isLinkMode && (
       <>
-      <div className="flex shrink-0 justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          className="h-11 rounded-xl border-emerald-200 bg-emerald-50/90 font-bold text-emerald-900 shadow-sm hover:bg-emerald-100 dark:border-emerald-800/80 dark:bg-emerald-950/50 dark:text-emerald-100 dark:hover:bg-emerald-900/60"
-          onClick={() => setConfModalOpen(true)}
-        >
-          <FileCheck className="mr-2 h-4 w-4" />
-          Confirmar pago
-        </Button>
-      </div>
-
       <Dialog open={confModalOpen} onOpenChange={setConfModalOpen}>
         <DialogContent
           showCloseButton
@@ -2313,27 +2301,40 @@ export function ContractsReservationSection({
               <h2 className="text-base font-bold tracking-tight text-zinc-950">
                 {isLinkMode ? "Link de Contrato" : "Generar Contrato"}
               </h2>
-              <span className="hidden text-xs text-zinc-400 sm:inline">
+              <span className="hidden text-xs text-zinc-400 lg:inline">
                 · Completa los pasos y genera el PDF
               </span>
+              {!isLinkMode && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto h-9 rounded-xl border-emerald-200 bg-emerald-50/90 font-bold text-emerald-900 shadow-sm hover:bg-emerald-100"
+                  onClick={() => setConfModalOpen(true)}
+                >
+                  <FileCheck className="mr-1.5 h-4 w-4" />
+                  Confirmar pago
+                </Button>
+              )}
             </div>
 
             <div className="space-y-4 p-3 md:p-4">
             {/* ── Stepper del asistente de contrato ─────────────────────── */}
-            <div className="flex gap-1.5 overflow-x-auto rounded-2xl border border-border bg-card p-1.5 shadow-sm scrollbar-hide">
+            <div className="flex gap-1 rounded-xl border border-border bg-card p-1 shadow-sm">
               {CONTRACT_STEPS.map((label, i) => (
                 <button
                   key={label}
                   type="button"
                   onClick={() => setStep(i)}
+                  title={label}
                   className={cn(
-                    "flex flex-1 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-left transition-colors",
+                    "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-1.5 py-1.5 transition-colors",
                     i === step ? "bg-primary/10" : "hover:bg-muted",
                   )}
                 >
                   <span
                     className={cn(
-                      "grid h-6 w-6 flex-none place-items-center rounded-full text-[11px] font-bold",
+                      "grid h-5 w-5 flex-none place-items-center rounded-full text-[10px] font-bold",
                       i <= step
                         ? "bg-primary text-white"
                         : "bg-muted text-muted-foreground",
@@ -2343,8 +2344,10 @@ export function ContractsReservationSection({
                   </span>
                   <span
                     className={cn(
-                      "text-xs font-semibold",
+                      "truncate text-[11px] font-semibold",
                       i === step ? "text-primary" : "text-muted-foreground",
+                      // En pantallas angostas solo se lee el paso activo.
+                      i === step ? "inline" : "hidden sm:inline",
                     )}
                   >
                     {label}
