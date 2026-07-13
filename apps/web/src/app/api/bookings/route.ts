@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getConvexHttpClient, api } from '@/lib/convex-server';
+import {
+  parseBookingFormData,
+  readBookingFormRequest,
+} from '@/lib/bookings/parse-booking-form';
+
+export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -12,7 +18,7 @@ export async function GET(request: Request) {
     const result = await client.query(api.bookings.list, {
       month,
       year,
-      propertyId: propertyId as any,
+      propertyId: propertyId as never,
       limit: 500,
     });
     const bookings = Array.isArray(result)
@@ -27,15 +33,15 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const form = await readBookingFormRequest(request);
+    const payload = await parseBookingFormData(form);
     const client = getConvexHttpClient();
-    const id = await client.mutation(api.bookings.create, body);
-    return NextResponse.json({ id });
+    const bookingId = await client.mutation(api.bookings.create, payload);
+    return NextResponse.json({ id: bookingId, bookingId });
   } catch (error) {
-    console.error('[api/bookings POST]', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Error' },
-      { status: 500 },
-    );
+    const message =
+      error instanceof Error ? error.message : 'No se pudo crear la reserva.';
+    console.error('[api/bookings POST]', message, error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

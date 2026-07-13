@@ -6,7 +6,7 @@
  * (acordeón) que aporta el encabezado. Paleta neutra y sobria — los estados
  * se comunican con texto, no con bloques de color.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useConvex, useMutation as useConvexMutation } from "convex/react";
 import { api as convexApi } from "@fincasya/backend/convex/_generated/api";
 import type { Id } from "@fincasya/backend/convex/_generated/dataModel";
@@ -22,7 +22,10 @@ import {
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getCurrentUser } from "@/features/auth/api/auth.api";
+import {
+  formatOperatorLabel,
+  getCurrentUser,
+} from "@/features/auth/api/auth.api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,6 +76,8 @@ const PAYMENT_STATUS_LABELS: Record<string, string> = {
   PAID: "Pagado",
   REFUNDED: "Reembolsado",
 };
+
+const PAYMENT_FIELD_CLASS = "h-10 w-full rounded-xl";
 
 function formatCop(value: number) {
   return new Intl.NumberFormat("es-CO", {
@@ -134,6 +139,7 @@ export function BookingPaymentsSection({
   });
   const [vFile, setVFile] = useState<File | null>(null);
   const [actor, setActor] = useState("");
+  const formAmountPrefilledRef = useRef(false);
 
   // Convex directo (reactivo). Los abonos se leen/crean/borran sin pasar por
   // rutas REST; el comprobante ("soporte") sube al bucket S3.
@@ -158,7 +164,7 @@ export function BookingPaymentsSection({
 
   useEffect(() => {
     getCurrentUser()
-      .then((u) => setActor(u?.name || u?.email || ""))
+      .then((u) => setActor(formatOperatorLabel(u)))
       .catch(() => {});
   }, []);
 
@@ -186,8 +192,10 @@ export function BookingPaymentsSection({
       setShowValidate(false);
       setVForm({ amount: "", paymentMethod: "Transferencia" });
       setVFile(null);
-    } catch {
-      toast.error("No se pudo validar el pago.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudo validar el pago.";
+      toast.error(message);
     } finally {
       setValidating(false);
     }
@@ -272,18 +280,28 @@ export function BookingPaymentsSection({
         reference: "",
         notes: "",
       });
-    } catch {
-      toast.error("No se pudo registrar el abono.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudo registrar el abono.";
+      toast.error(message);
     } finally {
       setSaving(false);
     }
   };
 
   useEffect(() => {
-    if (pending > 0 && !form.amount) {
-      setForm((prev) => ({ ...prev, amount: formatPriceInput(pending) }));
+    if (!showForm) {
+      formAmountPrefilledRef.current = false;
+      return;
     }
-  }, [pending, form.amount]);
+    if (pending > 0 && !formAmountPrefilledRef.current) {
+      setForm((prev) => ({
+        ...prev,
+        amount: formatPriceInput(pending),
+      }));
+      formAmountPrefilledRef.current = true;
+    }
+  }, [showForm, pending]);
 
   return (
     <div className="space-y-4">
@@ -494,7 +512,7 @@ export function BookingPaymentsSection({
                     amount: formatPriceInput(e.target.value),
                   }))
                 }
-                className="h-10 rounded-xl"
+                className={PAYMENT_FIELD_CLASS}
                 placeholder="Ej: 1.650.000"
               />
             </div>
@@ -508,7 +526,7 @@ export function BookingPaymentsSection({
                   setVForm((prev) => ({ ...prev, paymentMethod: value }))
                 }
               >
-                <SelectTrigger className="h-10 rounded-xl">
+                <SelectTrigger className={PAYMENT_FIELD_CLASS}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -601,7 +619,7 @@ export function BookingPaymentsSection({
                   setForm((prev) => ({ ...prev, type: value as PaymentType }))
                 }
               >
-                <SelectTrigger className="h-10 rounded-xl">
+                <SelectTrigger className={PAYMENT_FIELD_CLASS}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -626,7 +644,7 @@ export function BookingPaymentsSection({
                     amount: formatPriceInput(e.target.value),
                   }))
                 }
-                className="h-10 rounded-xl"
+                className={PAYMENT_FIELD_CLASS}
                 placeholder="Ej: 1.650.000"
               />
             </div>
@@ -640,7 +658,7 @@ export function BookingPaymentsSection({
                   setForm((prev) => ({ ...prev, paymentMethod: value }))
                 }
               >
-                <SelectTrigger className="h-10 rounded-xl">
+                <SelectTrigger className={PAYMENT_FIELD_CLASS}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -668,7 +686,7 @@ export function BookingPaymentsSection({
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, reference: e.target.value }))
                 }
-                className="h-10 rounded-xl"
+                className={PAYMENT_FIELD_CLASS}
                 placeholder="Nº comprobante"
               />
             </div>
@@ -682,7 +700,7 @@ export function BookingPaymentsSection({
               onChange={(e) =>
                 setForm((prev) => ({ ...prev, notes: e.target.value }))
               }
-              className="h-10 rounded-xl"
+              className={PAYMENT_FIELD_CLASS}
               placeholder="Ej. Abono del 50% por transferencia"
             />
           </div>

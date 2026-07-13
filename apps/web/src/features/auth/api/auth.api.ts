@@ -72,6 +72,19 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   return getSession();
 }
 
+/** Etiqueta legible del operador (panel admin) para auditoría de pagos y ajustes. */
+export function formatOperatorLabel(
+  user: Pick<AuthUser, 'name' | 'email'> | null | undefined,
+): string {
+  if (!user) return '';
+  const name = user.name?.trim();
+  const email = user.email?.trim();
+  if (name && email && name.toLowerCase() !== email.toLowerCase()) {
+    return `${name} (${email})`;
+  }
+  return name || email || '';
+}
+
 export interface SessionLogEntry {
   _id: string;
   userId: string;

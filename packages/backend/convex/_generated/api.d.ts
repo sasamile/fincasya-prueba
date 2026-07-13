@@ -21,6 +21,7 @@ import type * as auth from "../auth.js";
 import type * as bookings from "../bookings.js";
 import type * as campaignBroadcast from "../campaignBroadcast.js";
 import type * as categoryZoneTemplates from "../categoryZoneTemplates.js";
+import type * as checkinPortal from "../checkinPortal.js";
 import type * as contactNotes from "../contactNotes.js";
 import type * as contactTimeline from "../contactTimeline.js";
 import type * as contacts from "../contacts.js";
@@ -104,6 +105,7 @@ declare const fullApi: ApiFromModules<{
   bookings: typeof bookings;
   campaignBroadcast: typeof campaignBroadcast;
   categoryZoneTemplates: typeof categoryZoneTemplates;
+  checkinPortal: typeof checkinPortal;
   contactNotes: typeof contactNotes;
   contactTimeline: typeof contactTimeline;
   contacts: typeof contacts;

@@ -173,6 +173,18 @@ const OWNER_CHECKIN_TEMPLATE_KEYS = new Set([
   "owner_arrival_tomorrow",
 ]);
 
+/**
+ * Dominio base para los links de check-in / anfitrión / check-out que se copian
+ * o envían al cliente. Usa `NEXT_PUBLIC_APP_URL` si está configurada; si no, el
+ * dominio real donde corre la app (localhost en dev, el dominio de Vercel en
+ * prod). Evita quemar `fincasya.com` cuando la app vive en otro dominio.
+ */
+const APP_BASE_URL =
+  process.env.NEXT_PUBLIC_APP_URL ||
+  (typeof window !== "undefined"
+    ? window.location.origin
+    : "https://fincasya.com");
+
 export default function ReservationsPage() {
   const [date, setDate] = useState<Date>(new Date());
   const [view, setView] = useState<"calendar" | "list">("calendar");
@@ -258,7 +270,7 @@ export default function ReservationsPage() {
     // arma sin esperar al servidor: evita perder la "activación transitoria" del
     // clic, que en varios navegadores impide escribir en el portapapeles tras un await.
     const ref = selectedBooking.reference || selectedBooking._id;
-    const link = `https://fincasya.com/checkin/${encodeURIComponent(ref)}`;
+    const link = `${APP_BASE_URL}/checkin/${encodeURIComponent(ref)}`;
     const markCopied = () => {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
@@ -324,7 +336,7 @@ export default function ReservationsPage() {
         timeZone: "America/Bogota",
       }).format(new Date(selectedBooking.fechaEntrada));
     }
-    const link = `https://fincasya.com/checkin/${encodeURIComponent(ref)}`;
+    const link = `${APP_BASE_URL}/checkin/${encodeURIComponent(ref)}`;
     return (
       `¡Hola, ${nombre}! 👋\n` +
       `🌴 Ya casi llega el momento de disfrutar de ${finca}.\n` +
@@ -363,7 +375,7 @@ export default function ReservationsPage() {
   const buildCheckoutLink = (): string => {
     if (!selectedBooking?._id) return "";
     const ref = selectedBooking.reference || selectedBooking._id;
-    return `https://fincasya.com/checkout/${encodeURIComponent(ref)}`;
+    return `${APP_BASE_URL}/checkout/${encodeURIComponent(ref)}`;
   };
 
   const buildCheckoutMessage = (): string => {
@@ -739,7 +751,7 @@ export default function ReservationsPage() {
       selectedBooking.property?.requiresGuestList !== false;
     const showGuestListToOwner =
       selectedBooking.ownerPortalShare?.showGuestList !== false;
-    const link = `https://fincasya.com/anfitrion/${encodeURIComponent(ref)}`;
+    const link = `${APP_BASE_URL}/anfitrion/${encodeURIComponent(ref)}`;
     const fechasLinea =
       fecha && fechaSalida
         ? `📅 Entrada: ${fecha} · Salida: ${fechaSalida}\n`
@@ -928,7 +940,7 @@ export default function ReservationsPage() {
       guests.length > 0
         ? `✅ ${guests.length} ${guests.length === 1 ? "registrado" : "registrados"}`
         : "⏳ Pendiente";
-    const link = `https://fincasya.com/checkin/${encodeURIComponent(ref)}`;
+    const link = `${APP_BASE_URL}/checkin/${encodeURIComponent(ref)}`;
     const msg =
       `🚨 *Hola${nombre ? ", " + nombre : ""}*\n\n` +
       `Te damos la bienvenida a *${finca}*. Estamos preparando todo para tu llegada${rango ? " " + rango : ""} y, para que tu ingreso sea ágil y sin contratiempos, aún necesitamos que completes:\n\n` +
@@ -980,7 +992,7 @@ export default function ReservationsPage() {
       selectedBooking.property?.title ||
       selectedBooking.propertyTitle ||
       "tu finca";
-    const link = `https://fincasya.com/checkin/${encodeURIComponent(ref)}`;
+    const link = `${APP_BASE_URL}/checkin/${encodeURIComponent(ref)}`;
     const fechaLargaRaw = selectedBooking.fechaEntrada
       ? format(
           new Date(selectedBooking.fechaEntrada),

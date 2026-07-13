@@ -456,6 +456,213 @@ export const getByReference = query({
   },
 });
 
+/** Enmascara una cédula dejando visibles solo los últimos 4 dígitos. */
+function maskCedula(raw: unknown): string {
+  const digits = String(raw ?? '').replace(/\D+/g, '');
+  if (!digits) return '';
+  const last4 = digits.slice(-4);
+  return `••••${last4}`;
+}
+
+/** Quita del texto las líneas de "Invitados adicionales…" (nota interna admin). */
+function stripInternalGuestNotes(text: unknown): string | null {
+  const s = String(text ?? '').trim();
+  if (!s) return null;
+  const cleaned = s
+    .split('\n')
+    .filter((line) => !/^invitados adicionales/i.test(line.trim()))
+    .join('\n')
+    .trim();
+  return cleaned || null;
+}
+
+/**
+ * Vista del propietario (`/anfitrion/:reference`).
+ *
+ * Devuelve SOLO lo que el propietario puede ver, con el mismo "gating" que el
+ * backend anterior: mientras la oferta esté pendiente de aceptación, todos los
+ * flags de `ownerPortalShare` se fuerzan a falso (el propietario no ve nada
+ * hasta aceptar). Las cédulas se enmascaran y los menores se excluyen del
+ * listado de invitados.
+ */
+export const getOwnerView = query({
+  args: { reference: v.string() },
+  handler: async (ctx, args) => {
+    const trimmed = args.reference.trim();
+    if (!trimmed) return null;
+
+    const byRef = await ctx.db
+      .query('bookings')
+      .withIndex('by_reference', (q) => q.eq('reference', trimmed))
+      .first();
+    let booking = byRef;
+    if (!booking) {
+      try {
+        const byId = await ctx.db.get(trimmed as Id<'bookings'>);
+        if (byId && 'numeroPersonas' in byId) booking = byId;
+      } catch {
+        /* no es un Id válido */
+      }
+    }
+    if (!booking) return null;
+
+    const property = await ctx.db.get(booking.propertyId);
+    const ownerContact = property
+      ? await resolveOwnerContactFields(
+          ctx,
+          property._id,
+          property as Record<string, unknown>,
+        )
+      : { propietarioNombre: null, propietarioTratamiento: null };
+
+    const saleLink = booking.saleLinkId
+      ? await ctx.db.get(booking.saleLinkId)
+      : await ctx.db
+          .query('saleLinks')
+          .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
+          .first();
+
+    // ── Estado de la oferta al propietario ──
+    const payoutRecord = (booking.ownerPayout ?? null) as OwnerPayoutRecord | null;
+    const saleLinkOfferAmount = Number(
+      (saleLink as { ownerOfferAmount?: number } | null)?.ownerOfferAmount,
+    );
+    const valorAcordado =
+      Number(payoutRecord?.valorAcordado) ||
+      (Number.isFinite(saleLinkOfferAmount) ? saleLinkOfferAmount : 0);
+    const clientStep = Number(
+      (saleLink as { clientStep?: number } | null)?.clientStep ?? 0,
+    );
+    const ownerOfferAccepted = Boolean(booking.ownerOfferAcceptedAt);
+    const ownerOfferRejected = Boolean(booking.ownerOfferRejectedAt);
+    const ownerOfferPending =
+      Boolean(saleLink) &&
+      valorAcordado > 0 &&
+      !ownerOfferAccepted &&
+      !ownerOfferRejected &&
+      clientStep < 8;
+
+    // ── Qué puede ver el propietario ──
+    const shareRaw = (booking.ownerPortalShare ?? {}) as {
+      showGuestList?: boolean;
+      showPlates?: boolean;
+      showEmpleada?: boolean;
+      showInternalNotes?: boolean;
+    };
+    const share = ownerOfferPending
+      ? {
+          showGuestList: false,
+          showPlates: false,
+          showEmpleada: false,
+          showInternalNotes: false,
+        }
+      : {
+          showGuestList: shareRaw.showGuestList !== false,
+          showPlates: shareRaw.showPlates !== false,
+          showEmpleada: shareRaw.showEmpleada !== false,
+          showInternalNotes: shareRaw.showInternalNotes === true,
+        };
+
+    // ── Invitados (sin menores, cédula enmascarada) ──
+    const allGuests = Array.isArray(booking.checkinGuests)
+      ? booking.checkinGuests
+      : [];
+    const adultGuests = allGuests.filter((g) => !(g as { esMenor?: boolean }).esMenor);
+    const guestCount = adultGuests.length;
+    const guests = share.showGuestList
+      ? adultGuests.map((g) => ({
+          nombre: String((g as { nombreCompleto?: string }).nombreCompleto ?? ''),
+          cedula: maskCedula((g as { cedula?: string }).cedula),
+          tipoDocumento: (g as { tipoDocumento?: string }).tipoDocumento ?? 'CC',
+        }))
+      : [];
+
+    // ── Empleada de servicio (derivado del check-in) ──
+    const empleada: 'no' | 'una' | 'varias' = booking.checkinNeedsTeam
+      ? 'varias'
+      : booking.checkinNeedsEmpleada
+        ? 'una'
+        : 'no';
+
+    // ── Pago al propietario ──
+    const abonos = payoutRecord
+      ? normalizeOwnerAbonos(payoutRecord, String(booking._id))
+      : [];
+    const abonoTotal = sumOwnerAbonos(abonos);
+    const ultimoAbono = abonos.length ? abonos[abonos.length - 1] : null;
+    const ownerPayout =
+      valorAcordado > 0 || payoutRecord || abonos.length
+        ? {
+            valorAcordado: valorAcordado > 0 ? valorAcordado : null,
+            abono: abonoTotal > 0 ? abonoTotal : null,
+            saldo:
+              valorAcordado > 0 ? Math.max(0, valorAcordado - abonoTotal) : null,
+            valor: ultimoAbono ? Number(ultimoAbono.amount) || null : (payoutRecord?.valor ?? null),
+            fecha: ultimoAbono?.fecha ?? payoutRecord?.fecha ?? null,
+            medio: ultimoAbono?.medio ?? payoutRecord?.medio ?? null,
+            comprobanteUrl:
+              ultimoAbono?.comprobanteUrl ?? payoutRecord?.comprobanteUrl ?? null,
+          }
+        : null;
+
+    // ── Depósito de garantía + devolución ──
+    const depositReturn = (booking.depositReturn ?? null) as {
+      estado?: string;
+      devolucion?: { valor?: number };
+    } | null;
+    const depositoGarantia = Number((booking as { depositoGarantia?: number }).depositoGarantia) || 0;
+
+    return {
+      reference: booking.reference ?? String(booking._id),
+      propertyTitle:
+        (property as { title?: string } | null)?.title ?? 'tu finca',
+      propertyLocation:
+        (property as { location?: string } | null)?.location ?? null,
+      ownerName: ownerContact.propietarioNombre ?? null,
+      ownerTratamiento: ownerContact.propietarioTratamiento ?? null,
+      fechaEntrada: booking.fechaEntrada,
+      fechaSalida: booking.fechaSalida,
+      horaEntrada: booking.horaEntrada ?? null,
+      numeroPersonas: booking.numeroPersonas ?? null,
+      empleada,
+      placas: booking.checkinPlacas ?? null,
+      allowsPets:
+        (property as { allowsPets?: boolean } | null)?.allowsPets === true,
+      requiresGuestList:
+        (property as { requiresGuestList?: boolean } | null)
+          ?.requiresGuestList !== false,
+      mascotas:
+        booking.checkinMascotas ?? (Number(booking.numeroMascotas) || 0),
+      checkinCompleted: booking.checkinCompleted === true,
+      guestCount,
+      guests,
+      invitadosPdfUrl: null,
+      checkinObservaciones: stripInternalGuestNotes(booking.checkinObservaciones),
+      serviciosNota: booking.checkinServiciosNota ?? null,
+      clientObservaciones: booking.clientObservaciones ?? null,
+      ownerPortalShare: share,
+      ownerOfferPending,
+      ownerOfferAccepted,
+      ownerOfferRejected,
+      ownerOfferRejectedReason: booking.ownerOfferRejectedReason ?? null,
+      ownerReceiver: booking.ownerReceiver
+        ? {
+            nombre: booking.ownerReceiver.nombre ?? null,
+            contacto: booking.ownerReceiver.contacto ?? null,
+          }
+        : null,
+      ownerPayout,
+      depositoGarantia,
+      depositReturn: depositReturn
+        ? {
+            estado: depositReturn.estado ?? 'pendiente_validacion',
+            devuelto: depositReturn.devolucion?.valor ?? null,
+          }
+        : null,
+    };
+  },
+});
+
 /**
  * Verificar disponibilidad de una propiedad
  */

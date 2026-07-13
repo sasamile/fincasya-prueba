@@ -38,6 +38,8 @@ export async function POST(request: Request, { params }: RouteParams) {
       paymentMethod: body.paymentMethod,
       notes: body.notes,
       status: 'PAID',
+      verifiedBy:
+        typeof body.verifiedBy === 'string' ? body.verifiedBy.trim() : undefined,
     });
     return NextResponse.json({ paymentId });
   } catch (error) {

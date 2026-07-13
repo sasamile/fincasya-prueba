@@ -70,6 +70,12 @@ import { GuestCapacityWarningAlert } from "@/features/admin/components/shared/gu
 import { computePetFees } from "@/lib/pet-fees";
 import { toClientFieldUpper } from "@/lib/client-field-normalize";
 import { propertyMatchesSearchQuery } from "@/lib/property/property-search";
+import {
+  formatOperatorLabel,
+  getCurrentUser,
+} from "@/features/auth/api/auth.api";
+
+const PAYMENT_FIELD_CLASS = "h-10 w-full rounded-xl";
 
 /** IA / CRM pueden mandar yyyy-MM-dd, ISO completo, dd/MM/yyyy, etc. */
 function toReservationIsoDate(value: unknown): string {
@@ -585,9 +591,9 @@ export function ManualReservationModal({
 }: ManualReservationModalProps) {
   const isEditMode = Boolean(bookingId);
   const [loading, setLoading] = useState(false);
+  const [operatorLabel, setOperatorLabel] = useState("");
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [priceData, setPriceData] = useState<any>(null);
-  const [priceBreakdown, setPriceBreakdown] = useState<any[]>([]);
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -624,6 +630,13 @@ export function ManualReservationModal({
     // Cleanup URLs to avoid memory leaks
     return () => newPreviews.forEach((url) => url && URL.revokeObjectURL(url));
   }, [multimediaFiles]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    getCurrentUser()
+      .then((user) => setOperatorLabel(formatOperatorLabel(user)))
+      .catch(() => {});
+  }, [isOpen]);
 
   const [formData, setFormData] = useState({
     propertyId: "",
@@ -971,16 +984,15 @@ export function ManualReservationModal({
           if (data.total !== undefined) {
             // Guard determinista: si estamos editando una reserva y la finca y
             // las fechas siguen siendo las cargadas, conservamos los montos
-            // REGISTRADOS y no aplicamos el precio sugerido. Solo mostramos el
-            // desglose para referencia. Si el usuario cambia finca o fechas, la
-            // firma deja de coincidir y sí se aplica la cotización nueva.
+            // REGISTRADOS y no aplicamos el precio sugerido. Si el usuario
+            // cambia finca o fechas, la firma deja de coincidir y sí se aplica
+            // la cotización nueva.
             const currentSig = `${formData.propertyId}|${formData.fechaEntrada}|${formData.fechaSalida}`;
             if (
               loadedReservationSigRef.current !== null &&
               currentSig === loadedReservationSigRef.current
             ) {
               setPriceData(data);
-              setPriceBreakdown(data.nights || []);
               setLoadingPrice(false);
               return;
             }
@@ -1052,7 +1064,6 @@ export function ManualReservationModal({
               };
             });
             setPriceData(data);
-            setPriceBreakdown(data.nights || []);
           }
         } catch (error) {
           console.error("Error calculating price:", error);
@@ -1284,6 +1295,8 @@ export function ManualReservationModal({
 
     setLoading(true);
     try {
+      const verifiedBy =
+        operatorLabel || formatOperatorLabel(await getCurrentUser()) || undefined;
       const isoIn = toReservationIsoDate(formData.fechaEntrada);
       const isoOut = toReservationIsoDate(formData.fechaSalida);
       const timeIn = to24hTime(formData.horaEntrada);
@@ -1528,6 +1541,7 @@ export function ManualReservationModal({
             paymentStatus:
               formData.paymentStatus === "paid" ? "PAID" : "PARTIAL",
             abono: syncAbono,
+            verifiedBy,
           });
         } catch (paymentError) {
           console.error("Error sincronizando abono:", paymentError);
@@ -1588,7 +1602,10 @@ export function ManualReservationModal({
 
         for (const payment of paymentEntries) {
           try {
-            await axios.post(`/api/bookings/${savedBookingId}/payments`, payment);
+            await axios.post(`/api/bookings/${savedBookingId}/payments`, {
+              ...payment,
+              verifiedBy,
+            });
           } catch (paymentError) {
             console.error("Error registrando abono:", paymentError);
           }
@@ -1614,15 +1631,23 @@ export function ManualReservationModal({
         onClose();
       }
     } catch (error) {
+      const detail =
+        axios.isAxiosError(error) && typeof error.response?.data?.error === "string"
+          ? error.response.data.error
+          : error instanceof Error
+            ? error.message
+            : null;
       console.error(
         isEditMode ? "Error updating booking:" : "Error creating booking:",
-        error,
+        detail ?? error,
       );
       sileo.error({
         title: "Error",
-        description: isEditMode
-          ? "No se pudo actualizar la reserva."
-          : "No se pudo crear la reserva.",
+        description:
+          detail ??
+          (isEditMode
+            ? "No se pudo actualizar la reserva."
+            : "No se pudo crear la reserva."),
         fill: "#fee2e2",
       });
     } finally {
@@ -1664,7 +1689,7 @@ export function ManualReservationModal({
       description: adjustmentDraft.description,
       amount,
       type: adjustmentDraft.type,
-      createdBy: "admin",
+      createdBy: operatorLabel || "Operador",
     });
     setFormData((prev) => ({
       ...prev,
@@ -1764,6 +1789,7 @@ export function ManualReservationModal({
                     <div className="w-full flex items-center gap-1.5">
                       {idx > 0 && (
                         <div
+                          key={`line-before-${s.id}`}
                           className={cn(
                             "h-0.5 flex-1 rounded-full",
                             s.id <= step ? "bg-primary" : "bg-border",
@@ -1771,6 +1797,7 @@ export function ManualReservationModal({
                         />
                       )}
                       <div
+                        key={`step-circle-${s.id}`}
                         className={cn(
                           "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-black transition-all",
                           isCurrent
@@ -1788,6 +1815,7 @@ export function ManualReservationModal({
                       </div>
                       {idx < WIZARD_STEPS.length - 1 && (
                         <div
+                          key={`line-after-${s.id}`}
                           className={cn(
                             "h-0.5 flex-1 rounded-full",
                             s.id < step ? "bg-primary" : "bg-border",
@@ -2798,7 +2826,7 @@ export function ManualReservationModal({
                         setFormData((prev) => ({ ...prev, paymentStatus: value }))
                       }
                     >
-                      <SelectTrigger className="h-10 rounded-xl">
+                      <SelectTrigger className={PAYMENT_FIELD_CLASS}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -2858,7 +2886,7 @@ export function ManualReservationModal({
                           }))
                         }
                       >
-                        <SelectTrigger className="h-10 rounded-xl">
+                        <SelectTrigger className={PAYMENT_FIELD_CLASS}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -2942,7 +2970,7 @@ export function ManualReservationModal({
                           setAdjustmentDraft((prev) => ({ ...prev, type: value }))
                         }
                       >
-                        <SelectTrigger className="h-10 rounded-xl">
+                        <SelectTrigger className={PAYMENT_FIELD_CLASS}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -3084,45 +3112,6 @@ export function ManualReservationModal({
                 </p>
               </div>
 
-              {!isEditMode && priceBreakdown.length > 0 && (
-                <div
-                  className={cn(
-                    "col-span-1 md:col-span-2 p-3.5 bg-muted/40 rounded-xl space-y-1 border border-border/50 shadow-inner order-4",
-                    step !== 3 && "hidden",
-                  )}
-                >
-                  <p className="font-bold text-[10px] uppercase text-muted-foreground mb-2 flex items-center justify-between">
-                    <span>Desglose por noches</span>
-                    <span className="text-foreground font-black uppercase text-[9px] px-1.5 py-0.5 bg-muted rounded-md border border-border">
-                      {formData.temporada}
-                    </span>
-                  </p>
-                  <div className="space-y-1.5 max-h-24 overflow-y-auto custom-scrollbar pr-1">
-                    {priceBreakdown.map((n: any, idx: number) => (
-                      <div
-                        key={idx}
-                        className="flex justify-between font-bold text-[11px]"
-                      >
-                        <span className="text-foreground/70 flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/35"></span>
-                          {n.date}{" "}
-                          <span className="opacity-50 text-[9px] font-normal italic">
-                            ({n.ruleName})
-                          </span>
-                        </span>
-                        <span className="text-foreground">
-                          {new Intl.NumberFormat("es-CO", {
-                            style: "currency",
-                            currency: "COP",
-                            minimumFractionDigits: 0,
-                          }).format(n.price)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div
                 className={cn(
                   "col-span-1 md:col-span-2 space-y-4 pt-4 border-t border-border/50",
@@ -3261,6 +3250,7 @@ export function ManualReservationModal({
           )}
           <div className="flex items-center justify-end gap-2 sm:ml-auto">
             <Button
+              key="cancel"
               variant="outline"
               onClick={onClose}
               className="rounded-xl font-bold"
@@ -3269,6 +3259,7 @@ export function ManualReservationModal({
             </Button>
             {step > 1 && (
               <Button
+                key="back"
                 variant="outline"
                 onClick={() => setStep((s) => Math.max(1, s - 1))}
                 className="rounded-xl font-bold"
@@ -3278,6 +3269,7 @@ export function ManualReservationModal({
             )}
             {step < 4 ? (
               <Button
+                key="next"
                 onClick={goNext}
                 disabled={missingForCurrentStep.length > 0}
                 variant="primary"
@@ -3287,6 +3279,7 @@ export function ManualReservationModal({
               </Button>
             ) : (
               <Button
+                key="submit"
                 onClick={handleSubmit}
                 disabled={loading || missingAll.length > 0}
                 variant="primary"

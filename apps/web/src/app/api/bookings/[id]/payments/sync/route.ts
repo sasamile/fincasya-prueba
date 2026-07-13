@@ -15,6 +15,8 @@ export async function POST(
       bookingId: id as Id<'bookings'>,
       paymentStatus: body.paymentStatus,
       abono: body.abono,
+      verifiedBy:
+        typeof body.verifiedBy === 'string' ? body.verifiedBy.trim() : undefined,
     });
     return NextResponse.json(result);
   } catch (error) {

@@ -155,4 +155,178 @@ for (const path of ['/ycloud/webhook', '/webhooks/ycloud']) {
   http.route({ path, method: 'POST', handler: ycloudWebhookHandler });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Portal público de check-in del turista (`/checkin/:reference`).
+// No requiere autenticación: el cliente final lo abre desde el botón de la
+// plantilla de WhatsApp `inicio_checkin_turista`. La "llave" es la `reference`
+// de la reserva. El link NO expira y admite guardado parcial (llenar unos
+// invitados hoy y el resto otro día con el mismo enlace).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CHECKIN_CORS = { 'Access-Control-Allow-Origin': '*' } as const;
+
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  extraHeaders: Record<string, string> = {},
+): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
+  });
+}
+
+/** GET /api/checkin/:reference → resumen de la reserva + lo ya guardado. */
+http.route({
+  pathPrefix: '/api/checkin/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/checkin/', ''),
+    ).trim();
+
+    if (!key)
+      return jsonResponse({ error: 'Referencia inválida' }, 400, CHECKIN_CORS);
+
+    const data = await ctx.runQuery(internal.checkinPortal.getForPortal, { key });
+    if (data && 'portalClosed' in data && data.portalClosed) {
+      return jsonResponse(
+        {
+          error: 'reservation_ended',
+          message: 'Esta reserva ya finalizó.',
+          redirectUrl: 'https://fincasya.com',
+        },
+        410,
+        CHECKIN_CORS,
+      );
+    }
+    if (!data) {
+      return jsonResponse(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        404,
+        CHECKIN_CORS,
+      );
+    }
+
+    return jsonResponse({ ok: true, ...data }, 200, CHECKIN_CORS);
+  }),
+});
+
+/** POST /api/checkin/:reference → guarda avance (`save`) o envía (`submit`). */
+http.route({
+  pathPrefix: '/api/checkin/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/checkin/', ''),
+    ).trim();
+
+    if (!key)
+      return jsonResponse({ error: 'Referencia inválida' }, 400, CHECKIN_CORS);
+
+    let body: {
+      action?: 'save' | 'submit';
+      guests?: Array<{
+        nombreCompleto?: string;
+        cedula?: string;
+        tipoDocumento?: string;
+        esMenor?: boolean;
+        email?: string;
+        fechaNacimiento?: string;
+        telefono?: string;
+      }>;
+      needsEmpleada?: boolean;
+      needsTeam?: boolean;
+      serviciosNota?: string;
+      menoresDe2?: number;
+      placas?: string;
+      mascotas?: number;
+      observaciones?: string;
+      aceptaTratamientoDatos?: boolean;
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400, CHECKIN_CORS);
+    }
+
+    const guests = (Array.isArray(body?.guests) ? body.guests : []).map((g) => ({
+      nombreCompleto: String(g?.nombreCompleto ?? '').trim(),
+      cedula: String(g?.cedula ?? '').trim() || undefined,
+      tipoDocumento:
+        String(g?.tipoDocumento ?? '').trim().toUpperCase() || undefined,
+      esMenor: Boolean(g?.esMenor) || undefined,
+      email: String(g?.email ?? '').trim().toLowerCase() || undefined,
+      fechaNacimiento: String(g?.fechaNacimiento ?? '').trim() || undefined,
+      telefono: String(g?.telefono ?? '').trim() || undefined,
+    }));
+    const payload = {
+      key,
+      guests,
+      menoresDe2:
+        body?.menoresDe2 === undefined
+          ? undefined
+          : Math.max(0, Math.floor(Number(body.menoresDe2) || 0)),
+      placas: body?.placas?.trim() || undefined,
+      mascotas:
+        body?.mascotas === undefined
+          ? undefined
+          : Math.max(0, Math.floor(Number(body.mascotas) || 0)),
+      observaciones: body?.observaciones?.trim() || undefined,
+      aceptaTratamientoDatos:
+        body?.aceptaTratamientoDatos === undefined
+          ? undefined
+          : body.aceptaTratamientoDatos === true,
+      needsEmpleada: Boolean(body?.needsEmpleada),
+      needsTeam: Boolean(body?.needsTeam),
+      serviciosNota: body?.serviciosNota?.trim() || undefined,
+    };
+
+    const isSubmit = body?.action === 'submit';
+    const result = isSubmit
+      ? await ctx.runMutation(internal.checkinPortal.submitCheckin, payload)
+      : await ctx.runMutation(internal.checkinPortal.saveDraft, payload);
+
+    if (!result.ok) {
+      const reason = (result as { reason?: string }).reason ?? 'error';
+      const statusMap: Record<string, number> = {
+        not_found: 404,
+        count_mismatch: 422,
+        missing_guests: 422,
+        missing_name: 422,
+        missing_document: 422,
+        missing_data_consent: 422,
+        guest_list_locked: 423,
+        reservation_ended: 410,
+      };
+      return jsonResponse(
+        { error: reason, ...result },
+        statusMap[reason] ?? 400,
+        CHECKIN_CORS,
+      );
+    }
+
+    return jsonResponse({ ...result, ok: true }, 200, CHECKIN_CORS);
+  }),
+});
+
+/** OPTIONS preflight (CORS) para el portal de check-in. */
+http.route({
+  pathPrefix: '/api/checkin/',
+  method: 'OPTIONS',
+  handler: httpAction(async () => {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }),
+});
+
 export default http;
