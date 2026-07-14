@@ -38,6 +38,7 @@ import {
   Palette,
   Check,
   Receipt,
+  BarChart3,
 } from "lucide-react";
 import { useTheme } from '@/components/theme-provider';
 import { useAdminAccent } from "@/hooks/use-admin-accent";
@@ -117,6 +118,11 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         label: "Facturación (Siigo)",
         href: "/admin/facturacion",
         icon: Receipt,
+      },
+      {
+        label: "Reportes",
+        href: "/admin/reportes",
+        icon: BarChart3,
       },
       {
         label: "Contratos y Confirmación",

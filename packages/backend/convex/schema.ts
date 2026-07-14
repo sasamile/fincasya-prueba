@@ -1329,7 +1329,8 @@ export default defineSchema(
     })
       .index('by_booking', ['bookingId'])
       .index('by_transaction', ['transactionId'])
-      .index('by_status', ['status']),
+      .index('by_status', ['status'])
+      .index('by_created', ['createdAt']),
 
     googleCalendarIntegrations: defineTable({
       accessToken: v.optional(v.string()),

@@ -1,11 +1,11 @@
 /**
  * Open Graph para WhatsApp / crawlers.
- * WhatsApp es estricto: falla con WebP, imágenes grandes o URLs relativas.
- * Proxy via images.weserv.nl → JPEG 800×418 (mismo patrón de FincasYaWeb).
+ * WhatsApp es estricto: falla con WebP, PNG raros, imágenes grandes o URLs relativas.
+ * Siempre convertimos a JPEG 800×418 vía images.weserv.nl.
  */
 
-/** JPEG 1200×630 (sin alfa): WhatsApp falla con PNG transparentes/cuadrados. */
-const DEFAULT_OG_IMAGE = "https://fincasya.com/icons/fincasya-link-logo.jpg";
+/** En prod hoy existe el PNG 1200×630; el JPG se desplegará junto. */
+const DEFAULT_OG_IMAGE = "https://fincasya.com/icons/fincasya-link-logo.png";
 
 export function getPublicSiteOrigin(): string {
   const env =
@@ -28,8 +28,6 @@ export function buildOgImageUrl(imageUrl: string | null | undefined): string {
       : `https://fincasya.com${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`
     : DEFAULT_OG_IMAGE;
 
-  if (!imageUrl) return absoluteImageUrl;
-
   return `https://images.weserv.nl/?url=${encodeURIComponent(absoluteImageUrl)}&w=800&h=418&fit=cover&output=jpg&q=75`;
 }
 
@@ -45,7 +43,6 @@ export function buildOgMetadata(args: {
   const pageUrl = `${origin}${args.path.startsWith("/") ? args.path : `/${args.path}`}`;
   const optimizedImageUrl = buildOgImageUrl(args.imageUrl);
   const description = args.description.slice(0, 200);
-  const isDefaultImage = !args.imageUrl;
 
   return {
     title: args.title,
@@ -62,8 +59,8 @@ export function buildOgMetadata(args: {
       images: [
         {
           url: optimizedImageUrl,
-          width: isDefaultImage ? 1200 : 800,
-          height: isDefaultImage ? 630 : 418,
+          width: 800,
+          height: 418,
           alt: args.title,
           type: "image/jpeg",
         },

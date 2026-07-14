@@ -101,6 +101,7 @@ import type * as permissions from "../permissions.js";
 import type * as propertyOwners from "../propertyOwners.js";
 import type * as quickReplies from "../quickReplies.js";
 import type * as quienes_somos from "../quienes_somos.js";
+import type * as reportes from "../reportes.js";
 import type * as saleLinks from "../saleLinks.js";
 import type * as siigo from "../siigo.js";
 import type * as siteAnalytics from "../siteAnalytics.js";
@@ -209,6 +210,7 @@ declare const fullApi: ApiFromModules<{
   propertyOwners: typeof propertyOwners;
   quickReplies: typeof quickReplies;
   quienes_somos: typeof quienes_somos;
+  reportes: typeof reportes;
   saleLinks: typeof saleLinks;
   siigo: typeof siigo;
   siteAnalytics: typeof siteAnalytics;

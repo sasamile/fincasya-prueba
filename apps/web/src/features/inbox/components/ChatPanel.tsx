@@ -41,6 +41,11 @@ import { LabelPicker } from '@/features/inbox/components/LabelPicker';
 import { QuickReplyManager } from '@/features/inbox/components/QuickReplyManager';
 import { ASESOR_TOOLS, type AsesorTool } from '@/features/inbox/components/IconRail';
 import { SharedMedia } from '@/features/inbox/components/SharedMedia';
+import {
+  extractFirstHttpUrl,
+  LinkPreviewCard,
+  type LinkPreviewData,
+} from '@/features/inbox/components/LinkPreviewCard';
 import type { ConversationRow, Message } from '@/features/inbox/types';
 
 /** Formatea bytes a "240 KB" / "1.4 MB" para la tarjeta de documento. */
@@ -566,6 +571,9 @@ export function ChatPanel({
   const [showSearch, setShowSearch] = useState(false);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [linkPreview, setLinkPreview] = useState<LinkPreviewData | null>(null);
+  const [linkPreviewLoading, setLinkPreviewLoading] = useState(false);
+  const [linkPreviewDismissed, setLinkPreviewDismissed] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
@@ -696,6 +704,51 @@ export function ChatPanel({
     el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.45))}px`;
   }, [draft]);
 
+  // Preview de link (OG) al pegar/escribir una URL, como WhatsApp.
+  useEffect(() => {
+    const url = extractFirstHttpUrl(draft);
+    if (!url) {
+      setLinkPreview(null);
+      setLinkPreviewLoading(false);
+      setLinkPreviewDismissed(null);
+      return;
+    }
+    if (linkPreviewDismissed === url) {
+      setLinkPreview(null);
+      setLinkPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLinkPreviewLoading(true);
+      void fetch(`/api/link-preview?url=${encodeURIComponent(url)}`)
+        .then(async (res) => {
+          if (!res.ok) throw new Error('preview failed');
+          return (await res.json()) as LinkPreviewData;
+        })
+        .then((data) => {
+          if (cancelled) return;
+          if (!data.title && !data.description && !data.image) {
+            setLinkPreview(null);
+            return;
+          }
+          setLinkPreview(data);
+        })
+        .catch(() => {
+          if (!cancelled) setLinkPreview(null);
+        })
+        .finally(() => {
+          if (!cancelled) setLinkPreviewLoading(false);
+        });
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [draft, linkPreviewDismissed]);
+
   async function handleSend() {
     const text = draft.trim();
     if (!text || sending) return;
@@ -708,6 +761,8 @@ export function ChatPanel({
       });
       setDraft('');
       setReplyingTo(null);
+      setLinkPreview(null);
+      setLinkPreviewDismissed(null);
     } finally {
       setSending(false);
     }
@@ -971,6 +1026,18 @@ export function ChatPanel({
                 <X className="h-4 w-4" />
               </button>
             </div>
+          )}
+          {(linkPreviewLoading || linkPreview) && (
+            <LinkPreviewCard
+              preview={linkPreview}
+              loading={linkPreviewLoading}
+              onDismiss={() => {
+                const url = extractFirstHttpUrl(draft);
+                if (url) setLinkPreviewDismissed(url);
+                setLinkPreview(null);
+                setLinkPreviewLoading(false);
+              }}
+            />
           )}
           {recording ? (
             <AudioRecorder
