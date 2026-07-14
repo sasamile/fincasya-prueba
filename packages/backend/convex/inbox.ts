@@ -52,9 +52,8 @@ function previewSlice(text: string, max: number): string {
 }
 
 export const listConversations = query({
-  // Opcional por compatibilidad: pestañas con el bundle viejo llaman sin
-  // argumentos — reciben la primera tanda hasta que recarguen.
-  args: { paginationOpts: v.optional(paginationOptsValidator) },
+  // Requerido por usePaginatedQuery (si es optional, el typecheck de Next falla).
+  args: { paginationOpts: paginationOptsValidator },
   handler: async (ctx, { paginationOpts }) => {
     // Paginado (scroll infinito en el panel): se cargan tandas por orden de
     // último mensaje; el cliente pide más al llegar al fondo de la lista.
@@ -62,7 +61,7 @@ export const listConversations = query({
       .query('conversations')
       .withIndex('by_last_message')
       .order('desc')
-      .paginate(paginationOpts ?? { numItems: 60, cursor: null });
+      .paginate(paginationOpts);
     // Catálogo de listas/etiquetas (una vez) para resolver los ids por conversación.
     const allLabels = await ctx.db.query('labels').collect();
     const labelById = new Map(allLabels.map((l) => [String(l._id), l]));
