@@ -20,6 +20,7 @@ import {
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
+import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
 import { sendWhatsappReaction, sendWhatsappText } from './lib/ycloud';
 import {
@@ -51,19 +52,23 @@ function previewSlice(text: string, max: number): string {
 }
 
 export const listConversations = query({
-  args: {},
-  handler: async (ctx) => {
-    const conversations = await ctx.db
+  // Opcional por compatibilidad: pestañas con el bundle viejo llaman sin
+  // argumentos — reciben la primera tanda hasta que recarguen.
+  args: { paginationOpts: v.optional(paginationOptsValidator) },
+  handler: async (ctx, { paginationOpts }) => {
+    // Paginado (scroll infinito en el panel): se cargan tandas por orden de
+    // último mensaje; el cliente pide más al llegar al fondo de la lista.
+    const result = await ctx.db
       .query('conversations')
       .withIndex('by_last_message')
       .order('desc')
-      .take(100);
+      .paginate(paginationOpts ?? { numItems: 60, cursor: null });
     // Catálogo de listas/etiquetas (una vez) para resolver los ids por conversación.
     const allLabels = await ctx.db.query('labels').collect();
     const labelById = new Map(allLabels.map((l) => [String(l._id), l]));
 
     const out = [];
-    for (const c of conversations) {
+    for (const c of result.page) {
       if (c.deletedAt) continue;
       const contact = await ctx.db.get(c.contactId);
       const lastMsg = await ctx.db
@@ -104,9 +109,9 @@ export const listConversations = query({
           : null,
       });
     }
-    // Fijadas primero; dentro de cada grupo se respeta el orden por último mensaje.
-    out.sort((a, b) => Number(b.pinned) - Number(a.pinned));
-    return out;
+    // OJO: el orden "fijadas primero" se aplica en el cliente sobre lo ya
+    // cargado — con paginación el servidor entrega por último mensaje.
+    return { ...result, page: out };
   },
 });
 

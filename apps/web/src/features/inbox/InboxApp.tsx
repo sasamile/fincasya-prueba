@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { useMutation, useQuery } from 'convex/react';
+import { useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { Archive, Bot, ChevronRight, MoreVertical, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,12 @@ import { ChatPanel } from '@/features/inbox/components/ChatPanel';
 import type { ConversationRow, Filter } from '@/features/inbox/types';
 
 export default function App() {
-  const conversations = useQuery(api.inbox.listConversations);
+  // Scroll infinito: se cargan tandas de 60 y se pide más al llegar al fondo.
+  const {
+    results: conversations,
+    status: convStatus,
+    loadMore,
+  } = usePaginatedQuery(api.inbox.listConversations, {}, { initialNumItems: 60 });
   const agentSettings = useQuery(api.agentSettings.getAgentSettings);
   const setGlobalAi = useMutation(api.agentSettings.setGlobalAiEnabled);
   const markRead = useMutation(api.inbox.markConversationRead);
@@ -41,12 +46,11 @@ export default function App() {
   const labels = useQuery(api.labels.listLabels);
 
   const archived = useMemo(
-    () => (conversations ?? []).filter((c) => c.archived),
+    () => conversations.filter((c) => c.archived),
     [conversations],
   );
 
   const filtered = useMemo(() => {
-    if (!conversations) return [];
     const q = search.trim().toLowerCase();
 
     if (showArchived) {
@@ -56,7 +60,7 @@ export default function App() {
       });
     }
 
-    return conversations.filter((c) => {
+    const list = conversations.filter((c) => {
       // Las archivadas no aparecen en el listado principal.
       if (c.archived) return false;
       if (q && !c.name.toLowerCase().includes(q) && !c.phone.includes(q)) return false;
@@ -69,9 +73,13 @@ export default function App() {
       if (filter === 'web') return c.channel === 'web';
       return true;
     });
+    // Fijadas primero; dentro de cada grupo se respeta el orden por último
+    // mensaje (que ya trae el servidor). Con paginación este orden se aplica
+    // sobre lo cargado.
+    return [...list].sort((a, b) => Number(b.pinned) - Number(a.pinned));
   }, [conversations, search, filter, labelFilter, showArchived, archived]);
 
-  const selected = conversations?.find((c) => c.conversationId === selectedId) ?? null;
+  const selected = conversations.find((c) => c.conversationId === selectedId) ?? null;
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -93,7 +101,7 @@ export default function App() {
   function openChatByPhone(phone: string) {
     const d = phone.replace(/\D/g, '');
     if (d.length < 7) return toast.error('Número inválido.');
-    const match = (conversations ?? []).find((c) => {
+    const match = conversations.find((c) => {
       const cd = c.phone.replace(/\D/g, '');
       return cd.endsWith(d.slice(-10)) || d.endsWith(cd.slice(-10));
     });
@@ -208,8 +216,16 @@ export default function App() {
           />
         )}
 
-        <div className="flex-1 overflow-y-auto border-t border-border">
-          {conversations === undefined ? (
+        <div
+          className="flex-1 overflow-y-auto border-t border-border"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const nearBottom =
+              el.scrollHeight - el.scrollTop - el.clientHeight < 500;
+            if (nearBottom && convStatus === 'CanLoadMore') loadMore(60);
+          }}
+        >
+          {convStatus === 'LoadingFirstPage' ? (
             <LoadingArea className="py-16" />
           ) : (
             <>
@@ -258,6 +274,19 @@ export default function App() {
                   />
                 ))
               )}
+
+              {/* Pie del scroll infinito */}
+              {convStatus === 'LoadingMore' ? (
+                <LoadingArea className="py-4" />
+              ) : convStatus === 'CanLoadMore' ? (
+                <button
+                  type="button"
+                  onClick={() => loadMore(60)}
+                  className="block w-full py-3 text-center text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Cargar más conversaciones
+                </button>
+              ) : null}
             </>
           )}
         </div>
