@@ -21,6 +21,7 @@ import {
   formatDate,
   formatDateTime,
 } from './lib/emailTemplates';
+import { isHiddenAccessLogEmail } from './lib/roles';
 
 function siteUrl(): string {
   return (
@@ -167,11 +168,14 @@ export const notifyAdminSessionLogin = internalAction({
     loginAt: v.number(),
   },
   handler: async (ctx, args): Promise<void> => {
+    const loginEmail = args.userEmail.trim().toLowerCase();
+    // Cuentas de servicio / bot: nunca avisar.
+    if (isHiddenAccessLogEmail(loginEmail)) return;
+
     const admins = await ctx.runQuery(
       internal.notificationSettings.resolveAdminEmails,
       {},
     );
-    const loginEmail = args.userEmail.trim().toLowerCase();
     // No notificar al mismo usuario que acaba de entrar (evita autocorreo al admin).
     const recipients = admins.filter((email: string) => email !== loginEmail);
     if (recipients.length === 0) return;

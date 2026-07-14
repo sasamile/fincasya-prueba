@@ -223,3 +223,10 @@ export async function revokeAllStaffSessions(): Promise<{
   const { convex } = await import('@/lib/convex-client');
   return convex.mutation(api.adminSessionLogs.revokeAllStaffSessions, {});
 }
+
+/** Borra del historial las cuentas de servicio ocultas (Claude Dev, etc.). */
+export async function purgeHiddenAccessLogs(): Promise<{ deleted: number }> {
+  const { api } = await import('@fincasya/backend/convex/_generated/api');
+  const { convex } = await import('@/lib/convex-client');
+  return convex.mutation(api.adminSessionLogs.purgeHiddenAccessLogs, {});
+}

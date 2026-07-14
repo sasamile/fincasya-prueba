@@ -4,7 +4,9 @@ import { components, internal } from "./_generated/api";
 import { authComponent } from "./betterAuth/auth";
 import {
   canManageStaffSessions,
+  isHiddenAccessLogEmail,
   isSuperAdminRole,
+  shouldSkipAccessLog,
 } from "./lib/roles";
 import { parseUserAgent } from "./lib/parseUserAgent";
 import type { Id } from "./_generated/dataModel";
@@ -12,7 +14,8 @@ import type { Id } from "./_generated/dataModel";
 /**
  * Registra un inicio de sesión en el panel.
  *
- * Idempotente por `sessionToken`. `superadmin` no se registra.
+ * Idempotente por `sessionToken`. `superadmin` y cuentas de servicio
+ * (p. ej. claude-dev) no se registran ni disparan correo.
  */
 export const recordLogin = mutation({
   args: {
@@ -31,7 +34,19 @@ export const recordLogin = mutation({
     })) as { role?: string | null } | null;
     const effectiveRole = userRow?.role ?? args.role;
 
-    if (isSuperAdminRole(effectiveRole)) {
+    if (
+      shouldSkipAccessLog({ role: effectiveRole, email: args.userEmail })
+    ) {
+      // Limpia logs viejos de cuentas ocultas (p. ej. Claude Dev).
+      if (isHiddenAccessLogEmail(args.userEmail)) {
+        const old = await ctx.db
+          .query("adminSessionLogs")
+          .withIndex("by_user_loginAt", (q) => q.eq("userId", args.userId))
+          .take(100);
+        for (const log of old) {
+          await ctx.db.delete(log._id);
+        }
+      }
       return null;
     }
 
@@ -197,7 +212,9 @@ export const list = query({
     return rows
       .filter(
         (row) =>
-          !isSuperAdminRole(row.role) && !superadminIds.has(row.userId),
+          !isSuperAdminRole(row.role) &&
+          !superadminIds.has(row.userId) &&
+          !isHiddenAccessLogEmail(row.userEmail),
       )
       .map((row) => {
         const device = parseUserAgent(row.userAgent);
@@ -378,5 +395,37 @@ export const revokeAllStaffSessions = mutation({
     }
 
     return { usersRevoked, sessionsDeleted, logsClosed };
+  },
+});
+
+/**
+ * Borra del historial todas las filas de cuentas ocultas (Claude Dev, etc.).
+ * Idempotente: se puede correr varias veces.
+ */
+export const purgeHiddenAccessLogs = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const me = (await authComponent.safeGetAuthUser(ctx)) as {
+      role?: string | null;
+    } | null;
+    if (!me) throw new Error("No autenticado");
+    if (!canManageStaffSessions(me.role)) {
+      throw new Error("Sin permiso");
+    }
+
+    const rows = await ctx.db
+      .query("adminSessionLogs")
+      .withIndex("by_loginAt")
+      .order("desc")
+      .take(500);
+
+    let deleted = 0;
+    for (const row of rows) {
+      if (isHiddenAccessLogEmail(row.userEmail)) {
+        await ctx.db.delete(row._id);
+        deleted += 1;
+      }
+    }
+    return { deleted };
   },
 });

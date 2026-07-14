@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, formatDistanceStrict } from "date-fns";
 import { es } from "date-fns/locale";
@@ -15,6 +15,7 @@ import {
 import { sileo } from "sileo";
 import {
   getSessionLogs,
+  purgeHiddenAccessLogs,
   revokeAllStaffSessions,
   revokeSelectedSessions,
   type SessionLogEntry,
@@ -81,6 +82,17 @@ export default function AccessLogsPage() {
   });
   const [isRevoking, setIsRevoking] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Limpia una vez logs de cuentas de servicio (Claude Dev, etc.).
+  useEffect(() => {
+    void purgeHiddenAccessLogs()
+      .then((r) => {
+        if (r.deleted > 0) void refetch();
+      })
+      .catch(() => {
+        /* sin permiso o aún desplegando — el list ya filtra */
+      });
+  }, [refetch]);
 
   const rows = data ?? [];
   const activeRows = useMemo(
