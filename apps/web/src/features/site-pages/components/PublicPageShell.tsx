@@ -41,7 +41,7 @@ export function PublicPageHero({
 }) {
   return (
     <section className="border-b border-border/30 bg-linear-to-br from-[#fff6f2] via-white to-white">
-      <div className="container mx-auto max-w-4xl px-6 py-12 md:py-16">
+    <div className="container mx-auto max-w-4xl px-6 py-12 md:py-16">
         <h1 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
           {title}
         </h1>
