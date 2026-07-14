@@ -8,41 +8,45 @@ import {
   type AdminPermissionAction,
 } from "@/lib/admin-nav-permissions";
 
-/** Si el rol no tiene permisos guardados aún, usa estos hasta que admin configure Roles. */
-const ROLE_FALLBACK_PERMISSIONS: Record<string, Record<string, string[]>> = {
-  vendedor: {
-    inbox: ["read", "create", "update"],
-    contacts: ["read"],
-    bookings: ["read"],
-  },
-};
+/**
+ * Permisos efectivos del usuario logueado: rol + overrides personales.
+ * Si no hay userId, cae a permisos del rol (sin overrides).
+ */
+export function useRolePermissions(
+  role: string | undefined,
+  userId?: string | null,
+) {
+  const effective = useQuery(
+    api.permissions.getEffectiveForUser,
+    role && userId && !isFullAdminRole(role)
+      ? { userId, role }
+      : "skip",
+  );
 
-function applyRoleFallbacks(
-  role: string,
-  grouped: Record<string, string[]>,
-): Record<string, string[]> {
-  const hasAny = Object.values(grouped).some((perms) => perms.length > 0);
-  if (hasAny) return grouped;
-  return ROLE_FALLBACK_PERMISSIONS[role] ?? grouped;
-}
-
-export function useRolePermissions(role: string | undefined) {
-  const rows = useQuery(
+  const roleOnly = useQuery(
     api.permissions.getByRole,
-    role && !isFullAdminRole(role) ? { role } : "skip",
+    role && !userId && !isFullAdminRole(role) ? { role } : "skip",
   );
 
   const permissions = useMemo(() => {
-    const grouped: Record<string, string[]> = {};
-    if (!rows) return grouped;
-    for (const row of rows) {
-      grouped[row.module] = row.permissions;
+    if (role && isFullAdminRole(role)) return {} as Record<string, string[]>;
+    if (effective && !effective.fullAccess) return effective.permissions;
+    if (roleOnly) {
+      const grouped: Record<string, string[]> = {};
+      for (const row of roleOnly) {
+        grouped[row.module] = row.permissions;
+      }
+      return grouped;
     }
-    if (!role) return grouped;
-    return applyRoleFallbacks(role, grouped);
-  }, [rows, role]);
+    return {} as Record<string, string[]>;
+  }, [effective, roleOnly, role]);
 
-  const isLoading = Boolean(role && !isFullAdminRole(role) && rows === undefined);
+  const isLoading = Boolean(
+    role &&
+      !isFullAdminRole(role) &&
+      ((userId && effective === undefined) ||
+        (!userId && roleOnly === undefined)),
+  );
 
   function can(module: string, action: AdminPermissionAction = "read") {
     if (!role) return false;

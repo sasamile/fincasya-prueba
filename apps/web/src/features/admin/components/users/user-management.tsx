@@ -66,6 +66,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sileo } from "sileo";
 import { getErrorMessage } from "@/lib/error-utils";
+import { UserPermissionOverrides } from "@/features/admin/components/users/user-permission-overrides";
 
 interface UserManagementProps {
   searchTerm?: string;
@@ -97,9 +98,6 @@ export function UserManagement({
   const [showCreatePassword, setShowCreatePassword] = useState(false);
   const [showEditPassword, setShowEditPassword] = useState(false);
   const lastNumericHintAtRef = useRef(0);
-  const [activeTab, setActiveTab] = useState<"personal" | "propietarios">(
-    "personal",
-  );
 
   const showOnlyNumbersHint = () => {
     const now = Date.now();
@@ -193,9 +191,17 @@ export function UserManagement({
         throw new Error(`El teléfono debe tener ${PHONE_LENGTH} dígitos.`);
       }
 
+      const email = String(formData.get("email") || "")
+        .trim()
+        .toLowerCase();
+      if (!email || !email.includes("@")) {
+        throw new Error("Indicá un correo válido.");
+      }
+
       const userId = editingUser.id || (editingUser as any)._id;
       const data: any = {
         name: formData.get("name") as string,
+        email,
         role: (formData.get("role") || editingUser.role) as User["role"],
         phone,
         position: formData.get("position") as string,
@@ -252,9 +258,7 @@ export function UserManagement({
         name: formData.get("name") as string,
         email: formData.get("email") as string,
         password: formData.get("password") as string,
-        role: (activeTab === "propietarios"
-          ? "propietario"
-          : formData.get("role")) as UserRole,
+        role: formData.get("role") as UserRole,
         phone: phone || undefined,
         position: (formData.get("position") as string) || undefined,
         documentId: documentId || undefined,
@@ -312,23 +316,41 @@ export function UserManagement({
 
     if (!matchesSearch) return false;
 
-    // Filter by tab
-    if (activeTab === "propietarios") {
-      return user.role === "propietario";
-    } else {
-      // Show admin, assistant, vendedor and also users without a valid role (for recovery)
-      return (
-        user.role === "admin" ||
+    // Solo personal interno. Propietarios se gestionan en /admin/propietarios.
+    if (user.role === "propietario") return false;
+    return (
+      (user.role === "admin" ||
         user.role === "assistant" ||
         user.role === "vendedor" ||
+        user.role === "asesor_limitado" ||
+        user.role === "contabilidad" ||
+        user.role === "operador" ||
         !user.role ||
-        (user.role as string) === ""
-      ) && (user.role as string) !== "superadmin";
-    }
+        (user.role as string) === "") &&
+      (user.role as string) !== "superadmin"
+    );
   });
 
   const getRoleBadge = (role: User["role"]) => {
     switch (role) {
+      case "asesor_limitado":
+        return (
+          <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+            Asesor lim.
+          </span>
+        );
+      case "contabilidad":
+        return (
+          <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-800">
+            Contabilidad
+          </span>
+        );
+      case "operador":
+        return (
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-700">
+            Operador
+          </span>
+        );
       case "admin":
         return (
           <span className="text-[9px] font-black text-white bg-orange-500 px-2 py-0.5 rounded-full tracking-widest uppercase shadow-sm shadow-orange-200">
@@ -517,37 +539,6 @@ export function UserManagement({
 
   return (
     <>
-      {/* Tabs Header */}
-      <div className="flex px-8 pt-4 bg-background border-b border-border gap-8">
-        <button
-          onClick={() => setActiveTab("personal")}
-          className={`pb-4 text-xs font-black uppercase tracking-widest transition-all relative ${
-            activeTab === "personal"
-              ? "text-primary"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Personal FincasYa
-          {activeTab === "personal" && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-primary rounded-t-full" />
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab("propietarios")}
-          className={`pb-4 text-xs font-black uppercase tracking-widest transition-all relative ${
-            activeTab === "propietarios"
-              ? "text-primary"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Propietarios
-          {activeTab === "propietarios" && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-primary rounded-t-full" />
-          )}
-        </button>
-      </div>
-
-      {/* Content */}
       {content}
 
       {/* ── Create User Dialog ── */}
@@ -563,9 +554,8 @@ export function UserManagement({
                   Crear Usuario
                 </DialogTitle>
                 <DialogDescription className="text-white/80 font-medium relative z-10">
-                  {activeTab === "propietarios"
-                    ? "Cuenta para el dueño de una finca. No entra al panel admin; usa su portal de anfitrión."
-                    : "Completa los datos para crear un nuevo acceso al sistema."}
+                  Personal interno FincasYa. Los dueños de finca se crean en
+                  Propietarios.
                 </DialogDescription>
               </DialogHeader>
             </div>
@@ -623,55 +613,60 @@ export function UserManagement({
                   </div>
                 </div>
                 {/* Role */}
-                {activeTab === "personal" && (
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                      <Shield className="w-3 h-3" /> Rol *
-                    </label>
-                    <div className="relative">
-                      <select
-                        name="role"
-                        defaultValue="vendedor"
-                        className="w-full h-11 border border-border bg-muted/30 rounded-xl px-3 text-sm focus:bg-background focus:ring-2 focus:ring-primary focus:outline-none transition-all appearance-none cursor-pointer text-foreground font-medium"
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                    <Shield className="w-3 h-3" /> Rol *
+                  </label>
+                  <div className="relative">
+                    <select
+                      name="role"
+                      defaultValue="vendedor"
+                      className="w-full h-11 border border-border bg-muted/30 rounded-xl px-3 text-sm focus:bg-background focus:ring-2 focus:ring-primary focus:outline-none transition-all appearance-none cursor-pointer text-foreground font-medium"
+                    >
+                      <option value="admin" className="bg-background">
+                        Administrador
+                      </option>
+                      <option value="vendedor" className="bg-background">
+                        Vendedor
+                      </option>
+                      <option value="asesor_limitado" className="bg-background">
+                        Asesor limitado
+                      </option>
+                      <option value="contabilidad" className="bg-background">
+                        Contabilidad
+                      </option>
+                      <option value="operador" className="bg-background">
+                        Operador
+                      </option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted-foreground">
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        <option value="admin" className="bg-background">
-                          Administrador
-                        </option>
-                        <option value="vendedor" className="bg-background">
-                          Vendedor
-                        </option>
-                      </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted-foreground">
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M19 9l-7 7-7-7"
-                          />
-                        </svg>
-                      </div>
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
                     </div>
                   </div>
-                )}
+                </div>
                 {/* Position */}
-                {activeTab === "personal" && (
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                      <CheckCircle2 className="w-3 h-3" /> Cargo
-                    </label>
-                    <Input
-                      name="position"
-                      placeholder="Ej. Gerente"
-                      className="border-border bg-muted/30 rounded-xl focus:bg-background h-11"
-                    />
-                  </div>
-                )}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                    <CheckCircle2 className="w-3 h-3" /> Cargo
+                  </label>
+                  <Input
+                    name="position"
+                    placeholder="Ej. Gerente"
+                    className="border-border bg-muted/30 rounded-xl focus:bg-background h-11"
+                  />
+                </div>
                 {/* Document */}
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
@@ -751,20 +746,23 @@ export function UserManagement({
         open={!!editingUser}
         onOpenChange={(open) => !open && setEditingUser(null)}
       >
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden border-none rounded-3xl shadow-2xl bg-background">
-          <form onSubmit={handleUpdateUser}>
-            <div className="bg-primary p-8 text-white relative">
+        <DialogContent className="sm:max-w-[520px] max-h-[85vh] p-0 overflow-hidden border-none rounded-3xl shadow-2xl bg-background flex flex-col gap-0">
+          <form
+            onSubmit={handleUpdateUser}
+            className="flex flex-col min-h-0 max-h-[85vh]"
+          >
+            <div className="bg-primary px-6 py-5 text-white relative shrink-0">
               <DialogHeader>
-                <DialogTitle className="text-2xl font-black tracking-tight relative z-10">
+                <DialogTitle className="text-xl font-black tracking-tight relative z-10">
                   Editar Usuario
                 </DialogTitle>
-                <DialogDescription className="text-white/80 opacity-90 font-medium relative z-10">
-                  Permisos de acceso para <strong>{editingUser?.email}</strong>.
+                <DialogDescription className="text-white/80 opacity-90 text-sm font-medium relative z-10">
+                  Corregí datos y permisos. El correo es el que usa para entrar.
                 </DialogDescription>
               </DialogHeader>
             </div>
-            <div className="p-8 space-y-5 bg-background">
-              <div className="grid grid-cols-2 gap-5">
+            <div className="px-6 py-5 space-y-4 bg-background overflow-y-auto min-h-0 flex-1">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2 space-y-2">
                   <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
                     <UserIcon className="w-3 h-3" /> Nombre Completo
@@ -772,6 +770,19 @@ export function UserManagement({
                   <Input
                     name="name"
                     defaultValue={editingUser?.name}
+                    className="border-border bg-muted/30 rounded-xl focus:bg-background h-11"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                    <Mail className="w-3 h-3" /> Correo Electrónico *
+                  </label>
+                  <Input
+                    name="email"
+                    type="email"
+                    required
+                    defaultValue={editingUser?.email}
+                    placeholder="usuario@ejemplo.com"
                     className="border-border bg-muted/30 rounded-xl focus:bg-background h-11"
                   />
                 </div>
@@ -791,6 +802,15 @@ export function UserManagement({
                         </option>
                         <option value="vendedor" className="bg-background">
                           Vendedor
+                        </option>
+                        <option value="asesor_limitado" className="bg-background">
+                          Asesor limitado
+                        </option>
+                        <option value="contabilidad" className="bg-background">
+                          Contabilidad
+                        </option>
+                        <option value="operador" className="bg-background">
+                          Operador
                         </option>
                       </select>
                       <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted-foreground">
@@ -889,9 +909,21 @@ export function UserManagement({
                     </button>
                   </div>
                 </div>
+                {editingUser?.role !== "propietario" && editingUser?.id ? (
+                  <UserPermissionOverrides
+                    userId={editingUser.id}
+                    roleLabel={
+                      editingUser.role === "admin"
+                        ? "Administrador"
+                        : editingUser.role === "vendedor"
+                          ? "Vendedor"
+                          : editingUser.role
+                    }
+                  />
+                ) : null}
               </div>
             </div>
-            <DialogFooter className="p-8 bg-muted/20 border-t border-border gap-3">
+            <DialogFooter className="px-6 py-4 bg-muted/20 border-t border-border gap-3 shrink-0">
               <Button
                 type="button"
                 variant="outline"

@@ -38,6 +38,7 @@ import {
   type MessageSchedule,
 } from "@/features/admin/api/automation-settings.api";
 import { useAuthStore } from "@/features/auth/store/auth.store";
+import { useRolePermissions } from "@/features/admin/hooks/use-role-permissions";
 import { toast } from "sonner";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import { convex } from "@/lib/convex-client";
@@ -305,7 +306,7 @@ function MessageRow({
             <label className="space-y-1 text-xs">
               <span className="text-muted-foreground">Hora</span>
               <select
-                className="flex h-9 w-full min-w-[7rem] rounded-lg border border-border bg-background px-2 text-sm"
+                className="flex h-9 w-full min-w-28 rounded-lg border border-border bg-background px-2 text-sm"
                 value={draft.hourCO}
                 onChange={(e) =>
                   setDraft((d) => ({ ...d, hourCO: Number(e.target.value) }))
@@ -323,7 +324,7 @@ function MessageRow({
               <label className="space-y-1 text-xs">
                 <span className="text-muted-foreground">Día de la semana</span>
                 <select
-                  className="flex h-9 w-full min-w-[8rem] rounded-lg border border-border bg-background px-2 text-sm"
+                  className="flex h-9 w-full min-w-32 rounded-lg border border-border bg-background px-2 text-sm"
                   value={draft.weekday ?? 1}
                   onChange={(e) =>
                     setDraft((d) => ({
@@ -347,7 +348,7 @@ function MessageRow({
                     : "Días antes del ingreso"}
                 </span>
                 <select
-                  className="flex h-9 w-full min-w-[8rem] rounded-lg border border-border bg-background px-2 text-sm"
+                  className="flex h-9 w-full min-w-32 rounded-lg border border-border bg-background px-2 text-sm"
                   value={draft.offsetDays}
                   onChange={(e) =>
                     setDraft((d) => ({
@@ -590,10 +591,8 @@ export default function AutomatizacionesPage() {
   const queryClient = useQueryClient();
   const userRole = useAuthStore((s) => s.user?.role);
   const userId = useAuthStore((s) => s.user?.id);
-  const isAdmin =
-    userRole === "admin" ||
-    userRole === "assistant" ||
-    userRole === "superadmin";
+  const { can } = useRolePermissions(userRole, userId);
+  const isAdmin = can("automations", "update");
 
   const { data, isLoading } = useQuery({
     queryKey: AUTOMATION_QUERY_KEY,

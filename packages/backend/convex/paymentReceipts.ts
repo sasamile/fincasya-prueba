@@ -1,8 +1,18 @@
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
-import { mutation, query } from './_generated/server';
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type ActionCtx,
+} from './_generated/server';
+import { internal } from './_generated/api';
 import { resolveSaleLinkReference } from './lib/saleLinkReference';
 import { textMatchesSearchTerm } from './lib/searchText';
+import { extractPaymentReceiptFields } from './lib/receiptAi';
 
 type PaymentProofRecord = {
   url: string;
@@ -131,8 +141,19 @@ export const listPending = query({
               precioTotal,
               pagado,
               pendiente,
-              amount: typeof r.amount === 'number' ? r.amount : undefined,
-              bankName: r.bankName ?? '',
+              amount:
+                typeof r.amount === 'number'
+                  ? r.amount
+                  : typeof r.aiExtractedAmount === 'number'
+                    ? r.aiExtractedAmount
+                    : undefined,
+              aiExtractedAmount:
+                typeof r.aiExtractedAmount === 'number'
+                  ? r.aiExtractedAmount
+                  : undefined,
+              aiExtractedBank: r.aiExtractedBank ?? '',
+              aiExtractConfidence: r.aiExtractConfidence,
+              bankName: r.bankName || r.aiExtractedBank || '',
               receiptUrl: r.receiptUrl,
               fileName: r.fileName ?? '',
               submittedAt: r.submittedAt,
@@ -150,7 +171,6 @@ export const listPending = query({
       for (const link of saleLinks) {
         if (link.paymentValidated) continue;
         if (link.status === 'cancelled') continue;
-        if ((link.clientStep ?? 1) < 3) continue;
 
         const proofs = resolveSaleLinkPaymentProofs(link);
         if (!proofs.length) continue;
@@ -506,5 +526,147 @@ export const searchVerifiedGuests = query({
     return Array.from(byGuest.values())
       .sort((a, b) => b.lastVerifiedAt - a.lastVerifiedAt)
       .slice(0, limit);
+  },
+});
+
+// ─── IA: leer monto del comprobante ─────────────────────────────────────────
+
+export const _getPortalReceipt = internalQuery({
+  args: {
+    bookingId: v.id('bookings'),
+    receiptId: v.string(),
+  },
+  handler: async (ctx, { bookingId, receiptId }) => {
+    const booking = await ctx.db.get(bookingId);
+    if (!booking) return null;
+    const receipt = (booking.paymentPortalReceipts ?? []).find(
+      (r) => r.id === receiptId,
+    );
+    if (!receipt) return null;
+    return {
+      receiptUrl: receipt.receiptUrl,
+      mimeType: receipt.mimeType,
+      fileName: receipt.fileName,
+      amount: receipt.amount,
+      status: receipt.status,
+    };
+  },
+});
+
+export const _applyPortalReceiptAi = internalMutation({
+  args: {
+    bookingId: v.id('bookings'),
+    receiptId: v.string(),
+    amount: v.optional(v.number()),
+    bankName: v.optional(v.string()),
+    confidence: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) return { ok: false as const, reason: 'not_found' as const };
+    const now = Date.now();
+    let found = false;
+    const next = (booking.paymentPortalReceipts ?? []).map((r) => {
+      if (r.id !== args.receiptId) return r;
+      found = true;
+      const amount =
+        typeof args.amount === 'number' && args.amount > 0
+          ? Math.floor(args.amount)
+          : undefined;
+      return {
+        ...r,
+        // Si el cliente no puso monto, rellenamos con el de la IA.
+        amount: r.amount && r.amount > 0 ? r.amount : amount,
+        bankName: r.bankName?.trim() || args.bankName || r.bankName,
+        aiExtractedAmount: amount,
+        aiExtractedBank: args.bankName || r.aiExtractedBank,
+        aiExtractedAt: now,
+        aiExtractConfidence: args.confidence,
+      };
+    });
+    if (!found) return { ok: false as const, reason: 'receipt_not_found' as const };
+    await ctx.db.patch(args.bookingId, {
+      paymentPortalReceipts: next,
+      updatedAt: now,
+    });
+    return { ok: true as const, amount: args.amount };
+  },
+});
+
+async function runPortalReceiptAnalysis(
+  ctx: ActionCtx,
+  bookingId: Id<'bookings'>,
+  receiptId: string,
+): Promise<{
+  ok: boolean;
+  amount?: number;
+  bankName?: string;
+  reason?: string;
+}> {
+  const receipt = await ctx.runQuery(internal.paymentReceipts._getPortalReceipt, {
+    bookingId,
+    receiptId,
+  });
+  if (!receipt) return { ok: false, reason: 'not_found' };
+  if (receipt.status !== 'pending') {
+    return { ok: false, reason: 'not_pending' };
+  }
+
+  const mime = (receipt.mimeType || '').toLowerCase();
+  const name = (receipt.fileName || '').toLowerCase();
+  if (
+    mime.includes('pdf') ||
+    name.endsWith('.pdf') ||
+    receipt.receiptUrl.toLowerCase().includes('.pdf')
+  ) {
+    return { ok: false, reason: 'pdf_not_supported' };
+  }
+
+  try {
+    const extracted = await extractPaymentReceiptFields(receipt.receiptUrl);
+    if (!extracted.amount) {
+      return { ok: false, reason: 'no_amount' };
+    }
+    await ctx.runMutation(internal.paymentReceipts._applyPortalReceiptAi, {
+      bookingId,
+      receiptId,
+      amount: extracted.amount,
+      bankName: extracted.bankName,
+      confidence: extracted.confidence,
+    });
+    return {
+      ok: true,
+      amount: extracted.amount,
+      bankName: extracted.bankName,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'error';
+    if (msg === 'pdf_not_supported') {
+      return { ok: false, reason: 'pdf_not_supported' };
+    }
+    console.error('[paymentReceipts] analyze failed', err);
+    return { ok: false, reason: msg.slice(0, 120) };
+  }
+}
+
+/** Se agenda al subir un soporte. */
+export const analyzePortalReceipt = internalAction({
+  args: {
+    bookingId: v.id('bookings'),
+    receiptId: v.string(),
+  },
+  handler: async (ctx, { bookingId, receiptId }) => {
+    return await runPortalReceiptAnalysis(ctx, bookingId, receiptId);
+  },
+});
+
+/** Botón «Sugerir con IA» en revisión de pagos. */
+export const suggestReceiptAmount = action({
+  args: {
+    bookingId: v.id('bookings'),
+    receiptId: v.string(),
+  },
+  handler: async (ctx, { bookingId, receiptId }) => {
+    return await runPortalReceiptAnalysis(ctx, bookingId, receiptId);
   },
 });

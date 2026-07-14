@@ -36,3 +36,8 @@ export function shouldSkipAccessLog(args: {
 export function canManageStaffSessions(role?: string | null): boolean {
   return role === 'admin' || role === 'assistant' || isSuperAdminRole(role);
 }
+
+/** Acceso total al panel (ignoran matriz de roles, no overrides). */
+export function isFullAdminRole(role?: string | null): boolean {
+  return role === 'admin' || role === 'assistant' || isSuperAdminRole(role);
+}

@@ -22,7 +22,7 @@ export default function UsersPage() {
             Usuarios
           </h1>
           <p className="text-[10px] md:text-xs text-muted-foreground mt-1 font-bold uppercase tracking-wider opacity-60">
-            Gestión de Accesos a la Plataforma
+            Personal interno · propietarios en /admin/propietarios
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 md:gap-3 w-full md:w-auto">
@@ -37,7 +37,7 @@ export default function UsersPage() {
       </div>
 
       {/* Search + Table Container */}
-      <div className="rounded-[2rem] bg-background border border-border shadow-sm overflow-hidden flex flex-col">
+      <div className="rounded-4xl bg-background border border-border shadow-sm overflow-hidden flex flex-col">
         {/* Search Bar */}
         <div className="p-4 md:p-6 border-b border-border flex flex-col md:flex-row items-center gap-3 md:gap-4 bg-muted/20">
           <div className="relative flex-1 w-full">

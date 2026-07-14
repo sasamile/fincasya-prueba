@@ -6,6 +6,9 @@ import {
   Instagram,
   Loader2,
   MessageCircle,
+  MessageCircleMore,
+  CheckCircle2,
+  Inbox,
   RefreshCw,
   Send,
   Search,
@@ -104,7 +107,8 @@ export function CommentsInbox({
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterMode>('all');
-  const [replyFilter, setReplyFilter] = useState<ReplyFilter>('pending');
+  const [replyFilter, setReplyFilter] = useState<ReplyFilter>('all');
+  const [didAutoPickFilter, setDidAutoPickFilter] = useState(false);
   const [activePostKey, setActivePostKey] = useState<string | null>(null);
   const [activeCommentKey, setActiveCommentKey] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
@@ -138,6 +142,7 @@ export function CommentsInbox({
 
   useEffect(() => {
     void load();
+    setDidAutoPickFilter(false);
   }, [load]);
 
   useEffect(() => {
@@ -425,111 +430,157 @@ export function CommentsInbox({
     (n, g) => n + g.comments.filter((c) => isReplied(c)).length,
     0,
   );
+  const allCount = groups.reduce((n, g) => n + g.comments.length, 0);
+
+  useEffect(() => {
+    if (loading || didAutoPickFilter || groups.length === 0) return;
+    if (pendingCount > 0) setReplyFilter('pending');
+    setDidAutoPickFilter(true);
+  }, [loading, didAutoPickFilter, groups.length, pendingCount]);
+
+  const emptyCopy = (() => {
+    if (replyFilter === 'pending') {
+      return {
+        icon: CheckCircle2,
+        title: 'No hay pendientes',
+        description:
+          pendingCount === 0 && repliedCount > 0
+            ? 'Todo al día. Revisa los respondidos o ve todos los comentarios.'
+            : 'Cuando llegue un comentario nuevo aparecerá aquí.',
+        actions: [
+          repliedCount > 0
+            ? { label: 'Ver respondidos', onClick: () => setReplyFilter('replied') }
+            : null,
+          allCount > 0
+            ? { label: 'Ver todos', onClick: () => setReplyFilter('all') }
+            : null,
+        ].filter(Boolean) as { label: string; onClick: () => void }[],
+      };
+    }
+    if (replyFilter === 'replied') {
+      return {
+        icon: MessageCircleMore,
+        title: 'Sin respondidos',
+        description: 'Todavía no hay respuestas publicadas en este filtro.',
+        actions: [
+          pendingCount > 0
+            ? { label: 'Ver pendientes', onClick: () => setReplyFilter('pending') }
+            : null,
+          { label: 'Ver todos', onClick: () => setReplyFilter('all') },
+        ].filter(Boolean) as { label: string; onClick: () => void }[],
+      };
+    }
+    return {
+      icon: Inbox,
+      title: search.trim() ? 'Sin resultados' : 'Sin comentarios aún',
+      description: search.trim()
+        ? 'Prueba otra búsqueda o limpia el filtro.'
+        : 'Los comentarios de tus publicaciones aparecerán aquí.',
+      actions: [] as { label: string; onClick: () => void }[],
+    };
+  })();
 
   return (
     <div
       className={cn(
         'bg-card flex flex-col overflow-hidden',
-        embedded ? 'h-full min-h-0' : 'border-border rounded-2xl border shadow-sm',
+        embedded ? 'h-full min-h-0' : 'border-border/60 rounded-2xl border shadow-sm',
       )}
     >
-      <div className="border-border flex flex-wrap items-center gap-3 border-b px-4 py-3">
-        <div className="relative min-w-[180px] flex-1">
-          <Search className="text-muted-foreground absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+      <div className="flex flex-wrap items-center gap-2.5 px-4 py-3">
+        <div className="relative min-w-[160px] flex-1">
+          <Search className="text-muted-foreground absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar publicación o comentario…"
-            className="h-9 border-border bg-background pl-8 text-xs"
+            className="h-9 border-0 bg-muted/70 pl-9 text-xs shadow-none focus-visible:ring-1"
           />
         </div>
-        <div className="bg-muted flex items-center gap-0.5 rounded-full p-0.5">
-          <button
-            type="button"
-            onClick={() => setFilter('all')}
-            title="Todas las redes"
-            className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
-              filter === 'all'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-background',
-            )}
-          >
-            <Layers className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilter('facebook')}
-            title="Facebook"
-            className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
-              filter === 'facebook'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-background',
-            )}
-          >
-            <Facebook className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilter('instagram')}
-            title="Instagram"
-            className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
-              filter === 'instagram'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-background',
-            )}
-          >
-            <Instagram className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div className="flex items-center gap-1">
+
+        <div className="bg-muted/70 flex items-center gap-0.5 rounded-lg p-0.5">
           {(
             [
-              ['pending', `Pendientes (${pendingCount})`],
-              ['replied', `Respondidos (${repliedCount})`],
-              ['all', 'Todos'],
+              ['all', Layers, 'Todas'],
+              ['facebook', Facebook, 'Facebook'],
+              ['instagram', Instagram, 'Instagram'],
             ] as const
-          ).map(([value, label]) => (
+          ).map(([value, Icon, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setFilter(value)}
+              title={label}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+                filter === value
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
+        </div>
+
+        <div className="bg-muted/70 flex items-center gap-0.5 rounded-lg p-0.5">
+          {(
+            [
+              ['pending', `Pendientes`, pendingCount],
+              ['replied', `Respondidos`, repliedCount],
+              ['all', 'Todos', allCount],
+            ] as const
+          ).map(([value, label, count]) => (
             <button
               key={value}
               type="button"
               onClick={() => setReplyFilter(value)}
               className={cn(
-                'rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                'rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors',
                 replyFilter === value
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-muted text-muted-foreground',
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
               )}
             >
               {label}
+              <span
+                className={cn(
+                  'ml-1 tabular-nums',
+                  replyFilter === value ? 'text-primary' : 'opacity-70',
+                )}
+              >
+                {count}
+              </span>
             </button>
           ))}
         </div>
+
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9"
+          className="text-muted-foreground h-8 w-8"
           onClick={() => void load()}
           disabled={loading}
           title="Actualizar"
         >
-          <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
         </Button>
       </div>
 
-      <div className="border-border bg-accent/40 flex flex-wrap items-center gap-3 border-b px-4 py-2.5">
+      <div className="bg-muted/40 flex flex-wrap items-center gap-3 px-4 py-2">
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="h-8 gap-1.5 text-xs"
+          className="text-muted-foreground hover:text-foreground h-8 gap-1.5 px-2 text-xs"
           onClick={() => setTemplatesModalOpen(true)}
         >
           <LayoutTemplate className="h-3.5 w-3.5" />
-          Mis plantillas ({templates.length})
+          Plantillas
+          <span className="text-foreground/70 tabular-nums">{templates.length}</span>
         </Button>
+
+        <div className="bg-border/80 hidden h-4 w-px sm:block" />
 
         <div className="flex items-center gap-2">
           <Switch
@@ -538,14 +589,17 @@ export function CommentsInbox({
             disabled={savingAutoReply || templates.length === 0}
             onCheckedChange={(v) => void handleAutoReplyToggle(v)}
           />
-          <Label htmlFor="auto-reply" className="flex items-center gap-1.5 text-xs font-medium">
+          <Label
+            htmlFor="auto-reply"
+            className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium"
+          >
             <Bot className="h-3.5 w-3.5" />
-            Respuesta automática
+            Auto-respuesta
           </Label>
         </div>
         {templates.length === 0 ? (
           <span className="text-muted-foreground text-[11px]">
-            Crea una plantilla para activar el envío automático
+            Crea una plantilla para activarla
           </span>
         ) : null}
         {autoReply && templates.length > 0 ? (
@@ -553,7 +607,7 @@ export function CommentsInbox({
             value={autoReplyTemplateId || templates[0]?.id}
             onChange={(e) => void handleAutoReplyTemplateChange(e.target.value)}
             disabled={savingAutoReply}
-            className="border-border bg-background h-8 max-w-xs flex-1 rounded-lg border px-2 text-xs"
+            className="border-border/80 bg-card h-8 max-w-xs flex-1 rounded-md border px-2 text-xs"
           >
             {templates.map((t) => (
               <option key={t.id} value={t.id}>
@@ -562,19 +616,19 @@ export function CommentsInbox({
             ))}
           </select>
         ) : null}
-        <span className="text-muted-foreground ml-auto text-[11px]">
-          {totalComments} comentario{totalComments === 1 ? '' : 's'} ·{' '}
-          {filteredGroups.length} publicación{filteredGroups.length === 1 ? '' : 'es'}
+        <span className="text-muted-foreground ml-auto hidden text-[11px] sm:inline">
+          {totalComments} de {allCount} visibles
         </span>
       </div>
+
+      <div className="bg-border/60 h-px w-full" />
 
       <Dialog open={templatesModalOpen} onOpenChange={setTemplatesModalOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Mis plantillas</DialogTitle>
+            <DialogTitle>Plantillas de respuesta</DialogTitle>
             <DialogDescription>
-              Crea mensajes reutilizables para responder manualmente o configurar el envío
-              automático.
+              Mensajes reutilizables para responder a mano o configurar el envío automático.
             </DialogDescription>
           </DialogHeader>
 
@@ -584,7 +638,7 @@ export function CommentsInbox({
                 {templates.map((tpl) => (
                   <li
                     key={tpl.id}
-                    className="border-border flex items-start gap-2 rounded-xl border bg-muted/30 p-3"
+                    className="bg-muted/40 flex items-start gap-2 rounded-xl p-3"
                   >
                     <button
                       type="button"
@@ -614,24 +668,28 @@ export function CommentsInbox({
                 ))}
               </ul>
             ) : (
-              <p className="text-muted-foreground rounded-xl border border-dashed p-4 text-center text-sm">
-                Aún no tienes plantillas. Crea la primera abajo.
-              </p>
+              <div className="bg-muted/30 flex flex-col items-center gap-2 rounded-xl px-4 py-8 text-center">
+                <LayoutTemplate className="text-muted-foreground/50 h-8 w-8" />
+                <p className="text-muted-foreground text-sm">
+                  Aún no tienes plantillas. Crea la primera abajo.
+                </p>
+              </div>
             )}
 
-            <div className="border-border space-y-2 border-t pt-4">
+            <div className="border-border/60 space-y-2 border-t pt-4">
               <p className="text-sm font-semibold">Nueva plantilla</p>
               <Input
                 value={newTplLabel}
                 onChange={(e) => setNewTplLabel(e.target.value)}
                 placeholder="Nombre corto (ej. Catálogo WhatsApp)"
+                className="border-0 bg-muted/70 shadow-none"
               />
               <Textarea
                 value={newTplText}
                 onChange={(e) => setNewTplText(e.target.value)}
                 placeholder="Texto del mensaje que se enviará…"
                 rows={4}
-                className="resize-none"
+                className="resize-none border-0 bg-muted/70 shadow-none"
               />
               <Button
                 type="button"
@@ -656,30 +714,46 @@ export function CommentsInbox({
           <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
         </div>
       ) : error ? (
-        <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <p className="text-destructive text-sm">{error}</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={() => void load()}>
+          <Button variant="outline" size="sm" onClick={() => void load()}>
             Reintentar
           </Button>
         </div>
       ) : filteredGroups.length === 0 ? (
-        <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-2 p-6">
-          <MessageCircle className="h-8 w-8 opacity-40" />
-          <p className="text-sm font-medium">
-            {replyFilter === 'pending'
-              ? 'Sin comentarios pendientes'
-              : replyFilter === 'replied'
-                ? 'No hay comentarios respondidos'
-                : 'Bandeja al día'}
-          </p>
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-12 text-center">
+          <div className="bg-muted flex h-14 w-14 items-center justify-center rounded-2xl">
+            <emptyCopy.icon className="text-muted-foreground h-7 w-7" strokeWidth={1.6} />
+          </div>
+          <div className="max-w-sm space-y-1.5">
+            <p className="text-sm font-semibold">{emptyCopy.title}</p>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              {emptyCopy.description}
+            </p>
+          </div>
+          {emptyCopy.actions.length > 0 ? (
+            <div className="flex flex-wrap justify-center gap-2">
+              {emptyCopy.actions.map((action) => (
+                <Button
+                  key={action.label}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={action.onClick}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 lg:grid-cols-[300px_minmax(0,1fr)]">
-          <div className="border-border overflow-y-auto border-b lg:border-r lg:border-b-0">
-            <p className="text-muted-foreground border-border border-b px-3 py-2 text-[10px] font-bold tracking-wide uppercase">
+        <div className="grid min-h-0 flex-1 lg:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="bg-muted/20 overflow-y-auto lg:border-r lg:border-border/50">
+            <p className="text-muted-foreground px-4 py-2.5 text-[10px] font-semibold tracking-[0.08em] uppercase">
               Publicaciones
             </p>
-            <ul>
+            <ul className="space-y-0.5 px-2 pb-3">
               {filteredGroups.map((group) => {
                 const key = postKey(group);
                 const active = key === activePostKey;
@@ -694,11 +768,13 @@ export function CommentsInbox({
                       type="button"
                       onClick={() => setActivePostKey(key)}
                       className={cn(
-                        'hover:bg-muted/60 flex w-full gap-3 border-b px-3 py-3 text-left transition-colors',
-                        active && 'bg-primary/8 border-l-primary border-l-2',
+                        'flex w-full gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors',
+                        active
+                          ? 'bg-card shadow-sm ring-1 ring-border/80'
+                          : 'hover:bg-card/70',
                       )}
                     >
-                      <div className="bg-muted relative h-14 w-14 shrink-0 overflow-hidden rounded-xl">
+                      <div className="bg-muted relative h-12 w-12 shrink-0 overflow-hidden rounded-lg">
                         {group.postImageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -708,14 +784,14 @@ export function CommentsInbox({
                           />
                         ) : (
                           <div className="flex h-full items-center justify-center">
-                            <MessageCircle className="text-muted-foreground/30 h-5 w-5" />
+                            <MessageCircle className="text-muted-foreground/35 h-4 w-4" />
                           </div>
                         )}
-                        <span className="bg-card absolute right-1 bottom-1 rounded-full p-0.5 shadow-sm">
+                        <span className="bg-card absolute right-0.5 bottom-0.5 rounded-full p-0.5 shadow-sm">
                           {group.provider === 'instagram' ? (
-                            <Instagram className="h-3 w-3 text-pink-500" />
+                            <Instagram className="h-2.5 w-2.5 text-pink-500" />
                           ) : (
-                            <Facebook className="h-3 w-3 text-blue-600" />
+                            <Facebook className="h-2.5 w-2.5 text-blue-600" />
                           )}
                         </span>
                       </div>
@@ -723,18 +799,21 @@ export function CommentsInbox({
                         <p className="line-clamp-2 text-xs leading-snug font-medium">
                           {group.postPreview?.trim() || 'Publicación sin texto'}
                         </p>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                          <Badge
-                            variant={hasNew ? 'default' : 'secondary'}
-                            className="h-5 text-[10px]"
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={cn(
+                              'rounded-md px-1.5 py-0.5 text-[10px] font-medium',
+                              hasNew
+                                ? 'bg-primary/10 text-primary'
+                                : 'bg-muted text-muted-foreground',
+                            )}
                           >
-                            {group.comments.length} comentario
-                            {group.comments.length === 1 ? '' : 's'}
-                          </Badge>
-                          {pendingInGroup > 0 && pendingInGroup < group.comments.length ? (
-                            <Badge variant="outline" className="h-5 text-[10px]">
-                              {pendingInGroup} pendiente{pendingInGroup === 1 ? '' : 's'}
-                            </Badge>
+                            {group.comments.length} com.
+                          </span>
+                          {pendingInGroup > 0 ? (
+                            <span className="text-primary text-[10px] font-medium">
+                              {pendingInGroup} pend.
+                            </span>
                           ) : null}
                           {newest ? (
                             <span className="text-muted-foreground text-[10px]">
@@ -750,20 +829,20 @@ export function CommentsInbox({
             </ul>
           </div>
 
-          <div className="flex min-h-0 flex-col">
+          <div className="flex min-h-0 flex-col bg-card">
             {activeGroup && activeComment ? (
               <>
-                <div className="border-border bg-panel flex items-center justify-between border-b px-4 py-3">
-                  <p className="text-muted-foreground text-[10px] font-bold tracking-wide uppercase">
-                    Hilo de comentarios
+                <div className="flex items-center justify-between px-4 py-2.5">
+                  <p className="text-muted-foreground text-[10px] font-semibold tracking-[0.08em] uppercase">
+                    Hilo
                   </p>
                   {loadingThreads ? (
                     <Loader2 className="text-muted-foreground h-3.5 w-3.5 animate-spin" />
                   ) : null}
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-                  <ul className="space-y-4">
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+                  <ul className="space-y-1">
                     {activeComments.map((item) => {
                       const key = commentKey(item);
                       const isActive = key === activeCommentKey;
@@ -775,16 +854,14 @@ export function CommentsInbox({
                         <li
                           key={key}
                           className={cn(
-                            'rounded-2xl border transition-colors',
-                            isActive
-                              ? 'border-primary/30 bg-accent/30'
-                              : 'border-transparent',
+                            'rounded-xl transition-colors',
+                            isActive ? 'bg-muted/50' : 'hover:bg-muted/30',
                           )}
                         >
                           <button
                             type="button"
                             onClick={() => setActiveCommentKey(key)}
-                            className="hover:bg-muted/30 flex w-full gap-3 rounded-2xl px-3 py-3 text-left"
+                            className="flex w-full gap-3 px-3 py-3 text-left"
                           >
                             <MetaSocialAvatar
                               pageId={connection.pageId}
@@ -816,7 +893,7 @@ export function CommentsInbox({
                           </button>
 
                           {hasThread ? (
-                            <ul className="border-border/60 ml-11 space-y-3 border-l pb-3 pl-4">
+                            <ul className="border-border/40 ml-11 space-y-3 border-l pb-3 pl-4">
                               {replies.map((reply) => (
                                 <li key={reply.id} className="flex gap-2.5">
                                   <MetaSocialAvatar
@@ -843,7 +920,10 @@ export function CommentsInbox({
                                         {reply.fromName || connection.pageName || 'Página'}
                                       </span>
                                       {reply.isPageAuthor ? (
-                                        <Badge className="h-5 bg-blue-600 px-1.5 text-[10px] text-white hover:bg-blue-600">
+                                        <Badge
+                                          variant="secondary"
+                                          className="h-5 px-1.5 text-[10px]"
+                                        >
                                           Autor
                                         </Badge>
                                       ) : null}
@@ -853,9 +933,7 @@ export function CommentsInbox({
                                         </Badge>
                                       ) : null}
                                       <span className="text-muted-foreground text-[11px]">
-                                        {reply.createdTime
-                                          ? timeAgo(reply.createdTime)
-                                          : ''}
+                                        {reply.createdTime ? timeAgo(reply.createdTime) : ''}
                                       </span>
                                     </div>
                                     {reply.text ? (
@@ -868,17 +946,31 @@ export function CommentsInbox({
                               ))}
                             </ul>
                           ) : isReplied(item) && item.reply ? (
-                            <ul className="border-border/60 ml-11 space-y-3 border-l pb-3 pl-4">
+                            <ul className="border-border/40 ml-11 space-y-3 border-l pb-3 pl-4">
                               <li className="flex gap-2.5">
-                                <div className="bg-primary/10 text-primary flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold uppercase">
-                                  {(connection.pageName || '?')[0]}
-                                </div>
+                                <MetaSocialAvatar
+                                  pageId={connection.pageId}
+                                  participantId={connection.pageId}
+                                  platform={
+                                    item.provider === 'instagram' ? 'instagram' : 'facebook'
+                                  }
+                                  directUrl={
+                                    item.provider === 'instagram'
+                                      ? connection.igPictureUrl
+                                      : connection.pictureUrl
+                                  }
+                                  name={connection.pageName}
+                                  className="h-8 w-8"
+                                />
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                     <span className="text-sm font-semibold">
                                       {connection.pageName}
                                     </span>
-                                    <Badge className="h-5 bg-blue-600 px-1.5 text-[10px] text-white hover:bg-blue-600">
+                                    <Badge
+                                      variant="secondary"
+                                      className="h-5 px-1.5 text-[10px]"
+                                    >
                                       Autor
                                     </Badge>
                                     {item.reply.auto ? (
@@ -903,10 +995,10 @@ export function CommentsInbox({
                   </ul>
                 </div>
 
-                <div className="border-border bg-panel space-y-3 border-t p-4">
+                <div className="bg-muted/30 space-y-2.5 px-4 py-3">
                   <p className="text-muted-foreground text-xs">
                     Respondiendo a{' '}
-                    <span className="text-foreground font-semibold">
+                    <span className="text-foreground font-medium">
                       {activeComment.fromName || 'Usuario'}
                     </span>
                   </p>
@@ -918,7 +1010,7 @@ export function CommentsInbox({
                           key={tpl.id}
                           type="button"
                           onClick={() => setReplyText(tpl.text)}
-                          className="bg-background hover:bg-muted rounded-full border px-2.5 py-1 text-[11px]"
+                          className="bg-card text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1 text-[11px] ring-1 ring-border/70 transition-colors"
                         >
                           {tpl.label}
                         </button>
@@ -926,38 +1018,40 @@ export function CommentsInbox({
                     </div>
                   ) : (
                     <p className="text-muted-foreground text-xs">
-                      Crea plantillas arriba para insertar respuestas con un clic.
+                      Crea plantillas para insertar respuestas con un clic.
                     </p>
                   )}
 
-                  <Textarea
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
-                    placeholder="Comentar como la página…"
-                    rows={3}
-                    className="resize-none text-sm"
-                  />
-
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      size="sm"
-                      disabled={sending || !replyText.trim()}
-                      onClick={() => void handleSend()}
-                      className="gap-1.5"
-                    >
-                      {sending ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Send className="h-3.5 w-3.5" />
-                      )}
-                      Responder
-                    </Button>
+                  <div className="bg-card overflow-hidden rounded-xl ring-1 ring-border/70">
+                    <Textarea
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      placeholder="Escribe tu respuesta…"
+                      rows={3}
+                      className="resize-none border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
+                    />
+                    <div className="flex justify-end px-2 pb-2">
+                      <Button
+                        size="sm"
+                        disabled={sending || !replyText.trim()}
+                        onClick={() => void handleSend()}
+                        className="gap-1.5"
+                      >
+                        {sending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5" />
+                        )}
+                        Responder
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </>
             ) : (
-              <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
-                Selecciona una publicación
+              <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+                <MessageCircle className="h-8 w-8 opacity-30" />
+                <p className="text-sm">Selecciona una publicación</p>
               </div>
             )}
           </div>

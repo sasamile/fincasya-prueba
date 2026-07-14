@@ -69,21 +69,21 @@ body:has(.inbox) {
 
 /* ── Redes sociales CRM · pantalla completa (tema claro FincasYa) ─ */
 .social-crm {
-  --background: #f4f6f5;
-  --foreground: #1a2e24;
+  --background: #f7f7f8;
+  --foreground: #1c1917;
   --card: #ffffff;
   --panel-header: #ffffff;
-  --muted: #eef2ef;
-  --muted-foreground: #5c6f64;
-  --border: #dde5e0;
-  --input: #ffffff;
-  --primary: #21c063;
+  --muted: #f1f1f3;
+  --muted-foreground: #71717a;
+  --border: #e8e8ec;
+  --input: #f1f1f3;
+  --primary: #fe4a19;
   --primary-foreground: #ffffff;
-  --secondary: #eef2ef;
-  --accent: #e8f5ee;
+  --secondary: #f1f1f3;
+  --accent: #fff0eb;
   --destructive: #e5484d;
-  --ring: #21c063;
-  --bubble-in: #f0f2f5;
+  --ring: #fe4a19;
+  --bubble-in: #f4f4f5;
   --bubble-out: #0084ff;
   color-scheme: light;
   background: var(--background);
@@ -93,16 +93,8 @@ body:has(.inbox) {
 
 html:has(.social-crm),
 body:has(.social-crm) {
-  background-color: #f4f6f5;
+  background-color: #f7f7f8;
   color-scheme: light;
-}
-
-/* Bandeja unificada (inbox DM): acento naranja FincasYa en lugar de verde */
-.social-crm-inbox {
-  --primary: #fe4a19;
-  --ring: #fe4a19;
-  --accent: #fff0eb;
-  --primary-foreground: #ffffff;
 }
 
 @theme inline {
@@ -463,6 +455,7 @@ body:has(.landing) {
 
 /* ─────────────────────────────────────────────────────────────
  * Panel admin (réplica FincasYaWeb /admin): tema claro + naranja.
+ * Oscuro: html.dark .admin (next-themes). Acento: data-accent en <html>.
  * ───────────────────────────────────────────────────────────── */
 .admin {
   font-family: var(--font-poppins), 'Poppins', sans-serif;
@@ -499,11 +492,90 @@ body:has(.landing) {
   min-height: 100dvh;
 }
 
+html.dark .admin {
+  color-scheme: dark;
+  --background: #161717;
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: #fe4a19;
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: #202c33;
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+  --sidebar: #161717;
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #fe4a19;
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
+}
+
 html:has(.admin),
 body:has(.admin) {
   background-color: #ffffff;
   color-scheme: light;
 }
+
+html.dark:has(.admin),
+html.dark body:has(.admin) {
+  background-color: #161717;
+  color-scheme: dark;
+}
+
+/* Multi-acento (claro + oscuro) */
+html[data-accent="orange"] .admin {
+  --primary: #fe4a19;
+  --primary-foreground: #ffffff;
+  --ring: #fe4a19;
+  --sidebar-primary: #fe4a19;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #fe4a19;
+}
+
+html[data-accent="green"] .admin {
+  --primary: #21c063;
+  --primary-foreground: #0a0f0d;
+  --ring: #21c063;
+  --sidebar-primary: #21c063;
+  --sidebar-primary-foreground: #0a0f0d;
+  --sidebar-ring: #21c063;
+}
+
+html[data-accent="blue"] .admin {
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --ring: #2563eb;
+  --sidebar-primary: #2563eb;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #2563eb;
+}
+
+html[data-accent="violet"] .admin {
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --ring: #7c3aed;
+  --sidebar-primary: #7c3aed;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #7c3aed;
+}
+
+html.dark[data-accent="green"] .admin {
+  --primary-foreground: #0a0f0d;
+  --sidebar-primary-foreground: #0a0f0d;
+}
+
 
 /* Sidebar admin: scroll invisible, highlight sin recorte */
 [data-sidebar="sidebar"] [data-sidebar="content"] {

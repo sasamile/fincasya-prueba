@@ -4,7 +4,8 @@
  * Proxy via images.weserv.nl → JPEG 800×418 (mismo patrón de FincasYaWeb).
  */
 
-const DEFAULT_OG_IMAGE = "https://fincasya.com/icons/fincasya-link-logo.png";
+/** JPEG 1200×630 (sin alfa): WhatsApp falla con PNG transparentes/cuadrados. */
+const DEFAULT_OG_IMAGE = "https://fincasya.com/icons/fincasya-link-logo.jpg";
 
 export function getPublicSiteOrigin(): string {
   const env =
@@ -44,6 +45,7 @@ export function buildOgMetadata(args: {
   const pageUrl = `${origin}${args.path.startsWith("/") ? args.path : `/${args.path}`}`;
   const optimizedImageUrl = buildOgImageUrl(args.imageUrl);
   const description = args.description.slice(0, 200);
+  const isDefaultImage = !args.imageUrl;
 
   return {
     title: args.title,
@@ -60,8 +62,8 @@ export function buildOgMetadata(args: {
       images: [
         {
           url: optimizedImageUrl,
-          width: 800,
-          height: 418,
+          width: isDefaultImage ? 1200 : 800,
+          height: isDefaultImage ? 630 : 418,
           alt: args.title,
           type: "image/jpeg",
         },

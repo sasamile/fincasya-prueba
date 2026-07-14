@@ -11,7 +11,12 @@
  * notifications.<x>, {...})` en su disparador — no llevan lógica de correo.
  */
 import { v } from 'convex/values';
-import { action, internalAction, internalQuery } from './_generated/server';
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+} from './_generated/server';
 import { api, internal } from './_generated/api';
 import { sendEmail } from './lib/email';
 import {
@@ -82,7 +87,29 @@ export const _saleLinkEmailData = internalQuery({
       checkOut: link.checkOut,
       guests: link.guests,
       createdByName: link.createdByName,
+      paymentValidated: !!link.paymentValidated,
     };
+  },
+});
+
+/**
+ * Garantiza token + paymentValidationKey para el magic link público
+ * `/validar-pago/[token]?key=…` (sin login admin).
+ */
+export const _ensureSaleLinkValidationKey = internalMutation({
+  args: { saleLinkId: v.id('saleLinks') },
+  handler: async (ctx, { saleLinkId }) => {
+    const link = await ctx.db.get(saleLinkId);
+    if (!link?.token?.trim()) return null;
+    let validationKey = link.paymentValidationKey?.trim() ?? '';
+    if (!validationKey) {
+      validationKey = crypto.randomUUID();
+      await ctx.db.patch(saleLinkId, {
+        paymentValidationKey: validationKey,
+        updatedAt: Date.now(),
+      });
+    }
+    return { token: link.token.trim(), validationKey };
   },
 });
 
@@ -91,20 +118,23 @@ export const _saleLinkEmailData = internalQuery({
 export const notifyAdminSaleLinkPayment = internalAction({
   args: { saleLinkId: v.id('saleLinks') },
   handler: async (ctx, { saleLinkId }): Promise<void> => {
-    const [data, admins] = await Promise.all([
+    const [data, admins, ensured] = await Promise.all([
       ctx.runQuery(internal.notifications._saleLinkEmailData, { saleLinkId }),
       ctx.runQuery(internal.notificationSettings.resolveAdminEmails, {}),
+      ctx.runMutation(internal.notifications._ensureSaleLinkValidationKey, {
+        saleLinkId,
+      }),
     ]);
-    if (!data || admins.length === 0) return;
+    if (!data || admins.length === 0 || !ensured) return;
 
-    const reviewUrl =
-      data.token && data.validationKey
-        ? `${siteUrl()}/validar-pago/${encodeURIComponent(data.token)}?key=${encodeURIComponent(data.validationKey)}`
-        : `${siteUrl()}/admin/payment-review`;
+    // Nunca mandar a /admin/payment-review: ese path exige sesión y se
+    // queda en "Verificando acceso…" si el admin abre el correo sin login.
+    const reviewUrl = `${siteUrl()}/validar-pago/${encodeURIComponent(ensured.token)}?key=${encodeURIComponent(ensured.validationKey)}`;
 
     const html = wrap({
       title: 'Un cliente subió su soporte de pago',
-      intro: 'Revisa el comprobante y valida el pago en esta página.',
+      intro:
+        'Abre este enlace para ver el comprobante y validar el pago (no necesitas entrar al panel).',
       bodyHtml: rows([
         ['Cliente', data.clientName],
         ['Finca', data.propertyName],
@@ -115,7 +145,7 @@ export const notifyAdminSaleLinkPayment = internalAction({
         ['Huéspedes', data.guests ? String(data.guests) : undefined],
         ['Asesor', data.createdByName],
       ]),
-      ctaLabel: 'Revisar y validar pago',
+      ctaLabel: 'Revisar pago',
       ctaUrl: reviewUrl,
     });
 

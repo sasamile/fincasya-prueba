@@ -534,7 +534,7 @@ export function ReservationPaymentMethodsSection({
   initialExtraBankAccounts,
   initialBoldLink,
   initialBoldSurcharge,
-  clientPaymentProofUploadEnabled = false,
+  clientPaymentProofUploadEnabled = true,
   onClientPaymentProofUploadChange,
   className,
 }: ReservationPaymentMethodsSectionProps) {
@@ -1491,8 +1491,8 @@ export function ReservationPaymentMethodsSection({
               </p>
               <p className="text-[11px] leading-snug text-muted-foreground">
                 {uploadEnabled
-                  ? "El cliente puede cargar comprobantes en el check-in / portal."
-                  : "Apagado: se le pide enviar el soporte por WhatsApp (default)."}
+                  ? "El cliente ve y carga comprobantes en el check-in / portal."
+                  : "Apagado: WhatsApp (sigue viendo soportes ya cargados)."}
               </p>
             </div>
             <Switch

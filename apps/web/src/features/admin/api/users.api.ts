@@ -32,6 +32,7 @@ export interface User {
 
 export interface UpdateUserData {
   name?: string;
+  email?: string;
   role?: UserRole;
   banned?: boolean;
   phone?: string;
@@ -121,4 +122,106 @@ export async function deleteUser(id: string): Promise<void> {
 export async function getPropietarios(): Promise<User[]> {
   const rows = await convex.query(api.users.listPropietarios, {});
   return (rows as Record<string, unknown>[]).map(mapUser);
+}
+
+export async function getUserByEmail(email: string): Promise<User | null> {
+  const raw = await convex.query(api.users.getByEmail, {
+    email: email.trim(),
+  });
+  if (!raw) return null;
+  return mapUser(raw as Record<string, unknown>);
+}
+
+const CONVEX_SITE_URL =
+  process.env.NEXT_PUBLIC_CONVEX_SITE_URL ??
+  "https://modest-husky-871.convex.site";
+
+/**
+ * Crea o actualiza la cuenta de login del propietario (rol propietario).
+ * Usado desde /admin/propietarios — no desde Usuarios.
+ *
+ * 1) Intenta Convex action (Better Auth API en servidor).
+ * 2) Si falla, crea con POST /api/auth/sign-up/email sin tocar la sesión del admin
+ *    (`credentials: 'omit'` + sin authClient).
+ */
+export async function ensurePropietarioLogin(data: {
+  email: string;
+  name: string;
+  password: string;
+  phone?: string;
+  documentId?: string;
+}): Promise<{ userId: string; created: boolean }> {
+  const email = data.email.trim().toLowerCase();
+  const password = data.password.trim();
+  const name = data.name.trim();
+  if (!email) throw new Error("El correo es obligatorio para el acceso");
+  if (password.length < 8) {
+    throw new Error("La contraseña debe tener al menos 8 caracteres");
+  }
+
+  try {
+    const result = await convex.action(api.ownerAuth.provisionPropietarioLogin, {
+      email,
+      name,
+      password,
+      phone: data.phone,
+      documentId: data.documentId,
+    });
+    return { userId: result.userId, created: result.created };
+  } catch (actionErr) {
+    // Fallback HTTP: no usa authClient (no pisa sesión del admin).
+    const existing = await getUserByEmail(email);
+    if (existing?.id) {
+      await updateUser(existing.id, {
+        name,
+        role: "propietario",
+        phone: data.phone,
+        documentId: data.documentId,
+        password,
+      });
+      return { userId: existing.id, created: false };
+    }
+
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "http://localhost:3789";
+    const res = await fetch(`${CONVEX_SITE_URL}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: origin,
+      },
+      credentials: "omit",
+      body: JSON.stringify({ email, password, name }),
+    });
+
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        message?: string;
+      } | null;
+      const actionMsg =
+        actionErr instanceof Error ? actionErr.message : "Error en action";
+      throw new Error(
+        body?.message ||
+          `No se pudo crear el acceso (${res.status}). ${actionMsg}`,
+      );
+    }
+
+    await convex.mutation(api.users.updateByEmail, {
+      email,
+      name,
+      role: "propietario",
+      phone: data.phone,
+      documentId: data.documentId,
+    });
+
+    const created = await getUserByEmail(email);
+    if (!created?.id) {
+      throw new Error(
+        "Cuenta creada en Auth pero no aparece aún. Reintentá guardar.",
+      );
+    }
+    return { userId: created.id, created: true };
+  }
 }

@@ -25,7 +25,7 @@ import {
 } from "@/features/checkin/utils/payment-holders";
 
 // WhatsApp de asesores (mismo número del Soporte 24/7) cuando la subida
-// en el portal está deshabilitada (default / toggle en admin).
+// en el portal está deshabilitada explícitamente por el admin.
 const SOPORTE_WHATSAPP_E164 = "573157773937";
 
 // ---------------------------------------------------------------------------
@@ -298,6 +298,67 @@ type SubmittedReceipt = {
   status: string;
 };
 
+function SubmittedReceiptsGallery({
+  receipts,
+}: {
+  receipts: SubmittedReceipt[];
+}) {
+  if (receipts.length === 0) return null;
+  return (
+    <div className="space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+        Soportes de este check-in ({receipts.length})
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        {receipts.map((r) => (
+          <a
+            key={r.id}
+            href={r.receiptUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="overflow-hidden rounded-xl border border-white bg-white shadow-sm"
+          >
+            {isStoredReceiptPdf(r) ? (
+              <div className="flex aspect-4/3 w-full flex-col items-center justify-center gap-2 bg-gray-50 px-3">
+                <FileText className="h-10 w-10 text-emerald-600" />
+                <span className="text-center text-[10px] font-semibold text-gray-600">
+                  Ver PDF
+                </span>
+              </div>
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={r.receiptUrl}
+                alt={r.fileName || "Comprobante enviado"}
+                className="aspect-4/3 w-full bg-gray-100 object-contain"
+              />
+            )}
+            <div className="px-2 py-1.5">
+              <p className="truncate text-[10px] font-bold text-gray-800">
+                {r.bankName || "Pago"}
+                {r.amount ? ` · ${formatCop(r.amount)}` : ""}
+              </p>
+              <p className="text-[9px] capitalize text-gray-400">
+                {r.status === "pending"
+                  ? "En revisión"
+                  : r.status === "approved"
+                    ? "Aprobado"
+                    : r.status === "rejected"
+                      ? "Rechazado"
+                      : r.status}
+              </p>
+            </div>
+          </a>
+        ))}
+      </div>
+      <p className="text-[10px] leading-relaxed text-emerald-800/80">
+        Puedes ver los enviados y cargar más si hace falta. El equipo los
+        valida en Revisión de pagos.
+      </p>
+    </div>
+  );
+}
+
 function PendingReceiptPreview({
   file,
   onRemove,
@@ -358,7 +419,7 @@ function ReceiptUpload({
 }: {
   reference: string;
   bankAccounts: CheckinBankAccount[];
-  /** Si false, el cliente envía el soporte por WhatsApp (default). */
+  /** Si false, el cliente envía por WhatsApp (aún puede ver soportes ya cargados). */
   allowUpload: boolean;
   /** Reporta cuántos comprobantes hay cargados pero SIN enviar. */
   onPendingChange?: (count: number) => void;
@@ -464,7 +525,8 @@ function ReceiptUpload({
     }
   };
 
-  // Interruptor: en vez de subir el soporte, el cliente lo comparte por WhatsApp.
+  // Si el admin desactiva la carga en portal: WhatsApp + ver lo ya enviado.
+  // Por defecto (undefined/true) se muestra el formulario de subida abajo.
   if (!allowUpload) {
     const waText = encodeURIComponent(
       `Hola, quiero enviar el soporte de pago de mi reserva ${reference}.`,
@@ -481,12 +543,21 @@ function ReceiptUpload({
           </p>
         </div>
 
-        <p className="text-[13px] leading-relaxed text-gray-600">
-          Por favor envía el soporte de tu pago por WhatsApp a nuestros asesores.
-          Comparte únicamente el comprobante del{" "}
-          <strong className="font-bold text-gray-800">saldo pendiente</strong> —
-          no el de la reserva ni soportes de pagos ya validados.
-        </p>
+        <SubmittedReceiptsGallery receipts={submittedReceipts} />
+
+        {submittedReceipts.length === 0 ? (
+          <p className="text-[13px] leading-relaxed text-gray-600">
+            Aún no hay comprobantes cargados en este check-in. Envía el soporte
+            del{" "}
+            <strong className="font-bold text-gray-800">saldo pendiente</strong>{" "}
+            por WhatsApp (no el de la reserva ni pagos ya validados).
+          </p>
+        ) : (
+          <p className="text-[13px] leading-relaxed text-gray-600">
+            Arriba ves los soportes de este check-in. Si necesitas enviar otro,
+            escríbenos por WhatsApp.
+          </p>
+        )}
 
         <a
           href={waHref}
@@ -497,29 +568,6 @@ function ReceiptUpload({
           <MessageCircle className="h-5 w-5" />
           Enviar soporte por WhatsApp
         </a>
-
-        {submittedReceipts.length > 0 ? (
-          <div className="space-y-2 border-t border-gray-100 pt-3">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
-              Ya cargados
-            </p>
-            <ul className="space-y-1.5">
-              {submittedReceipts.map((r) => (
-                <li key={r.id}>
-                  <a
-                    href={r.receiptUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                  >
-                    {r.fileName || r.bankName || "Comprobante"}
-                    {r.status === "pending" ? " · en revisión" : ""}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
 
         <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
@@ -546,6 +594,8 @@ function ReceiptUpload({
           Subir comprobante de pago
         </p>
       </div>
+
+      <SubmittedReceiptsGallery receipts={submittedReceipts} />
 
       {/* Aviso destacado: solo el saldo pendiente */}
       <div className="rounded-xl border-2 border-red-300 bg-red-50 px-3.5 py-3">
@@ -620,53 +670,6 @@ function ReceiptUpload({
               </optgroup>
             ))}
           </select>
-        </div>
-      ) : null}
-
-      {submittedReceipts.length > 0 ? (
-        <div className="space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
-            Tus comprobantes enviados
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            {submittedReceipts.map((r) => (
-              <a
-                key={r.id}
-                href={r.receiptUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="overflow-hidden rounded-xl border border-white bg-white shadow-sm"
-              >
-                {isStoredReceiptPdf(r) ? (
-                  <div className="flex aspect-4/3 w-full flex-col items-center justify-center gap-2 bg-gray-50 px-3">
-                    <FileText className="h-10 w-10 text-emerald-600" />
-                    <span className="text-center text-[10px] font-semibold text-gray-600">
-                      Ver PDF
-                    </span>
-                  </div>
-                ) : (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={r.receiptUrl}
-                    alt={r.fileName || "Comprobante enviado"}
-                    className="aspect-4/3 w-full bg-gray-100 object-contain"
-                  />
-                )}
-                <div className="px-2 py-1.5">
-                  <p className="truncate text-[10px] font-bold text-gray-800">
-                    {r.bankName || "Pago"}
-                    {r.amount ? ` · ${formatCop(r.amount)}` : ""}
-                  </p>
-                  <p className="text-[9px] capitalize text-gray-400">
-                    {r.status === "pending" ? "En revisión" : r.status}
-                  </p>
-                </div>
-              </a>
-            ))}
-          </div>
-          <p className="text-[10px] leading-relaxed text-emerald-800/80">
-            Toca un comprobante para verlo en tamaño completo.
-          </p>
         </div>
       ) : null}
 
@@ -775,7 +778,7 @@ type CheckinPaymentSectionProps = {
   reference?: string;
   boldLink?: string | null;
   boldSurcharge?: number | null;
-  /** Admin habilita subida de comprobantes en esta reserva. */
+  /** Admin puede desactivar la subida (false = WhatsApp). Por defecto: cargar en portal. */
   allowPaymentProofUpload?: boolean;
   /** Reporta comprobantes cargados sin enviar (para alertar al finalizar). */
   onPendingReceiptsChange?: (count: number) => void;
@@ -791,7 +794,7 @@ export function CheckinPaymentSection({
   reference,
   boldLink,
   boldSurcharge,
-  allowPaymentProofUpload = false,
+  allowPaymentProofUpload = true,
   onPendingReceiptsChange,
 }: CheckinPaymentSectionProps) {
   const holders = useMemo(

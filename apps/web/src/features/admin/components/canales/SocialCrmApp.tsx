@@ -20,7 +20,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
   startFacebookConnect,
@@ -152,12 +151,7 @@ export default function SocialCrmApp() {
   const isLoading = connections === undefined;
 
   return (
-    <div
-      className={cn(
-        'flex h-full min-h-0 bg-background',
-        view === 'inbox' && 'social-crm-inbox',
-      )}
-    >
+    <div className="bg-background flex h-full min-h-0">
       <SocialCrmIconRail
         activeView={view}
         onViewChange={changeView}
@@ -165,17 +159,17 @@ export default function SocialCrmApp() {
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="border-border bg-panel flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4 md:px-5">
+        <header className="bg-card flex h-12 shrink-0 items-center justify-between gap-3 px-4 md:px-5">
           <div className="min-w-0">
-            <h1 className="truncate text-base font-bold tracking-tight">
+            <h1 className="truncate text-[15px] font-semibold tracking-tight">
               {SOCIAL_CRM_VIEW_LABELS[view]}
             </h1>
             <p className="text-muted-foreground truncate text-[11px]">
               {view === 'inbox'
-                ? 'Messenger e Instagram Direct en un solo lugar'
+                ? 'Messenger e Instagram Direct'
                 : view === 'comments'
-                  ? 'Responde sin salir a Facebook ni Instagram'
-                  : 'Últimas publicaciones de tus redes'}
+                  ? 'Comentarios de Facebook e Instagram'
+                  : 'Publicaciones recientes'}
             </p>
           </div>
 
@@ -183,7 +177,11 @@ export default function SocialCrmApp() {
             {connections && connections.length > 0 && activeConnection ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="max-w-[220px] gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="border-border/80 max-w-[220px] gap-2 border bg-transparent"
+                  >
                     {activeConnection.pictureUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -194,10 +192,10 @@ export default function SocialCrmApp() {
                     ) : (
                       <Facebook className="h-4 w-4 text-blue-500" />
                     )}
-                    <span className="truncate text-xs font-semibold">
+                    <span className="truncate text-xs font-medium">
                       {activeConnection.pageName}
                     </span>
-                    <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                    <ChevronDown className="h-3.5 w-3.5 opacity-50" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64">
@@ -246,7 +244,13 @@ export default function SocialCrmApp() {
               </DropdownMenu>
             ) : null}
 
-            <Button size="sm" onClick={handleConnect} disabled={connecting} className="gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleConnect}
+              disabled={connecting}
+              className="gap-1.5"
+            >
               {connecting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -256,6 +260,7 @@ export default function SocialCrmApp() {
             </Button>
           </div>
         </header>
+        <div className="bg-border/70 h-px w-full shrink-0" />
 
         {activeConnection?.lastError ? (
           <div className="border-amber-500/30 bg-amber-500/10 text-amber-200 shrink-0 border-b px-4 py-2 text-xs">

@@ -25,7 +25,11 @@ export function AdminLoginForm() {
     setError(null);
     setLoading(true);
     try {
-      const { error: signInError } = await authClient.signIn.email({ email, password });
+      const normalizedEmail = email.trim().toLowerCase();
+      const { error: signInError } = await authClient.signIn.email({
+        email: normalizedEmail,
+        password,
+      });
       if (signInError) {
         setError(signInError.message ?? 'Credenciales incorrectas. Inténtalo de nuevo.');
         return;
@@ -35,7 +39,10 @@ export function AdminLoginForm() {
         setError('Sesión iniciada pero no se pudo leer el usuario. Recarga e intenta de nuevo.');
         return;
       }
-      if (!canAccessAdminPanel(sessionUser.role)) {
+      const role = (sessionUser.role ?? "").trim().toLowerCase();
+      const isOwner = role === "propietario" || role === "owner";
+
+      if (!isOwner && !canAccessAdminPanel(sessionUser.role)) {
         // Si aún no vino el rol, deja entrar y que el layout confirme con Convex.
         if (sessionUser.role) {
           setError(`Tu rol (${sessionUser.role}) no tiene acceso al panel.`);
@@ -44,8 +51,12 @@ export function AdminLoginForm() {
         }
       }
       setUser(sessionUser);
-      await ensureSessionLogged(sessionUser);
-      const callbackUrl = searchParams.get('callbackUrl') || '/admin';
+      if (!isOwner) {
+        await ensureSessionLogged(sessionUser);
+      }
+      const callbackParam = searchParams.get("callbackUrl");
+      const callbackUrl =
+        callbackParam || (isOwner ? "/owner" : "/admin");
       router.push(callbackUrl);
     } catch {
       setError('No se pudo iniciar sesión. Intenta de nuevo.');

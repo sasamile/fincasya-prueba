@@ -26,6 +26,12 @@ export function AdminLoginPage() {
     }
     if (user === undefined) return;
 
+    const role = (user?.role ?? "").trim().toLowerCase();
+    if (role === "propietario" || role === "owner") {
+      router.replace("/owner");
+      return;
+    }
+
     if (canAccessAdminPanel(user?.role) || user?.role === "operador") {
       if (user?.role === "operador") {
         router.replace("/admin/inbox");

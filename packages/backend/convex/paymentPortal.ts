@@ -1,74 +1,21 @@
 import { v } from 'convex/values';
 import {
-  internalMutation,
   internalQuery,
   mutation,
   query,
 } from './_generated/server';
+import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import {
   netPaidFromPayments,
   pendingFromTotal,
 } from './lib/bookingPayments';
-import { economicAdjustmentBreakdownRows } from './lib/economicAdjustments';
+import { computeBreakdown } from './lib/bookingBreakdown';
 
 function paymentPortalBase(): string {
   return (
     process.env.PAYMENT_PORTAL_BASE_URL || 'https://fincasya.com/pago'
   ).replace(/\/+$/, '');
-}
-
-type BreakdownRow = { label: string; amount: number; highlight?: boolean };
-
-function computeBreakdown(booking: Doc<'bookings'>): BreakdownRow[] {
-  const rows: BreakdownRow[] = [
-    { label: 'Valor alquiler', amount: Number(booking.subtotal) || 0 },
-    { label: 'Limpieza general', amount: Number(booking.depositoAseo) || 0 },
-    {
-      label: 'Valor depósito reembolsable',
-      amount: Number(booking.depositoGarantia) || 0,
-      highlight: true,
-    },
-    {
-      label: 'Recargo por mascotas',
-      amount: Number(booking.costoMascotas) || 0,
-    },
-    {
-      label: 'Personal de servicio',
-      amount: Number(booking.costoPersonalServicio) || 0,
-    },
-    {
-      label: 'Descuento',
-      amount: -(Number(booking.discountAmount) || 0),
-    },
-  ].filter((row) => row.amount !== 0);
-
-  const adjustmentRows = economicAdjustmentBreakdownRows(
-    booking.economicAdjustments,
-  );
-  if (adjustmentRows.length > 0) {
-    rows.push(...adjustmentRows);
-  }
-
-  const sum = rows.reduce((acc, row) => acc + row.amount, 0);
-  const diff = (Number(booking.precioTotal) || 0) - sum;
-  const hasDeposit = rows.some((row) =>
-    row.label.toLowerCase().includes('depósito reembolsable'),
-  );
-
-  if (diff !== 0 && adjustmentRows.length === 0) {
-    if (!hasDeposit && diff > 0) {
-      rows.push({
-        label: 'Valor depósito reembolsable',
-        amount: diff,
-        highlight: true,
-      });
-    } else {
-      rows.push({ label: 'Otros ajustes', amount: diff });
-    }
-  }
-
-  return rows;
 }
 
 async function findBooking(
@@ -297,8 +244,9 @@ async function buildPortalView(ctx: { db: any }, key: string) {
     paymentMedia: media,
     boldLink: booking.paymentPortalConfig?.boldLink ?? null,
     boldSurcharge: booking.paymentPortalConfig?.boldSurcharge ?? null,
+    // Default ON: solo se desactiva si el admin lo apaga explícitamente.
     clientPaymentProofUploadEnabled:
-      booking.clientPaymentProofUploadEnabled === true,
+      booking.clientPaymentProofUploadEnabled !== false,
     receipts: (booking.paymentPortalReceipts ?? []).map((r) => ({
       id: r.id,
       bankAccountId: r.bankAccountId,
@@ -322,7 +270,7 @@ export const getForPortal = internalQuery({
   handler: async (ctx, args) => buildPortalView(ctx, args.key),
 });
 
-export const submitReceipt = internalMutation({
+export const submitReceipt = mutation({
   args: {
     key: v.string(),
     bankAccountId: v.optional(v.string()),
@@ -336,7 +284,7 @@ export const submitReceipt = internalMutation({
     const booking = await findBooking(ctx, args.key);
     if (!booking) return { ok: false as const, reason: 'not_found' };
 
-    if (booking.clientPaymentProofUploadEnabled !== true) {
+    if (booking.clientPaymentProofUploadEnabled === false) {
       return { ok: false as const, reason: 'upload_disabled' };
     }
 
@@ -366,6 +314,12 @@ export const submitReceipt = internalMutation({
       hasPendingReceipt: true,
       updatedAt: Date.now(),
     });
+
+    await ctx.scheduler.runAfter(
+      0,
+      internal.paymentReceipts.analyzePortalReceipt,
+      { bookingId: booking._id, receiptId: entry.id },
+    );
 
     return { ok: true as const, receiptId: entry.id };
   },

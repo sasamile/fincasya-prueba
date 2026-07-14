@@ -23,6 +23,7 @@ import {
   Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Switch } from '@/components/ui/switch';
 import type { ConversationRow } from '@/features/inbox/types';
 import {
   buildCheckinPortalUrl,
@@ -35,6 +36,7 @@ import {
   buildOwnerWhatsAppMessage,
   toWhatsAppPhone,
 } from '@/features/admin/utils/owner-whatsapp-message';
+import { AdminGuestListEditor } from '@/features/admin/components/reservations/admin-guest-list-editor';
 
 type Booking = {
   _id: string;
@@ -52,12 +54,14 @@ type Booking = {
   checkinCompleted?: boolean;
   checkinSentManualAt?: number;
   ownerPortalSentAt?: number;
+  guestListUnlocked?: boolean;
   checkinNeedsEmpleada?: boolean;
   checkinNeedsTeam?: boolean;
   checkinServiciosNota?: string | null;
   checkinObservaciones?: string | null;
   checkinMascotas?: number;
   checkinGuests?: unknown[];
+  clientPaymentProofUploadEnabled?: boolean;
   ownerPortalShare?: { showGuestList?: boolean };
   ownerPayout?: {
     valorAcordado?: number;
@@ -142,10 +146,18 @@ export function CheckinTool({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<'send' | 'copy' | null>(null);
   const [copied, setCopied] = useState(false);
+  const [savingShare, setSavingShare] = useState(false);
+  const [savingUnlock, setSavingUnlock] = useState(false);
+  const [savingProofUpload, setSavingProofUpload] = useState(false);
 
   const sendMessage = useMutation(api.inbox.sendAdvisorMessage);
   const markOwnerSent = useMutation(api.bookings.markOwnerPortalSent);
   const markCheckinSent = useMutation(api.bookings.markCheckinSent);
+  const saveOwnerPortalShare = useMutation(api.bookings.saveOwnerPortalShare);
+  const setGuestListUnlocked = useMutation(api.bookings.setGuestListUnlocked);
+  const setClientPaymentProofUpload = useMutation(
+    api.bookings.setClientPaymentProofUpload,
+  );
 
   const data = useQuery(api.bookings.list, { limit: 500 }) as
     | { bookings: Booking[] }
@@ -385,6 +397,77 @@ export function CheckinTool({
     }
   }
 
+  const requiresGuestList =
+    selectedBooking?.property?.requiresGuestList !== false;
+
+  const shareGuestList =
+    selectedBooking?.ownerPortalShare?.showGuestList !== false;
+
+  const guestCount = Array.isArray(selectedBooking?.checkinGuests)
+    ? selectedBooking.checkinGuests.length
+    : 0;
+  const guestCap = Math.max(1, Number(selectedBooking?.numeroPersonas) || 1);
+
+  async function handleToggleGuestListShare(enabled: boolean) {
+    if (!selectedBooking) return;
+    setSavingShare(true);
+    try {
+      await saveOwnerPortalShare({
+        id: selectedBooking._id as Id<'bookings'>,
+        showGuestList: enabled,
+      });
+      toast.success(
+        enabled
+          ? 'El propietario verá el listado en /anfitrion'
+          : 'Listado oculto para el propietario',
+      );
+    } catch {
+      toast.error('No se pudo guardar la preferencia');
+    } finally {
+      setSavingShare(false);
+    }
+  }
+
+  async function handleToggleGuestListUnlock(enabled: boolean) {
+    if (!selectedBooking) return;
+    setSavingUnlock(true);
+    try {
+      await setGuestListUnlocked({
+        bookingId: selectedBooking._id as Id<'bookings'>,
+        unlocked: enabled,
+      });
+      toast.success(
+        enabled
+          ? 'Edición de invitados habilitada para el turista'
+          : 'Edición de invitados bloqueada de nuevo',
+      );
+    } catch {
+      toast.error('No se pudo actualizar el desbloqueo');
+    } finally {
+      setSavingUnlock(false);
+    }
+  }
+
+  async function handleTogglePaymentProofUpload(enabled: boolean) {
+    if (!selectedBooking) return;
+    setSavingProofUpload(true);
+    try {
+      await setClientPaymentProofUpload({
+        bookingId: selectedBooking._id as Id<'bookings'>,
+        enabled,
+      });
+      toast.success(
+        enabled
+          ? 'El cliente puede cargar soportes en el check-in'
+          : 'Carga deshabilitada: envío por WhatsApp',
+      );
+    } catch {
+      toast.error('No se pudo guardar la preferencia de soportes');
+    } finally {
+      setSavingProofUpload(false);
+    }
+  }
+
   const missingCount =
     audience === 'guest'
       ? pendingGuests.filter((b) => !b.checkinSentManualAt).length
@@ -555,6 +638,100 @@ export function CheckinTool({
                   </p>
                 ) : null}
               </div>
+
+              {requiresGuestList ? (
+                <div className="space-y-2.5 rounded-xl border border-border bg-background p-3">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                      Invitados ({guestCount}/{guestCap})
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {guestCount === 0
+                        ? 'El turista aún no ha registrado su lista de invitados'
+                        : `${guestCount} invitado${guestCount === 1 ? '' : 's'} registrado${guestCount === 1 ? '' : 's'}`}
+                    </p>
+                  </div>
+
+                  <label className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground">
+                        Enviar listado al propietario
+                      </p>
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        {shareGuestList
+                          ? 'El propietario verá invitados y PDF en /anfitrion.'
+                          : 'Oculto: el propietario no verá nombres ni PDF.'}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={shareGuestList}
+                      onCheckedChange={(v) => void handleToggleGuestListShare(v)}
+                      disabled={savingShare}
+                      className="shrink-0 data-[state=checked]:bg-emerald-600"
+                    />
+                  </label>
+
+                  <AdminGuestListEditor
+                    key={`guests-${selectedBooking._id}`}
+                    bookingId={selectedBooking._id}
+                    initialGuests={
+                      selectedBooking.checkinGuests as
+                        | Array<{
+                            nombreCompleto?: string;
+                            cedula?: string;
+                            tipoDocumento?: string;
+                            esMenor?: boolean;
+                          }>
+                        | undefined
+                    }
+                    numeroPersonas={selectedBooking.numeroPersonas}
+                  />
+
+                  <label className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground">
+                        Habilitar edición de invitados
+                      </p>
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        {selectedBooking.guestListUnlocked
+                          ? 'Desbloqueada: el turista puede editar aunque falten menos de 24 h.'
+                          : 'Normal: la lista se bloquea 24 h antes (12 h si es 1 noche).'}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={!!selectedBooking.guestListUnlocked}
+                      onCheckedChange={(v) =>
+                        void handleToggleGuestListUnlock(v)
+                      }
+                      disabled={savingUnlock}
+                      className="shrink-0"
+                    />
+                  </label>
+                </div>
+              ) : null}
+
+              <label className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/20 px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-foreground">
+                    Cargar soportes de pago en el check-in
+                  </p>
+                  <p className="text-[10px] leading-snug text-muted-foreground">
+                    {selectedBooking.clientPaymentProofUploadEnabled !== false
+                      ? 'Activo: el turista ve y sube comprobantes en el portal.'
+                      : 'Apagado: WhatsApp (sigue pudiendo ver soportes ya cargados).'}
+                  </p>
+                </div>
+                <Switch
+                  checked={
+                    selectedBooking.clientPaymentProofUploadEnabled !== false
+                  }
+                  onCheckedChange={(v) =>
+                    void handleTogglePaymentProofUpload(v)
+                  }
+                  disabled={savingProofUpload}
+                  className="shrink-0 data-[state=checked]:bg-emerald-600"
+                />
+              </label>
 
               <div className="grid grid-cols-2 gap-2">
                 <button

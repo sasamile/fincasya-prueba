@@ -903,6 +903,33 @@ export default function ReservationsPage() {
     }
   };
 
+  const [savingPaymentProofUpload, setSavingPaymentProofUpload] =
+    useState(false);
+  const handleTogglePaymentProofUpload = async (enabled: boolean) => {
+    if (!selectedBooking?._id) return;
+    setSavingPaymentProofUpload(true);
+    try {
+      await axios.post(
+        `/api/bookings/${selectedBooking._id}/payment-proof-upload`,
+        { enabled },
+      );
+      setSelectedBooking((prev: any) =>
+        prev
+          ? { ...prev, clientPaymentProofUploadEnabled: enabled }
+          : prev,
+      );
+      toast.success(
+        enabled
+          ? "El cliente puede cargar soportes de pago en el check-in."
+          : "Carga deshabilitada: el cliente envía el soporte por WhatsApp.",
+      );
+    } catch {
+      toast.error("No se pudo guardar la preferencia de soportes.");
+    } finally {
+      setSavingPaymentProofUpload(false);
+    }
+  };
+
   // Recordatorio al cliente para finalizar el check-in (check-in + listado pendientes).
   const buildCheckinReminderMessage = (): {
     msg: string;
@@ -2768,6 +2795,31 @@ export default function ReservationsPage() {
                             </label>
                           ) : null}
 
+                          <label className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-foreground">
+                                Cargar soportes de pago en el check-in
+                              </p>
+                              <p className="text-[11px] leading-snug text-muted-foreground">
+                                {selectedBooking.clientPaymentProofUploadEnabled !==
+                                false
+                                  ? "Activo: el turista ve y sube comprobantes en el check-in."
+                                  : "Apagado: se pide WhatsApp (aún puede ver soportes ya cargados)."}
+                              </p>
+                            </div>
+                            <Switch
+                              checked={
+                                selectedBooking.clientPaymentProofUploadEnabled !==
+                                false
+                              }
+                              onCheckedChange={(v) =>
+                                void handleTogglePaymentProofUpload(v)
+                              }
+                              disabled={savingPaymentProofUpload}
+                              className="shrink-0 data-[state=checked]:bg-emerald-600"
+                            />
+                          </label>
+
                           {(selectedBooking.checkinNeedsEmpleada ||
                             selectedBooking.checkinNeedsTeam ||
                             selectedBooking.checkinServiciosNota) && (
@@ -3152,7 +3204,8 @@ export default function ReservationsPage() {
                         }
                         receipts={selectedBooking.paymentPortalReceipts ?? []}
                         clientPaymentProofUploadEnabled={
-                          !!selectedBooking.clientPaymentProofUploadEnabled
+                          selectedBooking.clientPaymentProofUploadEnabled !==
+                          false
                         }
                         onClientPaymentProofUploadChange={(enabled) => {
                           setSelectedBooking((prev: any) =>

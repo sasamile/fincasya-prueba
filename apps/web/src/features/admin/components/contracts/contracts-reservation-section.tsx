@@ -3513,19 +3513,19 @@ export function ContractsReservationSection({
                         )}
                       </div>
 
-                      <div className="rounded-xl bg-zinc-950 p-2.5 text-white shadow-lg">
+                      <div className="rounded-xl border border-primary/25 bg-primary p-2.5 text-primary-foreground shadow-sm">
                         <div className="flex items-center justify-between gap-2">
                           <div>
-                            <p className="text-[8px] font-bold uppercase tracking-wider text-white/60">
+                            <p className="text-[8px] font-bold uppercase tracking-wider text-primary-foreground/70">
                               Total contrato
                             </p>
-                            <p className="mt-0.5 text-lg font-semibold tracking-tight text-white">
+                            <p className="mt-0.5 text-lg font-semibold tracking-tight text-primary-foreground">
                               {contractTotal > 0
                                 ? money(contractTotal)
                                 : "—"}
                             </p>
                           </div>
-                          <div className="rounded-lg bg-white/10 p-1 text-white">
+                          <div className="rounded-lg bg-primary-foreground/15 p-1 text-primary-foreground">
                             <CreditCard className="h-4 w-4" />
                           </div>
                         </div>
@@ -3615,7 +3615,7 @@ export function ContractsReservationSection({
                     <>
                   <Button
                     type="button"
-                    className="h-10 w-full rounded-xl bg-blue-600 text-xs font-bold text-white shadow-md transition-all hover:bg-blue-700 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
+                    className="h-10 w-full rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-md transition-all hover:bg-primary/90 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -3649,18 +3649,18 @@ export function ContractsReservationSection({
                   transition={{ duration: 0.5, delay: 0.2 }}
                   className="mt-4"
                 >
-                  <div className="rounded-[20px] border border-blue-200/60 bg-blue-50 p-5 shadow-sm">
+                  <div className="rounded-[20px] border border-primary/20 bg-primary/5 p-5 shadow-sm">
                     <div className="flex items-center gap-3">
-                      <div className="rounded-full bg-blue-100 p-2.5 text-blue-600">
+                      <div className="rounded-full bg-primary/15 p-2.5 text-primary">
                         <FileText className="h-5 w-5" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-bold text-blue-950">
+                        <p className="text-sm font-bold text-foreground">
                           {contractArtifactKind === "docx"
                             ? "Contrato Word generado"
                             : "Contrato generado exitosamente"}
                         </p>
-                        <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-500/80">
+                        <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                           {generatedContractFilename}
                         </p>
                       </div>
@@ -3668,7 +3668,7 @@ export function ContractsReservationSection({
                     <div className="mt-4 flex flex-col gap-2">
                       <Button
                         type="button"
-                        className="h-12 w-full rounded-xl border-blue-200 font-bold text-white bg-blue-700 shadow-sm hover:bg-blue-600 transition-all"
+                        className="h-12 w-full rounded-xl font-bold text-primary-foreground bg-primary shadow-sm hover:bg-primary/90 transition-all"
                         onClick={downloadGeneratedContract}
                       >
                         <Download className="mr-2 h-4 w-4" /> Descargar archivo

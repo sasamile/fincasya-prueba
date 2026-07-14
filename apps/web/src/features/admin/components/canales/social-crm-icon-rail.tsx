@@ -41,9 +41,9 @@ function RailButton({
       aria-label={label}
       onClick={onClick}
       className={cn(
-        'relative flex h-11 w-11 items-center justify-center rounded-2xl transition-colors',
+        'relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors',
         active
-          ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
+          ? 'bg-primary text-primary-foreground'
           : 'text-muted-foreground hover:bg-muted hover:text-foreground',
       )}
     >

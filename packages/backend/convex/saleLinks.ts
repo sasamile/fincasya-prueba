@@ -779,7 +779,10 @@ export const submitClientData = mutation({
       paymentProofAmount: args.paymentProofAmount,
       paymentProofSubmittedAt: now,
       paymentProofs,
-      paymentValidationKey: args.paymentValidationKey,
+      paymentValidationKey:
+        args.paymentValidationKey.trim() ||
+        link.paymentValidationKey?.trim() ||
+        crypto.randomUUID(),
       updatedAt: now,
     };
 

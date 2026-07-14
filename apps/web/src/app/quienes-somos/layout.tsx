@@ -21,10 +21,11 @@ export const metadata: Metadata = {
     url: 'https://fincasya.com/quienes-somos',
     images: [
       {
-        url: '/fincas-ya-logo.png',
+        url: '/icons/fincasya-link-logo.jpg',
         width: 1200,
         height: 630,
         alt: 'FincasYa - ¿Quiénes Somos?',
+        type: 'image/jpeg',
       },
     ],
   },
@@ -33,7 +34,7 @@ export const metadata: Metadata = {
     title: '¿Quiénes Somos? | FincasYa',
     description:
       'Expertos en alquiler de propiedades turísticas en Colombia con más de 12 años de trayectoria.',
-    images: ['/fincas-ya-logo.png'],
+    images: ['/icons/fincasya-link-logo.jpg'],
   },
 };
 

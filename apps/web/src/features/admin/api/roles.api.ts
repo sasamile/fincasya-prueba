@@ -11,6 +11,7 @@ export interface RoleOption {
 export interface ModuleOption {
   value: string;
   label: string;
+  group?: string;
 }
 
 export interface ActionOption {

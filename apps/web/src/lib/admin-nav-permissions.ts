@@ -5,41 +5,59 @@ export type AdminPermissionAction = "read" | "create" | "update" | "delete";
 export interface NavPermissionRequirement {
   module: string;
   action?: AdminPermissionAction;
+  /** Si el módulo nuevo está vacío, acepta este módulo legacy. */
+  legacyModule?: string;
 }
 
-/** `admin_only` = solo admin/asistente. `null` = dashboard (solo admin/asistente). */
+/** `null` = dashboard: requiere módulo dashboard o full-admin. */
 export const ADMIN_NAV_PERMISSIONS: Record<
   string,
-  NavPermissionRequirement | "admin_only" | null
+  NavPermissionRequirement | null
 > = {
-  "/admin": null,
+  "/admin": { module: "dashboard", action: "read" },
   "/admin/inbox": { module: "inbox", action: "read" },
   "/admin/conversations": { module: "inbox", action: "read" },
   "/admin/properties": { module: "fincas", action: "read" },
   "/admin/reservations": { module: "bookings", action: "read" },
   "/admin/payment-review": { module: "payments", action: "read" },
-  "/admin/contracts-confirmation": { module: "bookings", action: "read" },
-  "/admin/ventas": { module: "bookings", action: "read" },
-  "/admin/contract-link": { module: "bookings", action: "read" },
-  "/admin/contracts": { module: "bookings", action: "read" },
-  "/admin/features": { module: "catalogs", action: "read" },
-  "/admin/category-zone-templates": { module: "catalogs", action: "read" },
-  "/admin/pricing-rules": { module: "fincas", action: "read" },
-  "/admin/reorder": { module: "fincas", action: "update" },
+  "/admin/facturacion": { module: "facturacion", action: "read" },
+  "/admin/contracts-confirmation": { module: "contracts", action: "read" },
+  "/admin/ventas": { module: "ventas", action: "read" },
+  "/admin/contract-link": { module: "contracts", action: "read" },
+  "/admin/contracts": { module: "contracts", action: "read" },
+  "/admin/features": {
+    module: "features",
+    action: "read",
+    legacyModule: "catalogs",
+  },
+  "/admin/category-zone-templates": {
+    module: "zone_templates",
+    action: "read",
+    legacyModule: "catalogs",
+  },
+  "/admin/pricing-rules": { module: "pricing_rules", action: "read" },
+  "/admin/reorder": { module: "reorder", action: "update" },
   "/admin/users": { module: "users", action: "read" },
   "/admin/customers": { module: "contacts", action: "read" },
   "/admin/propietarios": { module: "owner_info", action: "read" },
-  "/admin/crm": { module: "contacts", action: "read" },
-  "/admin/canales": "admin_only",
-  "/admin/roles": "admin_only",
-  "/admin/access-logs": { module: "users", action: "read" },
-  "/admin/sections": { module: "catalogs", action: "read" },
+  "/admin/crm": { module: "crm", action: "read" },
+  "/admin/canales": { module: "channels", action: "read" },
+  "/admin/roles": { module: "roles", action: "read" },
+  "/admin/access-logs": { module: "access_logs", action: "read" },
+  "/admin/sections": {
+    module: "contents",
+    action: "read",
+    legacyModule: "catalogs",
+  },
   "/admin/knowledge": { module: "knowledge", action: "read" },
-  "/admin/playbook": { module: "knowledge", action: "read" },
+  "/admin/playbook": { module: "playbook", action: "read" },
   "/admin/reviews": { module: "reviews", action: "read" },
-  "/admin/notifications": { module: "inbox", action: "read" },
-  "/admin/whatsapp-temporal-message": { module: "inbox", action: "read" },
-  "/admin/automatizaciones": "admin_only",
+  "/admin/notifications": { module: "notifications", action: "read" },
+  "/admin/whatsapp-temporal-message": {
+    module: "whatsapp_temp",
+    action: "read",
+  },
+  "/admin/automatizaciones": { module: "automations", action: "read" },
 };
 
 export function isFullAdminRole(role: string | undefined): boolean {
@@ -48,7 +66,7 @@ export function isFullAdminRole(role: string | undefined): boolean {
 
 /**
  * Roles que pueden entrar al panel /admin (layout).
- * Incluye vendedor (permisos acotados) y roles full-admin.
+ * Dentro, cada página se filtra por la matriz + overrides.
  */
 export function canAccessAdminPanel(role: string | undefined | null): boolean {
   if (!role) return false;
@@ -58,7 +76,10 @@ export function canAccessAdminPanel(role: string | undefined | null): boolean {
     r === "assistant" ||
     r === "asistente" ||
     r === "superadmin" ||
-    r === "vendedor"
+    r === "vendedor" ||
+    r === "asesor_limitado" ||
+    r === "contabilidad" ||
+    r === "operador"
   );
 }
 
@@ -66,8 +87,13 @@ export function hasModulePermission(
   permissions: Record<string, string[]>,
   module: string,
   action: AdminPermissionAction = "read",
+  legacyModule?: string,
 ): boolean {
-  return (permissions[module] ?? []).includes(action);
+  if ((permissions[module] ?? []).includes(action)) return true;
+  if (legacyModule && (permissions[legacyModule] ?? []).includes(action)) {
+    return true;
+  }
+  return false;
 }
 
 export function canAccessNavItem(
@@ -79,14 +105,14 @@ export function canAccessNavItem(
   if (isFullAdminRole(role)) return true;
 
   const requirement = ADMIN_NAV_PERMISSIONS[href];
-  if (requirement === "admin_only") return false;
+  if (requirement === undefined) return false;
   if (requirement === null) return false;
-  if (!requirement) return false;
 
   return hasModulePermission(
     permissions,
     requirement.module,
     requirement.action ?? "read",
+    requirement.legacyModule,
   );
 }
 
@@ -135,6 +161,7 @@ export const ADMIN_ROUTE_PRIORITY = [
   "/admin/ventas",
   "/admin/properties",
   "/admin/payment-review",
+  "/admin/facturacion",
   "/admin/contracts",
   "/admin/contracts-confirmation",
   "/admin/contract-link",
@@ -154,5 +181,7 @@ export const ADMIN_ROUTE_PRIORITY = [
   "/admin/whatsapp-temporal-message",
   "/admin/automatizaciones",
   "/admin/users",
+  "/admin/roles",
   "/admin/access-logs",
+  "/admin",
 ] as const;

@@ -1033,7 +1033,7 @@ export function CheckinPageContent({
               boldLink={paymentPortal?.boldLink}
               boldSurcharge={paymentPortal?.boldSurcharge}
               allowPaymentProofUpload={
-                paymentPortal?.clientPaymentProofUploadEnabled === true
+                paymentPortal?.clientPaymentProofUploadEnabled !== false
               }
               onPendingReceiptsChange={setPendingReceipts}
             />

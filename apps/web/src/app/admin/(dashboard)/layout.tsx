@@ -35,8 +35,12 @@ import {
   Home,
   Share2,
   Zap,
+  Palette,
+  Check,
+  Receipt,
 } from "lucide-react";
 import { useTheme } from '@/components/theme-provider';
+import { useAdminAccent } from "@/hooks/use-admin-accent";
 import { useState, useEffect, useRef } from "react";
 import { sileo } from "sileo";
 import {
@@ -101,14 +105,18 @@ const topNavItems: NavItem[] = [
 
 const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
   {
-    title: "GESTIÓN DE PROPIEDADES",
+    title: "RESERVAS Y CONTRATOS",
     items: [
-      { label: "Propiedades", href: "/admin/properties", icon: Building2 },
       { label: "Reservas", href: "/admin/reservations", icon: CalendarDays },
       {
         label: "Revisión de Pagos",
         href: "/admin/payment-review",
         icon: BadgeCheck,
+      },
+      {
+        label: "Facturación (Siigo)",
+        href: "/admin/facturacion",
+        icon: Receipt,
       },
       {
         label: "Contratos y Confirmación",
@@ -130,6 +138,12 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         href: "/admin/contracts",
         icon: FolderOpen,
       },
+    ],
+  },
+  {
+    title: "GESTIÓN DE PROPIEDADES",
+    items: [
+      { label: "Propiedades", href: "/admin/properties", icon: Building2 },
       { label: "Características", href: "/admin/features", icon: Sparkles },
       {
         label: "Plantillas de zona",
@@ -191,7 +205,8 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
   const router = useRouter();
   const { user, clearUser } = useAuthStore();
   const { setTheme, theme } = useTheme();
-  const { permissions } = useRolePermissions(user?.role);
+  const { accent, setAccent, accents } = useAdminAccent();
+  const { permissions } = useRolePermissions(user?.role, user?.id);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
     () =>
       collapsibleNavGroups.reduce<Record<string, boolean>>((acc, group) => {
@@ -405,22 +420,56 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
                     ) : (
                       <Monitor className="size-4" />
                     )}
-                    <span>Cambiar Tema</span>
+                    <span>Modo (claro / oscuro)</span>
                   </DropdownMenuSubTrigger>
                   <DropdownMenuPortal>
                     <DropdownMenuSubContent className="rounded-xl">
                       <DropdownMenuItem onClick={() => setTheme("light")}>
                         <Sun className="mr-2 size-4" />
                         <span>Claro</span>
+                        {theme === "light" ? (
+                          <Check className="ml-auto size-4" />
+                        ) : null}
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setTheme("dark")}>
                         <Moon className="mr-2 size-4" />
                         <span>Oscuro</span>
+                        {theme === "dark" ? (
+                          <Check className="ml-auto size-4" />
+                        ) : null}
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setTheme("system")}>
                         <Monitor className="mr-2 size-4" />
                         <span>Sistema</span>
+                        {theme === "system" ? (
+                          <Check className="ml-auto size-4" />
+                        ) : null}
                       </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="flex items-center gap-2">
+                    <Palette className="size-4" />
+                    <span>Color del tema</span>
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent className="rounded-xl min-w-44">
+                      {accents.map((item) => (
+                        <DropdownMenuItem
+                          key={item.id}
+                          onClick={() => setAccent(item.id)}
+                        >
+                          <span
+                            className="mr-2 size-3.5 rounded-full border border-border shadow-sm"
+                            style={{ backgroundColor: item.swatch }}
+                          />
+                          <span>{item.label}</span>
+                          {accent === item.id ? (
+                            <Check className="ml-auto size-4" />
+                          ) : null}
+                        </DropdownMenuItem>
+                      ))}
                     </DropdownMenuSubContent>
                   </DropdownMenuPortal>
                 </DropdownMenuSub>
@@ -451,6 +500,7 @@ export default function AdminLayout({
   const router = useRouter();
   const { permissions, isLoading: isLoadingPermissions } = useRolePermissions(
     user?.role,
+    user?.id,
   );
   const [isChecking, setIsChecking] = useState(true);
   const deniedOnceRef = useRef(false);
@@ -490,6 +540,24 @@ export default function AdminLayout({
     if (user) setIsChecking(false);
   }, [user]);
 
+  // Evita quedarse eternamente en "Verificando acceso..." (p. ej. correo
+  // sin cookies, getSession colgado o Convex lento).
+  useEffect(() => {
+    if (!isChecking) return;
+    const timer = window.setTimeout(() => {
+      const cached = useAuthStore.getState().user;
+      if (cached) {
+        setIsChecking(false);
+        return;
+      }
+      clearUser();
+      const next = encodeURIComponent(pathname || "/admin");
+      router.push(`/admin/login?callbackUrl=${next}`);
+      setIsChecking(false);
+    }, 12_000);
+    return () => window.clearTimeout(timer);
+  }, [isChecking, clearUser, router, pathname]);
+
   // Fuente de verdad: Convex JWT + rol en DB.
   // getSession() a veces llega sin `role` (cross-domain) y antes expulsaba
   // con "Acceso denegado" sin loguear nada en consola.
@@ -510,7 +578,12 @@ export default function AdminLayout({
       }
       fallbackTriedRef.current = true;
       void (async () => {
-        const sessionUser = await getSession();
+        const sessionUser = await Promise.race([
+          getSession(),
+          new Promise<null>((resolve) =>
+            window.setTimeout(() => resolve(null), 8_000),
+          ),
+        ]);
         if (sessionUser && canAccessAdminPanel(sessionUser.role)) {
           sessionBridgeOkRef.current = true;
           setUser(sessionUser);
@@ -526,7 +599,9 @@ export default function AdminLayout({
           return;
         }
         clearUser();
-        router.push("/admin/login");
+        router.push(
+          `/admin/login?callbackUrl=${encodeURIComponent(pathname || "/admin")}`,
+        );
         setIsChecking(false);
       })();
       return;
@@ -588,6 +663,7 @@ export default function AdminLayout({
     setUser,
     clearUser,
     router,
+    pathname,
   ]);
 
   useEffect(() => {

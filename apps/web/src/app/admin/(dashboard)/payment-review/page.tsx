@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useQuery as useConvexQuery,
   useMutation as useConvexMutation,
+  useAction as useConvexAction,
 } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import type { Id } from "@fincasya/backend/convex/_generated/dataModel";
@@ -19,6 +20,7 @@ import {
   Search,
   ShoppingBag,
   CreditCard,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { validateSaleLinkPaymentAdmin } from "@/features/ventas/api/sale-links.api";
@@ -39,6 +41,9 @@ type PendingReceipt = {
   pagado?: number;
   pendiente?: number;
   amount?: number;
+  aiExtractedAmount?: number;
+  aiExtractedBank?: string;
+  aiExtractConfidence?: number;
   bankName?: string;
   receiptUrl: string;
   fileName?: string;
@@ -75,15 +80,64 @@ function ReceiptReviewCard({
   onDone: () => void;
 }) {
   const setReceiptStatus = useConvexMutation(api.paymentReceipts.setReceiptStatus);
+  const suggestAmount = useConvexAction(api.paymentReceipts.suggestReceiptAmount);
   const isSaleLink = r.source === "sale-link";
   const previewUrl = receiptPreviewUrl(r);
+  const suggested =
+    r.aiExtractedAmount || r.amount || r.pendiente || undefined;
   const [amount, setAmount] = useState<string>(
-    String(r.amount || r.pendiente || ""),
+    suggested ? String(suggested) : "",
   );
   const [motivo, setMotivo] = useState("");
   const [showReject, setShowReject] = useState(false);
-  const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
+  const [loading, setLoading] = useState<"approve" | "reject" | "ai" | null>(
+    null,
+  );
   const [zoomed, setZoomed] = useState(false);
+
+  // Cuando la IA termina en background, rellena el campo si aún no lo editaron.
+  useEffect(() => {
+    const next = r.aiExtractedAmount || r.amount;
+    if (!next || next <= 0) return;
+    setAmount((prev) => {
+      const current = parseCop(prev);
+      if (current > 0 && current !== next && !r.aiExtractedAmount) return prev;
+      if (current === next) return prev;
+      if (current > 0 && current !== (r.pendiente || 0)) return prev;
+      return String(next);
+    });
+  }, [r.aiExtractedAmount, r.amount, r.pendiente]);
+
+  const runAiSuggest = async () => {
+    if (!r.bookingId || isSaleLink) return;
+    setLoading("ai");
+    try {
+      const res = await suggestAmount({
+        bookingId: r.bookingId as Id<"bookings">,
+        receiptId: r.receiptId,
+      });
+      if (!res.ok) {
+        const reasons: Record<string, string> = {
+          pdf_not_supported: "Los PDF aún no se leen con IA (usa una foto).",
+          no_amount: "No se pudo leer un monto claro en el comprobante.",
+          not_found: "Soporte no encontrado.",
+          not_pending: "Este soporte ya no está pendiente.",
+        };
+        toast.error(reasons[String(res.reason)] ?? "No se pudo analizar el soporte.");
+        return;
+      }
+      if (res.amount) setAmount(String(res.amount));
+      toast.success(
+        `IA sugiere ${money(res.amount)}${res.bankName ? ` · ${res.bankName}` : ""}`,
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Error al analizar con IA",
+      );
+    } finally {
+      setLoading(null);
+    }
+  };
 
   const approve = async () => {
     if (isSaleLink) {
@@ -185,7 +239,7 @@ function ReceiptReviewCard({
           <img
             src={previewUrl}
             alt={r.fileName || "Comprobante"}
-            className="aspect-[4/3] w-full object-contain bg-white"
+            className="aspect-4/3 w-full object-contain bg-white"
           />
           <span className="absolute bottom-1 right-1 inline-flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100">
             <ZoomIn className="h-3 w-3" /> Ampliar
@@ -236,7 +290,7 @@ function ReceiptReviewCard({
 
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
             {!isSaleLink ? (
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <label className="text-xs text-muted-foreground whitespace-nowrap">
                   Monto verificado
                 </label>
@@ -247,6 +301,28 @@ function ReceiptReviewCard({
                   placeholder="Ej: 2.000.000"
                   className="h-9 w-36 rounded-lg border border-border bg-background px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/30"
                 />
+                {r.aiExtractedAmount ? (
+                  <span className="rounded-md bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800">
+                    IA {money(r.aiExtractedAmount)}
+                    {typeof r.aiExtractConfidence === "number"
+                      ? ` · ${Math.round(r.aiExtractConfidence * 100)}%`
+                      : ""}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void runAiSuggest()}
+                  disabled={loading !== null}
+                  title="Leer el monto del comprobante con IA"
+                  className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 h-9 text-[11px] font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-60"
+                >
+                  {loading === "ai" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  Leer con IA
+                </button>
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
@@ -394,6 +470,7 @@ export default function PaymentReviewPage() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1 ml-11">
             Soportes del check-in y de los links de venta pendientes de validar.
+            Las fotos se leen con IA al llegar para sugerir el monto.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -474,14 +551,22 @@ export default function PaymentReviewPage() {
           <Loader2 className="w-4 h-4 animate-spin" /> Cargando soportes…
         </div>
       ) : items.length === 0 ? (
-        <div className="text-center text-sm text-muted-foreground py-12 border border-dashed border-border rounded-2xl space-y-2">
+        <div className="text-center text-sm text-muted-foreground py-12 border border-dashed border-border rounded-2xl space-y-2 px-4">
           <p>No hay soportes de pago por revisar. 🎉</p>
           {sourceFilter === "sale-link" ? (
-            <p className="text-xs">
-              Los links de venta aparecen aquí cuando el cliente sube comprobante
-              y aún no se ha validado el pago.
+            <p className="text-xs max-w-md mx-auto leading-relaxed">
+              Los links de venta solo aparecen aquí mientras el pago NO está
+              validado. Si ya lo aprobaste (correo «Revisar pago» o Links de
+              venta), desaparece de esta lista y el cliente puede seguir con el
+              contrato.
             </p>
-          ) : null}
+          ) : (
+            <p className="text-xs max-w-md mx-auto leading-relaxed">
+              El botón del correo de links de venta abre una página pública de
+              validación (sin login). Esta cola lista check-in/portal y links
+              aún pendientes.
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-3">

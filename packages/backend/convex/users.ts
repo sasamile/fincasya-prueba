@@ -10,18 +10,22 @@ import { isSuperAdminRole } from './lib/roles';
  * This runs as an action because it uses the crypto API.
  */
 export const resetPassword = action({
-  args: { userId: v.string(), newPassword: v.string() },
-  handler: async (ctx, args) => {
-    // Hash the password using Better Auth's own standalone utility
-    // This produces the correct scrypt hash format: salt:key
+  args: {
+    userId: v.string(),
+    newPassword: v.string(),
+    email: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ success: true }> => {
     const newPasswordHash = await hashPassword(args.newPassword);
-
-    // Update the password via the mutation
-    await ctx.runMutation(api.users.updatePassword, {
-      userId: args.userId,
-      newPasswordHash,
-    });
-
+    const result: { success: boolean; message?: string } =
+      await ctx.runMutation(api.users.setCredentialPassword, {
+        userId: args.userId,
+        email: args.email,
+        newPasswordHash,
+      });
+    if (!result.success) {
+      throw new Error(result.message ?? 'No se pudo actualizar la contraseña');
+    }
     return { success: true };
   },
 });
@@ -62,6 +66,25 @@ export const getById = query({
   },
 });
 
+/** Busca usuario Better Auth por email (case-insensitive vía valor exacto guardado). */
+export const getByEmail = query({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const email = args.email.trim().toLowerCase();
+    if (!email) return null;
+    const exact = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+      model: 'user',
+      where: [{ field: 'email', value: email }],
+    });
+    if (exact) return exact;
+    // Reintento con el valor tal cual (por si se guardó con mayúsculas).
+    return await ctx.runQuery(components.betterAuth.adapter.findOne, {
+      model: 'user',
+      where: [{ field: 'email', value: args.email.trim() }],
+    });
+  },
+});
+
 /**
  * Update user details and role by _id string
  * NOTE: updateOne takes an `input` wrapper
@@ -70,6 +93,7 @@ export const update = mutation({
   args: {
     id: v.string(),
     name: v.optional(v.string()),
+    email: v.optional(v.string()),
     // Rol flexible: la app maneja 9 roles y pueden crecer (ver betterAuth/schema).
     role: v.optional(v.union(v.null(), v.string())),
     banned: v.optional(v.boolean()),
@@ -82,8 +106,52 @@ export const update = mutation({
     if (isSuperAdminRole(updates.role)) {
       throw new Error('No se puede asignar el rol superadmin desde el panel');
     }
+
+    if (updates.email !== undefined) {
+      const email = updates.email.trim().toLowerCase();
+      if (!email || !email.includes('@')) {
+        throw new Error('Correo inválido');
+      }
+      const taken = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+        model: 'user',
+        where: [{ field: 'email', value: email }],
+      });
+      const takenId = String(
+        (taken as { _id?: string; id?: string } | null)?._id ??
+          (taken as { id?: string } | null)?.id ??
+          '',
+      );
+      if (taken && takenId && takenId !== id) {
+        throw new Error('Ya existe otro usuario con ese correo');
+      }
+      updates.email = email;
+
+      // Credential account suele usar el correo como accountId.
+      const account = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+        model: 'account',
+        where: [
+          { field: 'userId', value: id },
+          { field: 'providerId', value: 'credential' },
+        ],
+      });
+      if (account) {
+        await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+          input: {
+            model: 'account',
+            update: { accountId: email },
+            where: [
+              { field: 'userId', value: id },
+              { field: 'providerId', value: 'credential' },
+            ],
+          },
+        });
+      }
+    }
+
     const cleanUpdates = Object.fromEntries(
-      Object.entries(updates).filter(([k, v]) => !(k === 'role' && v === null)),
+      Object.entries(updates).filter(
+        ([k, v]) => !(k === 'role' && v === null) && v !== undefined,
+      ),
     );
     await ctx.runMutation(components.betterAuth.adapter.updateOne, {
       input: {
@@ -116,69 +184,94 @@ export const updateByEmail = mutation({
     if (isSuperAdminRole(updates.role)) {
       throw new Error('No se puede asignar el rol superadmin desde el panel');
     }
-    const result = await ctx.runMutation(
-      components.betterAuth.adapter.updateOne,
-      {
-        input: {
-          model: 'user',
-          update: updates as Record<string, unknown>,
-          where: [{ field: 'email', value: email }],
-        },
-      },
-    );
-
-    if (!result) {
+    const user = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+      model: 'user',
+      where: [{ field: 'email', value: email.trim().toLowerCase() }],
+    });
+    if (!user) {
       throw new Error(`User not found with email ${email}`);
     }
 
-    return result;
+    await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+      input: {
+        model: 'user',
+        update: updates as Record<string, unknown>,
+        where: [{ field: 'email', value: email.trim().toLowerCase() }],
+      },
+    });
+
+    return user;
   },
 });
 
 /**
- * Update a user's password by userId string (the string id returned by betterAuth).
- * The newPasswordHash must already be a bcrypt hash.
+ * Upsert de contraseña credential (hash ya generado con better-auth/crypto).
+ * Si no hay cuenta credential, la crea — evita "cuenta sin password" silenciosa.
  */
-export const updatePassword = mutation({
+export const setCredentialPassword = mutation({
   args: {
     userId: v.string(),
     newPasswordHash: v.string(),
+    email: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    // passwords live in the `account` table linked by userId
-    // Find the account first to see what's there
-    const account = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ success: boolean; message: string }> => {
+    const credential = await ctx.runQuery(components.betterAuth.adapter.findOne, {
       model: 'account',
-      where: [{ field: 'userId', value: args.userId }],
-    });
-    console.log('Found account for user:', {
-      userId: account.userId,
-      providerId: account.providerId,
-      passwordPrefix: account.password
-        ? account.password.substring(0, 15)
-        : 'no-password',
+      where: [
+        { field: 'userId', value: args.userId },
+        { field: 'providerId', value: 'credential' },
+      ],
     });
 
-    if (!account) {
-      console.error('Account not found for user ID:', args.userId);
-      return { success: false, message: 'Account not found' };
-    }
-
-    const result = await ctx.runMutation(
-      components.betterAuth.adapter.updateOne,
-      {
+    if (credential) {
+      await ctx.runMutation(components.betterAuth.adapter.updateOne, {
         input: {
           model: 'account',
-          update: { password: args.newPasswordHash },
+          update: { password: args.newPasswordHash, updatedAt: Date.now() },
           where: [
             { field: 'userId', value: args.userId },
-            { field: 'providerId', value: account.providerId },
+            { field: 'providerId', value: 'credential' },
           ],
         },
+      });
+      return { success: true as const, message: 'updated' };
+    }
+
+    let email = args.email?.trim().toLowerCase();
+    if (!email) {
+      const user = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+        model: 'user',
+        where: [{ field: '_id', value: args.userId }],
+      });
+      email = String((user as { email?: string } | null)?.email ?? '')
+        .trim()
+        .toLowerCase();
+    }
+    if (!email) {
+      return {
+        success: false as const,
+        message: 'No hay correo para crear la cuenta de contraseña',
+      };
+    }
+
+    const now = Date.now();
+    await ctx.runMutation(components.betterAuth.adapter.create, {
+      input: {
+        model: 'account',
+        data: {
+          accountId: email,
+          providerId: 'credential',
+          userId: args.userId,
+          password: args.newPasswordHash,
+          createdAt: now,
+          updatedAt: now,
+        },
       },
-    );
-    console.log('Update result:', result);
-    return { success: !!result };
+    });
+    return { success: true as const, message: 'created' };
   },
 });
 

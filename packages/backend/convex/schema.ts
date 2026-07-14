@@ -115,6 +115,12 @@ export default defineSchema(
       lastMessageAt: v.optional(v.number()),
       /** Últimas fincas enviadas en catálogo (para "otras opciones") */
       lastSentCatalogPropertyIds: v.optional(v.array(v.id('properties'))),
+      /**
+       * Zona que el cliente pidió (texto crudo, ej. "cerca a bogotá"). Es
+       * PERSISTENTE: si el cliente actualiza fechas/personas sin repetir la
+       * zona, se reutiliza para no enviar fincas de otra región.
+       */
+      lastRequestedZone: v.optional(v.string()),
       /** Filtros de la última búsqueda que envió catálogo (para repetir con otras fincas) */
       lastCatalogSearch: v.optional(
         v.object({
@@ -1127,6 +1133,11 @@ export default defineSchema(
               v.literal('rejected'),
             ),
             submittedAt: v.number(),
+            /** Monto sugerido por IA (visión del comprobante). */
+            aiExtractedAmount: v.optional(v.number()),
+            aiExtractedBank: v.optional(v.string()),
+            aiExtractedAt: v.optional(v.number()),
+            aiExtractConfidence: v.optional(v.number()),
             /** Revisión por el admin/representante legal. */
             reviewedAt: v.optional(v.number()),
             reviewedBy: v.optional(v.string()),
@@ -1334,6 +1345,95 @@ export default defineSchema(
     }),
 
     /**
+     * INTEGRACIÓN SIIGO (contabilidad + facturación electrónica DIAN).
+     * Cache del token de acceso de Siigo API (singleton). El token de /auth
+     * dura ~24h; se refresca on-demand desde las actions. Espejo del patrón de
+     * `googleCalendarIntegrations` (token persistido).
+     */
+    siigoAuth: defineTable({
+      accessToken: v.string(),
+      /** ms epoch, ya con el margen de seguridad restado. */
+      expiresAt: v.number(),
+      updatedAt: v.number(),
+    }),
+
+    /**
+     * Config de la integración Siigo (singleton: key = 'default'). Guarda el
+     * modelo de facturación elegido por contabilidad + los ids específicos de
+     * la cuenta Siigo (tipos de documento, vendedor, impuestos, formas de pago,
+     * productos) que se descubren con `syncConfig`. Cambiar de modelo
+     * (total ↔ comisión) es un cambio aquí, no de código.
+     */
+    siigoSettings: defineTable({
+      key: v.string(),
+      /** 'total' = valor total de la reserva; 'comision' = solo la comisión FincasYA. */
+      invoiceModel: v.union(v.literal('total'), v.literal('comision')),
+      comisionType: v.optional(
+        v.union(v.literal('percent'), v.literal('fixed')),
+      ),
+      /** % (0-100) si comisionType='percent'; COP fijo si 'fixed'. */
+      comisionValue: v.optional(v.number()),
+      salesDocumentTypeId: v.optional(v.number()),
+      purchaseDocumentTypeId: v.optional(v.number()),
+      sellerUserId: v.optional(v.number()),
+      salesPaymentTypeId: v.optional(v.number()),
+      purchasePaymentTypeId: v.optional(v.number()),
+      taxIds: v.optional(v.array(v.number())),
+      defaultProductCode: v.optional(v.string()),
+      comisionProductCode: v.optional(v.string()),
+      depositProductCode: v.optional(v.string()),
+      /**
+       * Interruptor de FASE 2: si false (default), NUNCA se timbra a la DIAN;
+       * todo se crea como borrador. Solo se enciende tras validar la resolución
+       * de facturación con el contador y cambiar a credenciales de producción.
+       */
+      dianSendEnabled: v.boolean(),
+      /** Listas crudas de opciones (document-types, users, taxes...) para los dropdowns del panel. */
+      catalogCache: v.optional(v.any()),
+      updatedAt: v.number(),
+    }).index('by_key', ['key']),
+
+    /**
+     * Una fila por documento creado en Siigo (venta o compra). Enlaza la
+     * reserva/propietario con el documento Siigo para: idempotencia (no
+     * facturar dos veces), badges de estado en el panel y conciliación futura.
+     */
+    siigoInvoices: defineTable({
+      type: v.union(v.literal('venta'), v.literal('compra')),
+      bookingId: v.optional(v.id('bookings')),
+      ownerInfoId: v.optional(v.id('propertyOwnerInfo')),
+      ownerIdentification: v.optional(v.string()),
+      /** Id del documento en Siigo (ausente en filas de error). */
+      siigoInvoiceId: v.optional(v.string()),
+      siigoNumber: v.optional(v.string()),
+      siigoCustomerId: v.optional(v.string()),
+      /** Ciclo de vida local. 'stamped' solo en fase 2 (DIAN). */
+      status: v.union(
+        v.literal('draft'),
+        v.literal('stamped'),
+        v.literal('error'),
+        v.literal('cancelled'),
+      ),
+      invoiceModel: v.optional(
+        v.union(v.literal('total'), v.literal('comision')),
+      ),
+      total: v.number(),
+      currency: v.optional(v.string()),
+      pdfUrl: v.optional(v.string()),
+      publicUrl: v.optional(v.string()),
+      errorMessage: v.optional(v.string()),
+      /** Email/nombre del operador que presionó "Facturar". */
+      createdBy: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index('by_booking', ['bookingId'])
+      .index('by_type', ['type'])
+      .index('by_status', ['status'])
+      .index('by_owner', ['ownerInfoId'])
+      .index('by_siigo_id', ['siigoInvoiceId']),
+
+    /**
      * Config global del agente (singleton: key = 'default').
      * globalAiEnabled: conversaciones nuevas y elegibles entran en modo bot.
      */
@@ -1407,6 +1507,20 @@ export default defineSchema(
     })
       .index('by_role', ['role'])
       .index('by_role_module', ['role', 'module']),
+
+    /**
+     * Overrides por usuario encima del rol:
+     * grants = fuerza ON; denies = fuerza OFF (si ambas, deny gana).
+     */
+    userPermissionOverrides: defineTable({
+      userId: v.string(),
+      module: v.string(),
+      grants: v.array(v.string()),
+      denies: v.array(v.string()),
+      updatedAt: v.number(),
+    })
+      .index('by_userId', ['userId'])
+      .index('by_user_module', ['userId', 'module']),
 
     siteAnalytics: defineTable({
       metricKey: v.string(),

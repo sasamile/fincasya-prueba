@@ -64,6 +64,8 @@ type AgentContext = {
   catalogSent: boolean;
   /** El contacto ya tuvo conversaciones anteriores ("gusto saludarte nuevamente"). */
   returning: boolean;
+  /** Zona persistente que el cliente pidió (ej. "cerca a bogotá"). */
+  lastRequestedZone: string | null;
 };
 
 type FincaResult = {
@@ -143,7 +145,26 @@ export const getAgentContext = internalQuery({
       lastUserMessageId,
       catalogSent: (conversation.lastSentCatalogPropertyIds?.length ?? 0) > 0,
       returning,
+      lastRequestedZone: conversation.lastRequestedZone ?? null,
     };
+  },
+});
+
+/** Persiste la zona que pidió el cliente (sticky para el resto del chat). */
+export const setRequestedZone = internalMutation({
+  args: { conversationId: v.id('conversations'), zona: v.string() },
+  handler: async (ctx, { conversationId, zona }): Promise<void> => {
+    const z = zona.trim();
+    if (!z) return;
+    await ctx.db.patch(conversationId, { lastRequestedZone: z });
+  },
+});
+
+/** Limpia la zona sticky (el cliente amplió a "cualquier lugar"). */
+export const clearRequestedZone = internalMutation({
+  args: { conversationId: v.id('conversations') },
+  handler: async (ctx, { conversationId }): Promise<void> => {
+    await ctx.db.patch(conversationId, { lastRequestedZone: undefined });
   },
 });
 
@@ -642,7 +663,8 @@ const TOOL_DEFS: ToolDef[] = [
           personas: { type: 'number', description: 'Numero de personas' },
           zona: {
             type: 'string',
-            description: 'Zona, municipio o departamento si el cliente lo dio',
+            description:
+              'Zona, municipio o departamento que pidio el cliente (ej. "cerca a bogota", "Melgar"). PERSISTENTE: si el cliente la dio ANTES en el chat, PASALA IGUAL aunque en este mensaje solo actualice fechas o personas — NO la omitas. Solo cambia si el cliente pide OTRA zona; si dice "cualquier lugar / donde sea", pasa exactamente eso.',
           },
           mascotas: {
             type: 'boolean',
@@ -906,6 +928,9 @@ export const runAgentTurn = internalAction({
     let avisoMinimoSentThisTurn = false;
     let skipFinalReply = false;
     let finalText: string | null = null;
+    // ZONA STICKY: la zona que pidio el cliente sigue vigente todo el chat.
+    // Arranca de lo persistido y se actualiza cuando CUALQUIER tool trae zona.
+    let stickyZone: string | null = context.lastRequestedZone;
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
       const { content, toolCalls } = await chatCompletion({
         messages,
@@ -924,6 +949,30 @@ export const runAgentTurn = internalAction({
             string,
             unknown
           >;
+          // Captura de zona (cualquier tool que la traiga): se hace sticky para
+          // que enviar_catalogo no pierda la zona aunque el modelo la omita
+          // en un turno posterior. "cualquier lugar/donde sea" la limpia.
+          if (typeof args.zona === 'string' && args.zona.trim()) {
+            const z = args.zona.trim();
+            const broaden =
+              /^(cualquier|donde sea|no importa|todas? part|toda colombia|indiferente|el que sea)/.test(
+                z.toLowerCase().normalize('NFD').replace(/\p{M}/gu, ''),
+              );
+            if (broaden) {
+              if (stickyZone !== null) {
+                stickyZone = null;
+                await ctx.runMutation(internal.agent.clearRequestedZone, {
+                  conversationId,
+                });
+              }
+            } else if (z !== stickyZone) {
+              stickyZone = z;
+              await ctx.runMutation(internal.agent.setRequestedZone, {
+                conversationId,
+                zona: z,
+              });
+            }
+          }
           if (call.function.name === 'buscar_fincas') {
             result = await ctx.runQuery(internal.agent.toolBuscarFincas, {
               personas: typeof args.personas === 'number' ? args.personas : undefined,
@@ -936,6 +985,11 @@ export const runAgentTurn = internalAction({
               fechaSalida: parseDateMs(String(args.fechaSalida ?? '')),
             });
           } else if (call.function.name === 'enviar_catalogo') {
+            // La zona ya se capturo/hizo sticky arriba (para toda tool). Se usa
+            // la sticky aunque el modelo la omita en este turno.
+            const effectiveZona = stickyZone ?? undefined;
+            console.log('[agent] enviar_catalogo zona', { effectiveZona });
+
             // Candado de temporada: si el cliente dio fechas, se validan los
             // minimos de noches (temporadas especiales y puentes festivos)
             // ANTES de enviar fichas — el modelo no puede saltarse la regla.
@@ -1038,7 +1092,7 @@ export const runAgentTurn = internalAction({
             const pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
               conversationId,
               personas: typeof args.personas === 'number' ? args.personas : undefined,
-              zona: typeof args.zona === 'string' ? args.zona : undefined,
+              zona: effectiveZona,
               mascotas:
                 typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
             });

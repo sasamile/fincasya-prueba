@@ -1,35 +1,13 @@
 import { v } from 'convex/values';
 import { query, mutation } from './_generated/server';
-
-const ROLES = [
-  { value: 'admin', label: 'Administrador' },
-  { value: 'vendedor', label: 'Vendedor' },
-  { value: 'asesor_limitado', label: 'Asesor Limitado' },
-  { value: 'contabilidad', label: 'Contabilidad' },
-  { value: 'propietario', label: 'Propietario' },
-  { value: 'client', label: 'Cliente' },
-] as const;
-
-const MODULES = [
-  { value: 'fincas', label: 'Fincas' },
-  { value: 'bookings', label: 'Reservas' },
-  { value: 'payments', label: 'Pagos' },
-  { value: 'users', label: 'Usuarios' },
-  { value: 'inbox', label: 'Bandeja de entrada' },
-  { value: 'contacts', label: 'Contactos' },
-  { value: 'reviews', label: 'Reseñas' },
-  { value: 'catalogs', label: 'Catálogos' },
-  { value: 'knowledge', label: 'Base de conocimiento' },
-  { value: 'reports', label: 'Reportes' },
-  { value: 'owner_info', label: 'Info. propietario' },
-] as const;
-
-const ACTIONS = [
-  { value: 'read', label: 'Ver' },
-  { value: 'create', label: 'Crear' },
-  { value: 'update', label: 'Editar' },
-  { value: 'delete', label: 'Eliminar' },
-] as const;
+import {
+  ACTIONS,
+  MODULES,
+  ROLE_FALLBACK_PERMISSIONS,
+  ROLES,
+  mergeRoleAndOverrides,
+} from './lib/permissionModules';
+import { isFullAdminRole } from './lib/roles';
 
 /** Reemplaza GET /api/roles — matriz completa de roles/módulos/acciones. */
 export const getAll = query({
@@ -55,7 +33,11 @@ export const getAll = query({
 
     return {
       roles: [...ROLES],
-      modules: [...MODULES],
+      modules: MODULES.map((m) => ({
+        value: m.value,
+        label: m.label,
+        group: m.group,
+      })),
       actions: [...ACTIONS],
       permissions: grouped,
     };
@@ -76,6 +58,54 @@ export const getByRole = query({
       .query('rolePermissions')
       .withIndex('by_role', (q) => q.eq('role', args.role))
       .collect();
+  },
+});
+
+/** Permisos efectivos = rol (+ fallback) ± overrides del usuario. */
+export const getEffectiveForUser = query({
+  args: {
+    userId: v.string(),
+    role: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (isFullAdminRole(args.role)) {
+      return {
+        fullAccess: true as const,
+        permissions: {} as Record<string, string[]>,
+      };
+    }
+
+    const roleRows = await ctx.db
+      .query('rolePermissions')
+      .withIndex('by_role', (q) => q.eq('role', args.role))
+      .collect();
+
+    const roleGrouped: Record<string, string[]> = {};
+    for (const row of roleRows) {
+      roleGrouped[row.module] = row.permissions;
+    }
+
+    const hasAny = Object.values(roleGrouped).some((p) => p.length > 0);
+    const base = hasAny
+      ? roleGrouped
+      : (ROLE_FALLBACK_PERMISSIONS[args.role] ?? roleGrouped);
+
+    const overrides = await ctx.db
+      .query('userPermissionOverrides')
+      .withIndex('by_userId', (q) => q.eq('userId', args.userId))
+      .collect();
+
+    return {
+      fullAccess: false as const,
+      permissions: mergeRoleAndOverrides(
+        base,
+        overrides.map((o) => ({
+          module: o.module,
+          grants: o.grants,
+          denies: o.denies,
+        })),
+      ),
+    };
   },
 });
 
@@ -100,38 +130,32 @@ export const upsert = mutation({
         updatedAt: Date.now(),
       });
       return existing._id;
-    } else {
-      return await ctx.db.insert('rolePermissions', {
-        role: args.role,
-        module: args.module,
-        permissions: args.permissions,
-        isCustom: false,
-        updatedAt: Date.now(),
-      });
     }
+    return await ctx.db.insert('rolePermissions', {
+      role: args.role,
+      module: args.module,
+      permissions: args.permissions,
+      isCustom: false,
+      updatedAt: Date.now(),
+    });
   },
 });
 
 export const initializeRole = mutation({
   args: { role: v.string() },
   handler: async (ctx, args) => {
-    const modules = [
-      'fincas', 'bookings', 'payments', 'users', 'inbox',
-      'contacts', 'reviews', 'catalogs', 'knowledge', 'reports', 'owner_info',
-    ];
-
-    for (const module of modules) {
+    for (const mod of MODULES) {
       const existing = await ctx.db
         .query('rolePermissions')
         .withIndex('by_role_module', (q) =>
-          q.eq('role', args.role).eq('module', module),
+          q.eq('role', args.role).eq('module', mod.value),
         )
         .first();
 
       if (!existing) {
         await ctx.db.insert('rolePermissions', {
           role: args.role,
-          module,
+          module: mod.value,
           permissions: [],
           isCustom: false,
           updatedAt: Date.now(),
@@ -140,5 +164,34 @@ export const initializeRole = mutation({
     }
 
     return { success: true };
+  },
+});
+
+/** Crea filas vacías para módulos nuevos en todos los roles conocidos. */
+export const ensureAllModules = mutation({
+  args: {},
+  handler: async (ctx) => {
+    let created = 0;
+    for (const role of ROLES) {
+      for (const mod of MODULES) {
+        const existing = await ctx.db
+          .query('rolePermissions')
+          .withIndex('by_role_module', (q) =>
+            q.eq('role', role.value).eq('module', mod.value),
+          )
+          .first();
+        if (!existing) {
+          await ctx.db.insert('rolePermissions', {
+            role: role.value,
+            module: mod.value,
+            permissions: [],
+            isCustom: false,
+            updatedAt: Date.now(),
+          });
+          created += 1;
+        }
+      }
+    }
+    return { created };
   },
 });

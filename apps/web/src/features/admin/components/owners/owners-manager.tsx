@@ -7,8 +7,12 @@ import { api } from "@fincasya/backend/convex/_generated/api";
 import {
   Building2,
   CreditCard,
+  Eye,
+  EyeOff,
   Home,
+  KeyRound,
   Loader2,
+  Lock,
   Mail,
   Phone,
   Plus,
@@ -49,6 +53,10 @@ import {
   resolveBankSelectValue,
 } from "@/features/admin/constants/colombian-banks";
 import type { OwnerBankAccount } from "@/features/fincas/types/fincas.types";
+import {
+  ensurePropietarioLogin,
+  getUserByEmail,
+} from "@/features/admin/api/users.api";
 
 type OwnerDirectoryRow = {
   id: string;
@@ -67,6 +75,10 @@ type OwnerDirectoryRow = {
   }>;
   bankAccounts: OwnerBankAccount[];
 };
+
+function digitsOnly(value: string): string {
+  return value.replace(/\D+/g, "");
+}
 
 function createBankAccount(
   partial?: Partial<OwnerBankAccount>,
@@ -100,13 +112,30 @@ export function OwnersManager() {
   const [editing, setEditing] = useState<OwnerDirectoryRow | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [propertyFilter, setPropertyFilter] = useState("");
+  const [enableLogin, setEnableLogin] = useState(true);
+  const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [hasExistingLogin, setHasExistingLogin] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const owners = useQuery(api.propertyOwners.listDirectory, {
     search: search.trim() || undefined,
   });
   const allProperties = useQuery(api.adminProperties.listAll, {});
+  const propietarioUsers = useQuery(api.users.listPropietarios, {});
 
   const saveProfile = useMutation(api.propertyOwners.saveProfile);
+
+  const loginEmails = useMemo(() => {
+    const set = new Set<string>();
+    for (const u of propietarioUsers ?? []) {
+      const email = String(
+        (u as { email?: string }).email ?? "",
+      ).toLowerCase();
+      if (email) set.add(email);
+    }
+    return set;
+  }, [propietarioUsers]);
 
   const propertyOptions = useMemo(() => {
     if (!allProperties) return [];
@@ -126,23 +155,33 @@ export function OwnersManager() {
 
   const isLoading = owners === undefined;
 
+  function syncDefaultPassword(cedula: string) {
+    const pwd = digitsOnly(cedula);
+    setLoginPassword(pwd);
+  }
+
   function openCreate() {
     setEditing(null);
     setForm({
       ...EMPTY_FORM,
       bankAccounts: [createBankAccount()],
     });
+    setEnableLogin(true);
+    setLoginPassword("");
+    setHasExistingLogin(false);
+    setShowLoginPassword(false);
     setPropertyFilter("");
     setDialogOpen(true);
   }
 
-  function openEdit(row: OwnerDirectoryRow) {
+  async function openEdit(row: OwnerDirectoryRow) {
     setEditing(row);
+    const cedula = row.propietarioCedula ?? "";
     setForm({
       propietarioNombre: row.propietarioNombre,
       propietarioTratamiento: row.propietarioTratamiento ?? "Sr",
       propietarioTelefono: row.propietarioTelefono ?? "",
-      propietarioCedula: row.propietarioCedula ?? "",
+      propietarioCedula: cedula,
       propietarioCorreo: row.propietarioCorreo ?? "",
       propertyIds: row.properties.map((p) => p.propertyId),
       bankAccounts: row.bankAccounts.length
@@ -151,8 +190,25 @@ export function OwnersManager() {
           )
         : [createBankAccount({ accountHolderName: row.propietarioNombre })],
     });
+    syncDefaultPassword(cedula);
+    const email = row.propietarioCorreo?.trim().toLowerCase() ?? "";
+    const already =
+      Boolean(row.ownerUserId?.trim()) ||
+      (email ? loginEmails.has(email) : false);
+    setHasExistingLogin(already);
+    setEnableLogin(already || Boolean(email));
+    setShowLoginPassword(false);
     setPropertyFilter("");
     setDialogOpen(true);
+
+    if (email) {
+      try {
+        const u = await getUserByEmail(email);
+        if (u?.id) setHasExistingLogin(true);
+      } catch {
+        /* opcional */
+      }
+    }
   }
 
   function toggleProperty(propertyId: string) {
@@ -227,9 +283,48 @@ export function OwnersManager() {
       return;
     }
 
+    const email = form.propietarioCorreo.trim().toLowerCase();
+    const cedulaDigits = digitsOnly(form.propietarioCedula);
+    let ownerUserId = editing?.ownerUserId?.trim() || undefined;
+
+    if (enableLogin) {
+      if (!email) {
+        sileo.error({
+          title: "Correo obligatorio para el acceso",
+          description: "Necesario para que entre en /admin/login → /owner",
+          fill: "#fee2e2",
+        });
+        return;
+      }
+      const password = loginPassword.trim() || cedulaDigits;
+      if (password.length < 8) {
+        sileo.error({
+          title: "Contraseña inválida",
+          description:
+            "Mínimo 8 caracteres. Usa la cédula (solo dígitos) u otra contraseña.",
+          fill: "#fee2e2",
+        });
+        return;
+      }
+    }
+
+    setSaving(true);
     try {
+      if (enableLogin) {
+        const password = loginPassword.trim() || cedulaDigits;
+        const login = await ensurePropietarioLogin({
+          email,
+          name: form.propietarioNombre.trim(),
+          password,
+          phone: form.propietarioTelefono.trim() || undefined,
+          documentId: cedulaDigits || undefined,
+        });
+        ownerUserId = login.userId;
+      }
+
       await saveProfile({
         groupId: editing?.id,
+        ownerUserId,
         propietarioNombre: form.propietarioNombre.trim(),
         propietarioTratamiento: form.propietarioTratamiento,
         propietarioTelefono: form.propietarioTelefono.trim() || undefined,
@@ -249,6 +344,9 @@ export function OwnersManager() {
       });
       sileo.success({
         title: editing ? "Propietario actualizado" : "Propietario creado",
+        description: enableLogin
+          ? `Acceso listo: ${email} · contraseña la que configuraste (cédula por defecto). /admin/login → /owner`
+          : undefined,
         fill: "#f0fdf4",
       });
       setDialogOpen(false);
@@ -258,6 +356,8 @@ export function OwnersManager() {
         description: err instanceof Error ? err.message : "Error desconocido",
         fill: "#fee2e2",
       });
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -267,7 +367,8 @@ export function OwnersManager() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Propietarios</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            Dueños de fincas, cuentas bancarias y fincas asignadas.
+            Dueños de fincas, cuentas, acceso a /owner (contraseña = cédula por
+            defecto).
           </p>
         </div>
         <Button
@@ -317,10 +418,23 @@ export function OwnersManager() {
                       <User className="h-5 w-5" />
                     </div>
                     <div>
-                      <h2 className="text-lg font-bold tracking-tight">
-                        {owner.propietarioTratamiento === "Sra" ? "Sra. " : "Sr. "}
-                        {owner.propietarioNombre}
-                      </h2>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-lg font-bold tracking-tight">
+                          {owner.propietarioTratamiento === "Sra"
+                            ? "Sra. "
+                            : "Sr. "}
+                          {owner.propietarioNombre}
+                        </h2>
+                        {(owner.ownerUserId?.trim() ||
+                          (owner.propietarioCorreo &&
+                            loginEmails.has(
+                              owner.propietarioCorreo.trim().toLowerCase(),
+                            ))) && (
+                          <Badge className="bg-emerald-600 hover:bg-emerald-600 text-[10px]">
+                            Acceso /owner
+                          </Badge>
+                        )}
+                      </div>
                       <div className="text-muted-foreground mt-0.5 flex flex-wrap gap-3 text-xs">
                         {owner.propietarioTelefono ? (
                           <span className="inline-flex items-center gap-1">
@@ -514,12 +628,14 @@ export function OwnersManager() {
                     </Label>
                     <Input
                       value={form.propietarioCedula}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const value = e.target.value;
                         setForm((f) => ({
                           ...f,
-                          propietarioCedula: e.target.value,
-                        }))
-                      }
+                          propietarioCedula: value,
+                        }));
+                        syncDefaultPassword(value);
+                      }}
                       placeholder="1.234.567.890"
                       className="h-11 rounded-xl"
                     />
@@ -542,6 +658,86 @@ export function OwnersManager() {
                     />
                   </div>
                 </div>
+              </section>
+
+              {/* Acceso panel propietario */}
+              <section className="space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="bg-primary/10 text-primary flex h-8 w-8 items-center justify-center rounded-lg">
+                      <KeyRound className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold tracking-tight">
+                        Acceso al panel
+                      </h3>
+                      <p className="text-muted-foreground text-xs">
+                        Login en /admin/login → /owner
+                        {hasExistingLogin
+                          ? " · cuenta ya creada"
+                          : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-semibold">
+                    <Checkbox
+                      checked={enableLogin}
+                      onCheckedChange={(v) => setEnableLogin(v === true)}
+                    />
+                    Activar
+                  </label>
+                </div>
+
+                {enableLogin ? (
+                  <div className="space-y-3 rounded-2xl border border-border bg-muted/15 p-4">
+                    <p className="text-muted-foreground text-[11px] leading-relaxed">
+                      Contraseña por defecto = número de cédula (solo dígitos).
+                      Puede cambiarla aquí.
+                    </p>
+                    <div className="space-y-1.5">
+                      <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                        Contraseña de ingreso
+                      </Label>
+                      <div className="relative">
+                        <Lock className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+                        <Input
+                          type={showLoginPassword ? "text" : "password"}
+                          value={loginPassword}
+                          onChange={(e) => setLoginPassword(e.target.value)}
+                          placeholder="Se usa la cédula si lo dejas vacío"
+                          className="h-11 rounded-xl pl-10 pr-10 font-mono text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowLoginPassword((v) => !v)}
+                          className="text-muted-foreground absolute top-1/2 right-3 -translate-y-1/2"
+                          aria-label={
+                            showLoginPassword
+                              ? "Ocultar contraseña"
+                              : "Mostrar contraseña"
+                          }
+                        >
+                          {showLoginPassword ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                      {digitsOnly(form.propietarioCedula).length >= 6 ? (
+                        <button
+                          type="button"
+                          className="text-primary text-[11px] font-semibold hover:underline"
+                          onClick={() =>
+                            syncDefaultPassword(form.propietarioCedula)
+                          }
+                        >
+                          Usar cédula ({digitsOnly(form.propietarioCedula)})
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </section>
 
               {/* Cuentas */}
@@ -748,11 +944,19 @@ export function OwnersManager() {
             <Button
               variant="outline"
               className="rounded-xl"
+              disabled={saving}
               onClick={() => setDialogOpen(false)}
             >
               Cancelar
             </Button>
-            <Button className="rounded-xl" onClick={() => void handleSave()}>
+            <Button
+              className="rounded-xl"
+              disabled={saving}
+              onClick={() => void handleSave()}
+            >
+              {saving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
               Guardar propietario
             </Button>
           </DialogFooter>
