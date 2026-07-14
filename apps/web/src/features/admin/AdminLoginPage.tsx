@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import { AdminLoginForm } from "./AdminLoginForm";
+import { canAccessAdminPanel } from "@/lib/admin-nav-permissions";
 
 type AuthUser = { role?: string | null };
 
@@ -24,13 +25,17 @@ export function AdminLoginPage() {
       return;
     }
     if (user === undefined) return;
-    if (user?.role === "admin") {
-      router.replace("/admin");
-    } else if (user?.role === "operador") {
-      router.replace("/inbox");
-    } else {
-      setIsChecking(false);
+
+    if (canAccessAdminPanel(user?.role) || user?.role === "operador") {
+      if (user?.role === "operador") {
+        router.replace("/admin/inbox");
+      } else {
+        router.replace("/admin");
+      }
+      return;
     }
+
+    setIsChecking(false);
   }, [authLoading, isAuthenticated, user, router]);
 
   if (isChecking || authLoading || (isAuthenticated && user === undefined)) {
@@ -49,7 +54,6 @@ export function AdminLoginPage() {
   return (
     <main className="admin relative min-h-screen w-full flex items-center justify-center p-4 overflow-hidden">
       <div className="absolute inset-0 -z-10 overflow-hidden">
-        {/* Abstract Mesh Gradients */}
         <div
           className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full opacity-60 mix-blend-multiply filter blur-[80px] animate-pulse"
           style={{
@@ -70,9 +74,7 @@ export function AdminLoginPage() {
             background: "radial-gradient(circle, #4F46E5 0%, transparent 70%)",
           }}
         />
-        {/* Base Gradient */}
         <div className="absolute inset-0 bg-background" />
-        {/* Grid Pattern Overlay */}
         <div
           className="absolute inset-0 opacity-[0.03] dark:opacity-[0.07]"
           style={{

@@ -5,12 +5,15 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { ensureSessionLogged, getSession } from '@/features/auth/api/auth.api';
+import { useAuthStore } from '@/features/auth/store/auth.store';
+import { canAccessAdminPanel } from '@/lib/admin-nav-permissions';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
 export function AdminLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const setUser = useAuthStore((s) => s.setUser);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -28,9 +31,20 @@ export function AdminLoginForm() {
         return;
       }
       const sessionUser = await getSession();
-      if (sessionUser) {
-        await ensureSessionLogged(sessionUser);
+      if (!sessionUser) {
+        setError('Sesión iniciada pero no se pudo leer el usuario. Recarga e intenta de nuevo.');
+        return;
       }
+      if (!canAccessAdminPanel(sessionUser.role)) {
+        // Si aún no vino el rol, deja entrar y que el layout confirme con Convex.
+        if (sessionUser.role) {
+          setError(`Tu rol (${sessionUser.role}) no tiene acceso al panel.`);
+          await authClient.signOut();
+          return;
+        }
+      }
+      setUser(sessionUser);
+      await ensureSessionLogged(sessionUser);
       const callbackUrl = searchParams.get('callbackUrl') || '/admin';
       router.push(callbackUrl);
     } catch {

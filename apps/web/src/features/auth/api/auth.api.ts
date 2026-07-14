@@ -26,12 +26,17 @@ export interface AuthResponse {
 }
 
 function mapUser(raw: Record<string, unknown>): AuthUser {
+  const roleRaw = raw.role ?? raw.Role;
+  const role =
+    typeof roleRaw === 'string' && roleRaw.trim()
+      ? roleRaw.trim()
+      : undefined;
   return {
     id: String(raw.id ?? raw._id ?? ''),
     email: String(raw.email ?? ''),
     name: String(raw.name ?? raw.email ?? ''),
     image: raw.image ? String(raw.image) : undefined,
-    role: raw.role ? String(raw.role) : undefined,
+    role,
     documentId: raw.documentId ? String(raw.documentId) : undefined,
     phone: raw.phone ? String(raw.phone) : undefined,
     city: raw.city ? String(raw.city) : undefined,
@@ -85,7 +90,16 @@ export async function getSession(): Promise<AuthUser | null> {
     const { data } = await authClient.getSession();
     const user = data?.user;
     if (!user) return null;
-    return mapUser(user as Record<string, unknown>);
+    const mapped = mapUser(user as Record<string, unknown>);
+    // Better Auth a veces omite `role` en la primera respuesta del cliente
+    // cross-domain. Reintenta una vez antes de devolver usuario sin rol.
+    if (!mapped.role) {
+      await new Promise((r) => setTimeout(r, 250));
+      const second = await authClient.getSession();
+      const again = second.data?.user;
+      if (again) return mapUser(again as Record<string, unknown>);
+    }
+    return mapped;
   } catch {
     return null;
   }

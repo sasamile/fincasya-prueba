@@ -13,6 +13,7 @@ import { useRouter } from 'next/navigation';
 import { useConvexAuth, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { LoadingArea } from '@/components/ui/spinner';
+import { canAccessAdminPanel } from '@/lib/admin-nav-permissions';
 
 export function RequireInboxAuth({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -25,9 +26,13 @@ export function RequireInboxAuth({ children }: { children: React.ReactNode }) {
 
   const allowed =
     user && typeof user === 'object' && 'role' in user
-      ? (user as { role?: string | null }).role === 'admin' ||
-        (user as { role?: string | null }).role === 'operador' ||
-        (user as { role?: string | null }).role === 'superadmin'
+      ? (() => {
+          const role = (user as { role?: string | null }).role;
+          return (
+            canAccessAdminPanel(role) ||
+            role === 'operador'
+          );
+        })()
       : false;
 
   useEffect(() => {

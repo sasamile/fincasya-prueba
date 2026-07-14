@@ -79,11 +79,14 @@ import { ContractSettingsRemoteSync } from "@/features/admin/components/contract
 import { useRolePermissions } from "@/features/admin/hooks/use-role-permissions";
 import {
   ADMIN_ROUTE_PRIORITY,
+  canAccessAdminPanel,
   canAccessAdminPath,
   canAccessNavItem,
   getDefaultAdminPath,
   isFullAdminRole,
 } from "@/lib/admin-nav-permissions";
+import { useConvexAuth, useQuery } from "convex/react";
+import { api } from "@fincasya/backend/convex/_generated/api";
 
 type NavItem = {
   label: string;
@@ -450,9 +453,25 @@ export default function AdminLayout({
     user?.role,
   );
   const [isChecking, setIsChecking] = useState(true);
-  // Revalida la sesión contra el servidor una sola vez al montar, aunque haya
-  // un usuario persistido en localStorage (que podría traer un rol viejo).
-  const serverValidatedRef = useRef(false);
+  const deniedOnceRef = useRef(false);
+  const fallbackTriedRef = useRef(false);
+  const sessionBridgeOkRef = useRef(false);
+  const { isLoading: authLoading, isAuthenticated } = useConvexAuth();
+  const convexUser = useQuery(
+    api.auth.getCurrentUser,
+    isAuthenticated ? {} : "skip",
+  ) as
+    | {
+        _id?: string;
+        id?: string;
+        email?: string;
+        name?: string;
+        role?: string | null;
+        image?: string | null;
+      }
+    | null
+    | undefined;
+
   const isConversationsRoute =
     pathname.startsWith("/admin/inbox") ||
     pathname.startsWith("/admin/conversations");
@@ -466,60 +485,110 @@ export default function AdminLayout({
     }
   }, [isFullScreenRoute, pathname]);
 
-  // Valida la sesión contra el servidor al montar. SIEMPRE consulta getSession
-  // (aunque haya un usuario persistido en localStorage) para tomar el rol fresco
-  // — así los cambios de rol/permisos hechos por el admin toman efecto sin exigir
-  // re-login. El usuario en caché se muestra mientras tanto para no parpadear.
+  // Si hay usuario en caché, no bloquear la UI mientras Convex confirma.
   useEffect(() => {
-    if (serverValidatedRef.current) return;
-    serverValidatedRef.current = true;
+    if (user) setIsChecking(false);
+  }, [user]);
 
-    async function checkAuth() {
-      try {
+  // Fuente de verdad: Convex JWT + rol en DB.
+  // getSession() a veces llega sin `role` (cross-domain) y antes expulsaba
+  // con "Acceso denegado" sin loguear nada en consola.
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (!isAuthenticated) {
+      // Better Auth ya autenticó pero Convex aún no propagó el JWT.
+      if (sessionBridgeOkRef.current) {
+        setIsChecking(false);
+        return;
+      }
+      if (fallbackTriedRef.current) {
+        clearUser();
+        router.push("/admin/login");
+        setIsChecking(false);
+        return;
+      }
+      fallbackTriedRef.current = true;
+      void (async () => {
         const sessionUser = await getSession();
-        if (!sessionUser) {
-          clearUser();
-          router.push("/admin/login");
-          return;
-        }
-
-        const isAdminRole =
-          sessionUser.role === "admin" ||
-          sessionUser.role === "assistant" ||
-          sessionUser.role === "vendedor" ||
-          sessionUser.role === "superadmin";
-
-        if (!isAdminRole) {
-          // Sincroniza el rol real para no dejar uno viejo en el store.
+        if (sessionUser && canAccessAdminPanel(sessionUser.role)) {
+          sessionBridgeOkRef.current = true;
           setUser(sessionUser);
-          sileo.error({
-            title: "Acceso denegado",
-            description: "No tienes permisos para acceder al panel administrativo.",
-            fill: "#fee2e2",
-          });
-          if (sessionUser.role === "owner" || sessionUser.role === "propietario") {
-            router.push("/owner");
-          } else {
-            router.push("/");
-          }
+          void ensureSessionLogged(sessionUser);
           setIsChecking(false);
           return;
         }
-
-        // Rol válido: sincroniza el store con el rol/datos frescos del servidor.
-        setUser(sessionUser);
-        void ensureSessionLogged(sessionUser);
-        setIsChecking(false);
-      } catch (err) {
-        console.error("Auth check error:", err);
+        // Rol vacío: deja seguir (el cliente cross-domain a veces omite role).
+        if (sessionUser && !sessionUser.role) {
+          sessionBridgeOkRef.current = true;
+          setUser(sessionUser);
+          setIsChecking(false);
+          return;
+        }
+        clearUser();
         router.push("/admin/login");
-      }
+        setIsChecking(false);
+      })();
+      return;
     }
 
-    // Si hay usuario en caché, muéstralo ya (sin spinner) mientras revalidamos.
-    if (user) setIsChecking(false);
-    void checkAuth();
-  }, [user, setUser, clearUser, router]);
+    fallbackTriedRef.current = false;
+    sessionBridgeOkRef.current = false;
+
+    if (convexUser === undefined) return;
+
+    if (convexUser === null) {
+      clearUser();
+      router.push("/admin/login");
+      setIsChecking(false);
+      return;
+    }
+
+    const role = (convexUser.role ?? undefined)?.trim() || undefined;
+    const mapped = {
+      id: String(convexUser._id ?? convexUser.id ?? ""),
+      email: String(convexUser.email ?? ""),
+      name: String(convexUser.name ?? convexUser.email ?? ""),
+      image: convexUser.image ? String(convexUser.image) : undefined,
+      role,
+    };
+
+    if (!canAccessAdminPanel(role)) {
+      // Sin rol en el doc todavía: no expulsar (puede ser race).
+      if (!role) {
+        setUser(mapped);
+        setIsChecking(false);
+        return;
+      }
+      if (!deniedOnceRef.current) {
+        deniedOnceRef.current = true;
+        sileo.error({
+          title: "Acceso denegado",
+          description: `Tu rol (${role}) no puede entrar al panel administrativo.`,
+          fill: "#fee2e2",
+        });
+      }
+      clearUser();
+      if (role === "owner" || role === "propietario") {
+        router.push("/owner");
+      } else {
+        router.push("/admin/login");
+      }
+      setIsChecking(false);
+      return;
+    }
+
+    setUser(mapped);
+    void ensureSessionLogged(mapped);
+    setIsChecking(false);
+  }, [
+    authLoading,
+    isAuthenticated,
+    convexUser,
+    setUser,
+    clearUser,
+    router,
+  ]);
 
   useEffect(() => {
     if (!user || isLoadingPermissions || isFullAdminRole(user.role)) return;
@@ -543,11 +612,7 @@ export default function AdminLayout({
         .join("")
         .toUpperCase()
     : (user?.email?.[0]?.toUpperCase() ?? "AD");
-  const showInboxHumanAlerts =
-    user?.role === "admin" ||
-    user?.role === "assistant" ||
-    user?.role === "vendedor" ||
-    user?.role === "superadmin";
+  const showInboxHumanAlerts = canAccessAdminPanel(user?.role);
   if (isFullScreenRoute) {
     return (
       <SidebarProvider

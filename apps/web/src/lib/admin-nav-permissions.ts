@@ -46,6 +46,22 @@ export function isFullAdminRole(role: string | undefined): boolean {
   return role === "admin" || role === "assistant" || role === "superadmin";
 }
 
+/**
+ * Roles que pueden entrar al panel /admin (layout).
+ * Incluye vendedor (permisos acotados) y roles full-admin.
+ */
+export function canAccessAdminPanel(role: string | undefined | null): boolean {
+  if (!role) return false;
+  const r = role.trim().toLowerCase();
+  return (
+    r === "admin" ||
+    r === "assistant" ||
+    r === "asistente" ||
+    r === "superadmin" ||
+    r === "vendedor"
+  );
+}
+
 export function hasModulePermission(
   permissions: Record<string, string[]>,
   module: string,
@@ -74,19 +90,6 @@ export function canAccessNavItem(
   );
 }
 
-export function resolveAdminNavHref(pathname: string): string | null {
-  const entries = Object.keys(ADMIN_NAV_PERMISSIONS).sort(
-    (a, b) => b.length - a.length,
-  );
-
-  for (const href of entries) {
-    if (pathname === href) return href;
-    if (href !== "/admin" && pathname.startsWith(`${href}/`)) return href;
-  }
-
-  return null;
-}
-
 export function canAccessAdminPath(
   pathname: string,
   role: string | undefined,
@@ -99,6 +102,19 @@ export function canAccessAdminPath(
   if (!href) return false;
 
   return canAccessNavItem(href, role, permissions);
+}
+
+export function resolveAdminNavHref(pathname: string): string | null {
+  const entries = Object.keys(ADMIN_NAV_PERMISSIONS).sort(
+    (a, b) => b.length - a.length,
+  );
+
+  for (const href of entries) {
+    if (pathname === href) return href;
+    if (href !== "/admin" && pathname.startsWith(`${href}/`)) return href;
+  }
+
+  return null;
 }
 
 /** Primera ruta permitida para redirigir vendedores u otros roles limitados. */
