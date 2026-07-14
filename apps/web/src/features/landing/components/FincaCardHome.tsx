@@ -45,7 +45,7 @@ export function FincaCardHome({ finca, badge, modoVenta }: FincaCardHomeProps) {
 
   return (
     <div className="group w-full block border border-border rounded-3xl p-4 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 bg-card/30">
-      <div className="relative aspect-[4/3] rounded-2xl overflow-hidden mb-4">
+      <div className="relative aspect-4/3 rounded-2xl overflow-hidden mb-4">
         {/* Image Carousel */}
         <Carousel setApi={setApi} opts={{ loop: true }} className="w-full h-full">
           <CarouselContent className="h-full ml-0">

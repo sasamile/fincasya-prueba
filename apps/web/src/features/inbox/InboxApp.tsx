@@ -104,11 +104,14 @@ export default function App() {
 
   return (
     <div className="flex h-full bg-background">
-      {/* Rail de herramientas del asesor (columna extrema izquierda) */}
+      {/* Rail de herramientas del asesor (columna extrema izquierda).
+          En móvil se oculta solo cuando el chat está a pantalla completa;
+          con una herramienta abierta vuelve a verse para cambiar entre ellas. */}
       <IconRail
         activeTool={activeTool}
         onOpenTool={setActiveTool}
         hasSelection={Boolean(selected)}
+        className={cn(selected && !activeTool && 'hidden md:flex')}
       />
 
       {/* Panel de herramienta del asesor (izquierda) o lista de chats.
@@ -121,7 +124,12 @@ export default function App() {
           onOpenChat={openChatByPhone}
         />
       ) : (
-      <aside className="flex w-[380px] shrink-0 flex-col border-r border-border bg-card">
+      <aside
+        className={cn(
+          'flex min-w-0 flex-1 flex-col border-r border-border bg-card md:w-[380px] md:flex-none',
+          selected && 'hidden md:flex',
+        )}
+      >
         {/* Cabecera con título y acciones */}
         <header className="flex items-center justify-between px-4 py-3">
           {showArchived ? (
@@ -247,9 +255,18 @@ export default function App() {
       </aside>
       )}
 
-      {/* Conversación (siempre visible a la derecha; no la tapa el panel) */}
+      {/* Conversación (siempre visible a la derecha; no la tapa el panel).
+          En móvil ocupa toda la pantalla, el botón ← vuelve a la lista y el
+          botón de herramientas abre el panel del asesor; mientras una
+          herramienta está abierta, el chat se oculta (solo en móvil). */}
       {selected ? (
-        <ChatPanel key={selected.conversationId} conv={selected} />
+        <ChatPanel
+          key={selected.conversationId}
+          conv={selected}
+          onBack={() => setSelectedId(null)}
+          onOpenTool={setActiveTool}
+          className={cn(activeTool && 'hidden md:flex')}
+        />
       ) : (
         <ChatHomeScreen />
       )}

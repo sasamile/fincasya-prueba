@@ -5,7 +5,7 @@
  * natural segun el hilo — regla de Santiago: no pegar plantillas tal cual.
  */
 
-import { HORARIOS_OFICIALES } from './copys';
+import { HORARIOS_OFICIALES, MASCOTAS_POLITICA } from './copys';
 
 export const SITUATION_SEED: Array<{
   key: string;
@@ -32,32 +32,16 @@ Si nos escribes fuera de ese horario, tu mensaje queda recibido y te respondemos
   {
     key: 'sit:mascotas-respuesta',
     situation:
-      'El cliente pregunta si puede llevar mascotas o confirma que lleva una. Se responde con la politica oficial de mascotas (bienvenidas en la mayoria + recomendaciones + cargos) y se pregunta cuantas van.',
+      'El cliente pregunta si puede llevar mascotas o confirma que lleva una. El mensaje oficial de mascotas se envia TAL CUAL con la tool enviar_politica_mascotas (el bot NO lo redacta ni lo resume). Las mascotas NUNCA frenan el catalogo: con fechas + personas se envia catalogo en el mismo turno (mascotas:true). PROHIBIDO decir "pet friendly".',
     clientExamples: [
       'Puedo llevar mascotas?',
       'Aceptan perros?',
       'Voy a llevar una mascota',
       'Llevamos un perrito pequeño',
       'Se puede con gatos?',
+      'Cuantos perros puedo llevar?',
     ],
-    response: `✨🐶 Tus mascotas son bienvenidas en la mayoría de nuestras propiedades. Para garantizar una excelente estancia, ten en cuenta las siguientes condiciones: 🐾
-
-💰 Depósito: Se requiere un depósito reembolsable de $100.000 por cada mascota
-
-✅ Tarifas adicionales: A partir de la tercera (3ra) mascota, se cobrará una tarifa de ingreso de $30.000 por cada una
-
-🧹 Limpieza adicional: Si viajas con 3 o más mascotas, aplica un cargo único de aseo de $70.000.
-
-📌 Recomendaciones importantes:
-🚫 No ingresar las mascotas a la piscina.
-🐾 Evitar orina o pelaje en zonas interiores.
-🛋️ No subirlas a muebles ni camas.
-🦴 Cuidar que no muerdan implementos de la casa.
-💩 Recoger sus necesidades constantemente.
-
-❗Recuerda: El incumplimiento de estas normas puede generar descuentos en el depósito de garantía. ¡Gracias por cuidar la propiedad mientras disfrutas con tus peluditos! 💚
-
-Cuéntanos por favor cuántas mascotas llevas y de qué tamaño, para validar la finca ideal 🤝`,
+    response: MASCOTAS_POLITICA,
   },
   {
     key: 'qr:servicio-limpieza',
@@ -296,7 +280,49 @@ Por favor ten presente que en temporadas especiales como *Fin de año*, *Navidad
 🎄 Fin de Año: Mínimo 6 a 7 noches (máximo 7).
 🤴 Reyes: Mínimo 3 noches.
 
+✅ *DISPONIBILIDAD DE FECHAS NAVIDAD Y FIN DE AÑO:*
+
+🗓️ 22 de dic al 26 de dic
+🗓️ 23 de dic al 26/27 de dic
+🗓️ 24 de dic al 27/28 de dic
+
+🗓️ 28 de dic al 03/04 de ene
+🗓️ 29 de dic al 04/05 de ene
+🗓️ 30 de dic al 05/06 de ene
+
 Si tus fechas cumplen el mínimo, con gusto te compartimos las opciones disponibles; si no, ajustemos las fechas y seguimos 🙌`,
+  },
+  {
+    key: 'sit:puente-festivo',
+    situation:
+      'El cliente pide fechas que caen en un puente festivo (o una sola noche en puente). Aviso oficial de estancia minima en puentes: minimo 2 noches / 3 dias.',
+    clientExamples: [
+      'Sería el 5 de septiembre al 6 de septiembre',
+      'Para el puente de agosto una sola noche',
+      'Quiero la finca solo el sábado del puente',
+    ],
+    response: `Hola buen día, gusto saludarte 🙋
+
+🗓️ Por favor no olvides tener presente que para las fechas con puente festivo, las propiedades cuentan con disponibilidad mínimo (2) noches (3) días 🏡`,
+  },
+  {
+    key: 'sit:evento-detalles',
+    situation:
+      'El cliente indica que es un evento, fiesta o celebracion. Antes de filtrar opciones se pregunta la logistica de sonido (copy oficial del equipo).',
+    clientExamples: [
+      'Es para una fiesta de amigos',
+      'Queremos hacer un evento familiar',
+      'Es una despedida, vamos a llevar música',
+    ],
+    response: `🪅 *Detalles de tu evento*
+
+Por favor, cuéntanos si tienes contemplado ingresar:
+
+🎧 Sonido profesional, iluminación o DJ.
+🎸 Grupos musicales o presentaciones en vivo.
+🏡 ¿O prefieres departir solo con el sonido básico de la finca?
+
+Esta información es clave para verificar la disponibilidad según las normas de cada propiedad.`,
   },
   {
     key: 'sit:pre-catalogo',

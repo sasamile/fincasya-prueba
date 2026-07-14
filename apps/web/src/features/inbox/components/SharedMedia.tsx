@@ -34,7 +34,7 @@ export function SharedMedia({
   }, [items]);
 
   return (
-    <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-border bg-card">
+    <aside className="absolute inset-y-0 right-0 z-30 flex h-full w-full shrink-0 flex-col border-l border-border bg-card md:static md:z-auto md:w-[380px]">
       <header className="flex items-center gap-6 px-4 py-3.5">
         <button
           type="button"

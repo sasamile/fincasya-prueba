@@ -1,6 +1,7 @@
 import { v } from 'convex/values';
 import { internalAction, internalQuery, mutation } from './_generated/server';
 import { internal } from './_generated/api';
+import type { Doc } from './_generated/dataModel';
 
 const REQUEST_TYPES = [
   'acceso',
@@ -123,12 +124,15 @@ export const sendNotificationEmail = internalAction({
       return;
     }
 
-    const request = await ctx.runQuery(internal.habeasData.getById, {
-      requestId: args.requestId,
-    });
+    const request: Doc<'habeas_data_requests'> | null = await ctx.runQuery(
+      internal.habeasData.getById,
+      {
+        requestId: args.requestId,
+      },
+    );
     if (!request) return;
 
-    const typeLabel = REQUEST_TYPE_LABELS[request.requestType];
+    const typeLabel = REQUEST_TYPE_LABELS[request.requestType as RequestType];
     const submitted = new Date(request.submittedAt).toLocaleString('es-CO', {
       timeZone: 'America/Bogota',
     });

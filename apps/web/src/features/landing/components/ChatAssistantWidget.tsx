@@ -30,7 +30,7 @@ export function ChatAssistantWidget() {
     <>
       {open ? (
         <div
-          className="fixed inset-0 z-[55] bg-black/25 backdrop-blur-[2px]"
+          className="fixed inset-0 z-55 bg-black/25 backdrop-blur-[2px]"
           aria-hidden
           onClick={close}
         />
@@ -38,7 +38,7 @@ export function ChatAssistantWidget() {
 
       <div
         className={cn(
-          'fixed bottom-24 left-5 z-[56] w-[min(100vw-2.5rem,380px)] transition-all duration-300 origin-bottom-left',
+          'fixed bottom-24 left-5 z-56 w-[min(100vw-2.5rem,380px)] transition-all duration-300 origin-bottom-left',
           open
             ? 'scale-100 opacity-100 pointer-events-auto'
             : 'scale-95 opacity-0 pointer-events-none',
@@ -112,7 +112,7 @@ export function ChatAssistantWidget() {
         aria-label={open ? 'Cerrar asistente' : 'Abrir asistente FincasYa'}
         aria-expanded={open}
         className={cn(
-          'fixed bottom-5 left-5 z-[56] flex h-14 w-14 items-center justify-center rounded-full shadow-xl transition-transform hover:scale-105',
+          'fixed bottom-5 left-5 z-56 flex h-14 w-14 items-center justify-center rounded-full shadow-xl transition-transform hover:scale-105',
           open ? 'bg-[#1a5c2e]' : 'bg-[#1a5c2e]',
         )}
       >

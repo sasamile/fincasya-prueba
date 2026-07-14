@@ -14,9 +14,9 @@ export function CookieConsentBanner() {
     <div
       role="dialog"
       aria-label="Consentimiento de cookies"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] px-3 pb-3 sm:px-4 sm:pb-4"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-60 px-3 pb-3 sm:px-4 sm:pb-4"
     >
-      <div className="pointer-events-auto mx-auto flex w-full max-w-6xl flex-col gap-3 rounded-2xl border border-black/[0.06] bg-white px-3 py-3 text-foreground shadow-[0_4px_24px_rgba(0,0,0,0.10)] sm:flex-row sm:items-center sm:gap-5 sm:px-4 sm:py-3.5">
+      <div className="pointer-events-auto mx-auto flex w-full max-w-6xl flex-col gap-3 rounded-2xl border border-black/6 bg-white px-3 py-3 text-foreground shadow-[0_4px_24px_rgba(0,0,0,0.10)] sm:flex-row sm:items-center sm:gap-5 sm:px-4 sm:py-3.5">
         <div className="flex min-w-0 flex-1 items-start gap-2.5 sm:items-center sm:gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#fe4a19]/10 sm:h-10 sm:w-10">
             <Cookie className="h-[18px] w-[18px] text-[#fe4a19] sm:h-5 sm:w-5" aria-hidden />

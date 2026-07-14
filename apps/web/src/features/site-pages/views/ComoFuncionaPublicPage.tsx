@@ -79,7 +79,7 @@ export function ComoFuncionaPublicPage() {
                     {i + 1}
                   </div>
                   {i < content.guestSteps.length - 1 ? (
-                    <div className="w-0.5 flex-grow bg-primary/20" />
+                    <div className="w-0.5 grow bg-primary/20" />
                   ) : null}
                 </div>
                 <div className="flex-1 rounded-xl border-l-4 border-primary bg-secondary/50 p-5">

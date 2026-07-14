@@ -3,6 +3,7 @@
 /** Rail de herramientas del asesor (columna extrema izquierda del inbox). */
 import { useRouter } from 'next/navigation';
 import {
+  BadgeCheck,
   CalendarDays,
   DoorOpen,
   FileText,
@@ -17,9 +18,14 @@ import { cn } from '@/lib/utils';
 import { authClient } from '@/lib/auth-client';
 import { useSidebar } from '@/components/ui/sidebar';
 
-export type AsesorTool = 'contrato' | 'calendario' | 'venta' | 'checkin';
+export type AsesorTool =
+  | 'contrato'
+  | 'calendario'
+  | 'venta'
+  | 'checkin'
+  | 'confirmar';
 
-const TOOLS: {
+export const ASESOR_TOOLS: {
   id: AsesorTool;
   icon: LucideIcon;
   label: string;
@@ -29,6 +35,7 @@ const TOOLS: {
   { id: 'calendario', icon: CalendarDays, label: 'Reservas', needsChat: false },
   { id: 'venta', icon: Link2, label: 'Links de venta', needsChat: false },
   { id: 'checkin', icon: DoorOpen, label: 'Check-ins', needsChat: false },
+  { id: 'confirmar', icon: BadgeCheck, label: 'Confirmar reserva', needsChat: false },
 ];
 
 function RailIcon({
@@ -73,10 +80,12 @@ export function IconRail({
   activeTool,
   onOpenTool,
   hasSelection,
+  className,
 }: {
   activeTool: AsesorTool | null;
   onOpenTool: (tool: AsesorTool | null) => void;
   hasSelection: boolean;
+  className?: string;
 }) {
   const router = useRouter();
   const { toggleSidebar } = useSidebar();
@@ -87,7 +96,12 @@ export function IconRail({
   }
 
   return (
-    <nav className="flex w-[68px] shrink-0 flex-col items-center justify-between border-r border-border bg-background py-4">
+    <nav
+      className={cn(
+        'flex w-[60px] shrink-0 flex-col items-center justify-between border-r border-border bg-background py-4 md:w-[68px]',
+        className,
+      )}
+    >
       <div className="flex flex-col items-center gap-2">
         {/* Desplegar / ocultar el sidebar principal de admin */}
         <RailIcon
@@ -106,7 +120,7 @@ export function IconRail({
         />
 
         {/* Herramientas del asesor sobre el chat seleccionado */}
-        {TOOLS.map((tool) => (
+        {ASESOR_TOOLS.map((tool) => (
           <RailIcon
             key={tool.id}
             icon={tool.icon}

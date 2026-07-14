@@ -584,6 +584,7 @@ export function CheckinPageContent({
       );
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
+        message?: string;
         expected?: number;
         got?: number;
       };
@@ -623,7 +624,10 @@ export function CheckinPageContent({
         return;
       }
       if (!res.ok) {
-        setFormError("No se pudo enviar tu check-in. Intenta de nuevo.");
+        setFormError(
+          data.message ??
+            "No se pudo enviar tu check-in. Intenta de nuevo.",
+        );
         return;
       }
       setPageState("success");
@@ -684,66 +688,115 @@ export function CheckinPageContent({
   }
 
   if (pageState === "success") {
+    const successSummary = reservation ? (
+      <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-left">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-700">
+          Tu reserva
+        </p>
+        <p className="mt-1 text-sm font-bold text-gray-900">
+          {reservation.propertyTitle}
+        </p>
+        {reservation.propertyLocation ? (
+          <p className="mt-0.5 text-xs text-gray-500">
+            {reservation.propertyLocation}
+          </p>
+        ) : null}
+        <p className="mt-2 text-xs text-gray-600">
+          {formatDate(reservation.fechaEntrada)} →{" "}
+          {formatDate(reservation.fechaSalida)}
+        </p>
+      </div>
+    ) : null;
+
     if (embedded) {
       return (
-        <div className="rounded-2xl border border-emerald-100 bg-white p-8 text-center shadow-sm">
-          <div className="mb-4 flex justify-center">
-            <CheckCircle2 className="h-12 w-12 text-emerald-500" />
+        <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
+          <div className="bg-linear-to-r from-emerald-600 to-emerald-500 px-6 py-6 text-center text-white">
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white/20">
+              <CheckCircle2 className="h-8 w-8" />
+            </div>
+            <h2 className="text-lg font-black">¡Check-in completado!</h2>
+            {reservation?.reference ? (
+              <p className="mt-1 text-xs font-semibold text-emerald-50">
+                CR {reservation.reference}
+              </p>
+            ) : null}
           </div>
-          <h2 className="mb-2 text-xl font-black text-gray-900">
-            ¡Check-in completado! 🎉
-          </h2>
-          <p className="text-sm leading-relaxed text-gray-600">
-            Recibimos tu lista de invitados
-            {reservation?.reference ? ` (CR ${reservation.reference})` : ""}.
-            Ya estás listo para ingresar a la finca en la fecha de tu reserva.
-            ¡Buen viaje!
-          </p>
+          <div className="px-6 py-5 text-center">
+            <p className="text-sm leading-relaxed text-gray-600">
+              Recibimos tu lista de invitados. Ya estás listo para ingresar a la
+              finca en la fecha de tu reserva. ¡Buen viaje!
+            </p>
+            {successSummary}
+          </div>
         </div>
       );
     }
 
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <div className="mx-auto max-w-sm rounded-2xl bg-white p-8 text-center shadow-md">
-          <div className="mb-4 flex justify-center">
-            <CheckCircle2 className="h-12 w-12 text-emerald-500" />
+      <div className="flex min-h-screen items-center justify-center bg-linear-to-b from-emerald-50 via-white to-orange-50/40 px-4 py-10">
+        <div className="mx-auto w-full max-w-md">
+          <div className="mb-5 text-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/gml/Logo.png"
+              alt="FincasYa"
+              className="mx-auto h-9 w-auto opacity-90"
+            />
           </div>
-          <h2 className="mb-2 text-xl font-black text-gray-900">
-            ¡Check-in completado! 🎉
-          </h2>
-          <p className="text-sm leading-relaxed text-gray-500">
-            Recibimos tu lista de invitados
-            {reservation?.reference ? ` (CR ${reservation.reference})` : ""}.
-            Ya puedes ingresar a la finca en la fecha de tu reserva. ¡Buen
-            viaje!
-          </p>
-          <Button
-            type="button"
-            onClick={handleDownloadPdf}
-            disabled={isDownloading}
-            className="mt-6 h-12 w-full rounded-xl bg-emerald-600 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-60"
-          >
-            {isDownloading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generando
-                PDF...
-              </>
-            ) : (
-              <>
-                <Download className="mr-2 h-4 w-4" /> Descargar mi PDF
-              </>
-            )}
-          </Button>
-          {pdfError && (
-            <p className="mt-2 text-[11px] font-medium text-red-500">
-              {pdfError}
-            </p>
-          )}
-          <p className="mt-3 text-[11px] leading-relaxed text-gray-400">
-            Guárdalo y compártelo por WhatsApp con Fincas Ya para agilizar tu
-            ingreso.
-          </p>
+
+          <div className="overflow-hidden rounded-3xl border border-emerald-100/80 bg-white shadow-xl shadow-emerald-900/5">
+            <div className="relative bg-linear-to-br from-emerald-600 via-emerald-500 to-emerald-600 px-6 py-8 text-center text-white">
+              <div className="absolute inset-x-0 bottom-0 h-1 bg-orange-500" />
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/15 ring-4 ring-white/10">
+                <CheckCircle2 className="h-9 w-9" />
+              </div>
+              <h2 className="text-2xl font-black tracking-tight">
+                ¡Check-in completado!
+              </h2>
+              {reservation?.reference ? (
+                <p className="mt-2 inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-bold tracking-wide">
+                  CR {reservation.reference}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="px-6 py-6 text-center">
+              <p className="text-sm leading-relaxed text-gray-600">
+                Recibimos tu lista de invitados. Ya puedes ingresar a la finca en
+                la fecha de tu reserva. ¡Buen viaje!
+              </p>
+
+              {successSummary}
+
+              <Button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={isDownloading}
+                className="mt-6 h-12 w-full rounded-xl bg-emerald-600 text-sm font-black text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {isDownloading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generando
+                    PDF...
+                  </>
+                ) : (
+                  <>
+                    <Download className="mr-2 h-4 w-4" /> Descargar mi PDF
+                  </>
+                )}
+              </Button>
+              {pdfError && (
+                <p className="mt-2 text-[11px] font-medium text-red-500">
+                  {pdfError}
+                </p>
+              )}
+              <p className="mt-4 text-[11px] leading-relaxed text-gray-400">
+                Guárdalo y compártelo por WhatsApp con Fincas Ya para agilizar tu
+                ingreso.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     );

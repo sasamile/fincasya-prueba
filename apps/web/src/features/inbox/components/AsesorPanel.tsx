@@ -12,6 +12,7 @@ import { api } from '@fincasya/backend/convex/_generated/api';
 import { toast } from 'sonner';
 import { BankLogoBadge } from '@/features/checkin/components/bank-logo-badge';
 import {
+  BadgeCheck,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -33,6 +34,7 @@ import { ContractPreviewModal } from '@/features/inbox/components/ContractPrevie
 import { ReservasTool } from '@/features/inbox/components/tools/ReservasTool';
 import { VentaTool } from '@/features/inbox/components/tools/VentaTool';
 import { CheckinTool } from '@/features/inbox/components/tools/CheckinTool';
+import { ConfirmarReservaTool } from '@/features/inbox/components/tools/ConfirmarReservaTool';
 import type { AsesorTool } from '@/features/inbox/components/IconRail';
 import type { ConversationRow } from '@/features/inbox/types';
 
@@ -107,6 +109,11 @@ const TOOL_META: Record<
     icon: DoorOpen,
     title: 'Check-ins',
     subtitle: 'Reservas próximas sin check-in — abre el chat y despacha.',
+  },
+  confirmar: {
+    icon: BadgeCheck,
+    title: 'Confirmar reserva',
+    subtitle: 'Busca el contrato por código y envía la confirmación al chat.',
   },
 };
 
@@ -678,11 +685,13 @@ export function AsesorPanel({
   conversation,
   onClose,
   onOpenChat,
+  className,
 }: {
   tool: AsesorTool;
   conversation: ConversationRow | null;
   onClose: () => void;
   onOpenChat?: (phone: string) => void;
+  className?: string;
 }) {
   const fincasForTools = useQuery(api.adminProperties.listAll, {}) as
     | Array<{ _id: string; title: string }>
@@ -691,7 +700,12 @@ export function AsesorPanel({
   const Icon = meta.icon;
 
   return (
-    <aside className="flex w-[440px] shrink-0 flex-col border-r border-border bg-muted/20">
+    <aside
+      className={cn(
+        'flex min-w-0 flex-1 flex-col border-r border-border bg-muted/20 md:w-[440px] md:flex-none',
+        className,
+      )}
+    >
       {/* Cabecera */}
       <header className="flex items-center gap-3 border-b border-border bg-background px-4 py-3">
         <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
@@ -746,6 +760,12 @@ export function AsesorPanel({
         )}
         {tool === 'checkin' && (
           <CheckinTool conversation={conversation} onOpenChat={onOpenChat} />
+        )}
+        {tool === 'confirmar' && (
+          <ConfirmarReservaTool
+            conversation={conversation}
+            onOpenChat={onOpenChat}
+          />
         )}
       </div>
     </aside>

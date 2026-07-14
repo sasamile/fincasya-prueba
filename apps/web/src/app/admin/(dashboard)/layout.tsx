@@ -154,7 +154,7 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
   {
     title: "REDES SOCIALES",
     items: [
-      { label: "Canales", href: "/admin/canales", icon: Share2 },
+      { label: "Bandeja social", href: "/admin/canales", icon: Share2 },
     ],
   },
   {
@@ -447,13 +447,15 @@ export default function AdminLayout({
   const isConversationsRoute =
     pathname.startsWith("/admin/inbox") ||
     pathname.startsWith("/admin/conversations");
+  const isSocialCrmRoute = pathname.startsWith("/admin/canales");
+  const isFullScreenRoute = isConversationsRoute || isSocialCrmRoute;
   const [conversationsSidebarOpen, setConversationsSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (isConversationsRoute) {
+    if (isFullScreenRoute) {
       setConversationsSidebarOpen(false);
     }
-  }, [isConversationsRoute, pathname]);
+  }, [isFullScreenRoute, pathname]);
 
   // Load session on mount if not already in store
   useEffect(() => {
@@ -544,7 +546,7 @@ export default function AdminLayout({
     user?.role === "admin" ||
     user?.role === "assistant" ||
     user?.role === "vendedor";
-  if (isConversationsRoute) {
+  if (isFullScreenRoute) {
     return (
       <SidebarProvider
         defaultOpen={false}
@@ -552,7 +554,12 @@ export default function AdminLayout({
         onOpenChange={setConversationsSidebarOpen}
       >
         <AdminSidebar showRail={false} />
-        <SidebarInset className="inbox relative h-dvh max-h-dvh min-h-0 min-w-0 overflow-hidden">
+        <SidebarInset
+          className={cn(
+            'relative h-dvh max-h-dvh min-h-0 min-w-0 overflow-hidden',
+            isSocialCrmRoute ? 'social-crm' : 'inbox',
+          )}
+        >
           {isChecking ? (
             <div className="z-50 flex min-h-screen flex-1 items-center justify-center bg-background">
               <div className="flex flex-col items-center gap-4">

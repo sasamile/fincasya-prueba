@@ -21,6 +21,9 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: '*.convex.cloud' },
       // Markers de Leaflet (map-picker).
       { protocol: 'https', hostname: 'unpkg.com' },
+      // Avatares de reseñas de Google.
+      { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
+      { protocol: 'https', hostname: 'ui-avatars.com' },
     ],
   },
 };

@@ -9,9 +9,28 @@ import { internal } from './_generated/api';
 import { chatCompletion } from './lib/openai';
 
 /** Contexto para la extracción: transcript, contacto y catálogo de fincas. */
+type ExtractionContext = {
+  contact: {
+    name: string;
+    phone: string;
+    cedula: string;
+    email: string;
+    city: string;
+  };
+  messages: Array<{ fromAdvisor: boolean; content: string }>;
+  fincas: Array<{
+    id: string;
+    title: string;
+    code: string;
+    location: string;
+    capacity: number;
+    priceBase: number;
+  }>;
+};
+
 export const getExtractionContext = internalQuery({
   args: { conversationId: v.id('conversations') },
-  handler: async (ctx, { conversationId }) => {
+  handler: async (ctx, { conversationId }): Promise<ExtractionContext | null> => {
     const conv = await ctx.db.get(conversationId);
     if (!conv) return null;
 
@@ -93,7 +112,7 @@ export type ContractExtraction = {
 export const extractFromConversation = action({
   args: { conversationId: v.id('conversations') },
   handler: async (ctx, { conversationId }): Promise<ContractExtraction> => {
-    const context = await ctx.runQuery(
+    const context: ExtractionContext | null = await ctx.runQuery(
       internal.contractAi.getExtractionContext,
       { conversationId },
     );

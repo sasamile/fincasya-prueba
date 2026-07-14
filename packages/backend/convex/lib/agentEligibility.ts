@@ -1,6 +1,11 @@
 import type { Doc } from '../_generated/dataModel';
 
-/** Mensajes totales (sin system) para considerar una conversación "casi nueva". */
+/**
+ * Mensajes DEL CLIENTE para considerar una conversación "casi nueva".
+ * OJO: el limite se mide solo sobre mensajes del cliente — los del bot NO
+ * cuentan (sus copys fijos: bienvenida, horarios, mascotas, intro de catalogo
+ * suman rapido y apagaban el bot a mitad de flujo).
+ */
 export const MAX_MESSAGES_FOR_AI = 12;
 
 export type EligibilitySignals = {
@@ -48,9 +53,9 @@ export function isQuickEligibleForAi(
   if (state !== 'pending_data') {
     return { eligible: false, reason: 'proceso_avanzado' };
   }
-  if ((conversation.lastSentCatalogPropertyIds?.length ?? 0) > 0) {
-    return { eligible: false, reason: 'catalogo_ya_enviado' };
-  }
+  // OJO: enviar catalogo NO apaga el bot (pedido 13-jul): despues de las
+  // fichas el bot sigue atendiendo dudas, precios y el pick de finca. El bot
+  // se apaga por escalacion, experto participando o proceso avanzado.
   return { eligible: true };
 }
 
@@ -63,7 +68,7 @@ export function isConversationEligibleForAi(
   if (signals.advisorMessageCount > 0) {
     return { eligible: false, reason: 'Experto_ya_participo' };
   }
-  if (signals.totalMessageCount > MAX_MESSAGES_FOR_AI) {
+  if (signals.userMessageCount > MAX_MESSAGES_FOR_AI) {
     return { eligible: false, reason: 'historial_largo' };
   }
   return { eligible: true };

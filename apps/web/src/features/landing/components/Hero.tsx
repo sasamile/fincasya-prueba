@@ -141,7 +141,7 @@ export function Hero({ fincas, onOpenChat }: { fincas: PropertyResponse[]; onOpe
                     </span>
                   </button>
                 </PopoverTrigger>
-                <PopoverContent className="landing w-auto p-0 z-[100]" align="center">
+                <PopoverContent className="landing w-auto p-0 z-100" align="center">
                   <Calendar
                     initialFocus
                     mode="range"

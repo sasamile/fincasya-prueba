@@ -1,4 +1,4 @@
-export type ReservationCalendarStage = 1 | 2 | 3 | 4 | 5 | 6;
+export type ReservationCalendarStage = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 type BookingForSemaphore = {
   status?: string;
@@ -41,6 +41,11 @@ export const RESERVATION_CALENDAR_LEGEND: Array<{
     stage: 3,
     colorClass: "bg-amber-100 text-amber-900 border-amber-200",
     label: "Amarillo — invitados diligenciados",
+  },
+  {
+    stage: 7,
+    colorClass: "bg-cyan-100 text-cyan-900 border-cyan-200",
+    label: "Turquesa — check-in completado",
   },
   {
     stage: 4,
@@ -107,6 +112,9 @@ export function getReservationCalendarStage(
   // Resto por avance del ciclo: gana la etapa más avanzada alcanzada.
   if (isFinishedWithDepositReturned(booking)) return 5;
   if (isFullyPaid(booking)) return 4;
+  // Turquesa: el turista TERMINÓ el check-in (distinto de solo haber
+  // diligenciado invitados, que sigue en amarillo).
+  if (booking.checkinCompleted) return 7;
   if (hasGuestsFilled(booking)) return 3;
   if (hasCheckinSent(booking)) return 2;
   return 1;
@@ -121,6 +129,7 @@ export function getReservationCalendarStyles(booking: BookingForSemaphore) {
     4: "bg-emerald-100/95 text-emerald-900 border-emerald-200 shadow-emerald-200/20",
     5: "bg-pink-100/95 text-pink-900 border-pink-200 shadow-pink-200/20",
     6: "bg-orange-100/95 text-orange-900 border-orange-300 shadow-orange-200/30",
+    7: "bg-cyan-100/95 text-cyan-900 border-cyan-200 shadow-cyan-200/20",
   };
   return styles[stage];
 }
@@ -134,6 +143,7 @@ export function getReservationCalendarLabel(booking: BookingForSemaphore) {
     4: "Pago al 100%",
     5: "Finalizada",
     6: "Soporte por revisar",
+    7: "Check-in completado",
   };
   return labels[stage];
 }
@@ -147,6 +157,7 @@ export function getReservationCalendarBarClass(booking: BookingForSemaphore) {
     4: "bg-emerald-500",
     5: "bg-pink-500",
     6: "bg-orange-500",
+    7: "bg-cyan-500",
   };
   return bars[stage];
 }

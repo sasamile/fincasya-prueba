@@ -34,15 +34,7 @@ import {
 /** Forma del invitado tal como llega del portal / se guarda en la reserva. */
 const GUEST_DOCUMENT_TYPES = new Set(['CC', 'TI', 'RC', 'CE', 'PA']);
 
-const guestValidator = v.object({
-  nombreCompleto: v.string(),
-  cedula: v.optional(v.string()),
-  tipoDocumento: v.optional(v.string()),
-  esMenor: v.optional(v.boolean()),
-  email: v.optional(v.string()),
-  fechaNacimiento: v.optional(v.string()),
-  telefono: v.optional(v.string()),
-});
+import { checkinGuestValidator as guestValidator } from './lib/checkinGuest';
 
 type Guest = {
   nombreCompleto: string;

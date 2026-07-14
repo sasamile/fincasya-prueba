@@ -12,6 +12,7 @@ import {
   normalizeContractCode,
   resolveSaleLinkReference,
 } from './lib/saleLinkReference';
+import { checkinGuestValidator } from './lib/checkinGuest';
 
 type ProvisionFromSaleLinkResult =
   | { ok: true; bookingId: Id<'bookings'>; reference: string }
@@ -332,6 +333,20 @@ export const create = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    // CRM-3: promover oportunidad a "propuesta" o crearla
+    const property = await ctx.db.get(args.propertyId);
+    await ctx.scheduler.runAfter(0, internal.opportunities.upsertFromSaleLink, {
+      saleLinkId: id,
+      propertyName: property?.title ?? undefined,
+      estimatedValue: args.totalValue,
+      checkIn: args.checkIn,
+      checkOut: args.checkOut,
+      guests: args.guests,
+      assignedUserId: args.createdBy,
+      assignedUserName: args.createdByName,
+    });
+
     return { id, token, contractCode };
   },
 });
@@ -524,6 +539,10 @@ export const validatePayment = internalMutation({
     });
     // Al aprobar el pago la reserva ya debe existir y verse en /admin/reservations.
     await provisionBookingOnPayment(ctx, link._id);
+    // CRM-3: marcar oportunidad como ganada
+    await ctx.scheduler.runAfter(0, internal.opportunities.markWon, {
+      saleLinkId: link._id,
+    });
     return { ok: true };
   },
 });
@@ -554,6 +573,10 @@ export const validatePaymentAdmin = mutation({
     });
     // Al aprobar el pago la reserva ya debe existir y verse en /admin/reservations.
     await provisionBookingOnPayment(ctx, link._id);
+    // CRM-3: marcar oportunidad como ganada
+    await ctx.scheduler.runAfter(0, internal.opportunities.markWon, {
+      saleLinkId: link._id,
+    });
     return { ok: true };
   },
 });
@@ -941,14 +964,7 @@ async function finalizeSaleLinkCheckin(
 export const submitCheckin = mutation({
   args: {
     token: v.string(),
-    guests: v.array(
-      v.object({
-        nombreCompleto: v.string(),
-        cedula: v.optional(v.string()),
-        tipoDocumento: v.optional(v.string()),
-        esMenor: v.optional(v.boolean()),
-      }),
-    ),
+    guests: v.array(checkinGuestValidator),
     menoresDe2: v.optional(v.number()),
     mascotas: v.optional(v.number()),
     placas: v.optional(v.string()),
@@ -1315,14 +1331,7 @@ export const syncCheckinFromBooking = internalMutation({
     bookingId: v.id('bookings'),
     completed: v.boolean(),
     guests: v.optional(
-      v.array(
-        v.object({
-          nombreCompleto: v.string(),
-          cedula: v.optional(v.string()),
-          tipoDocumento: v.optional(v.string()),
-          esMenor: v.optional(v.boolean()),
-        }),
-      ),
+      v.array(checkinGuestValidator),
     ),
     menoresDe2: v.optional(v.number()),
     placas: v.optional(v.string()),
@@ -1394,14 +1403,7 @@ export const ensureBookingForCheckinInternal = internalMutation({
 export const submitCheckinInternal = internalMutation({
   args: {
     token: v.string(),
-    guests: v.array(
-      v.object({
-        nombreCompleto: v.string(),
-        cedula: v.optional(v.string()),
-        tipoDocumento: v.optional(v.string()),
-        esMenor: v.optional(v.boolean()),
-      }),
-    ),
+    guests: v.array(checkinGuestValidator),
     menoresDe2: v.optional(v.number()),
     mascotas: v.optional(v.number()),
     placas: v.optional(v.string()),

@@ -3,31 +3,99 @@ $ next build
 - Environments: .env
 
   Creating an optimized production build ...
-Turbopack build encountered 1 warnings:
-[next]/internal/font/google/poppins_2c75aa0f.module.css
-Error while requesting resource
-There was an issue establishing a connection while requesting https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap
+✓ Compiled successfully in 46s
+  Running TypeScript ...
+  Finished TypeScript in 34.4s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/50) ...
+  Generating static pages using 7 workers (12/50) 
+  Generating static pages using 7 workers (24/50) 
+⚠ metadataBase property in metadata export is not set for resolving social open graph or twitter images, using "http://localhost:3000". See https://nextjs.org/docs/app/api-reference/functions/generate-metadata#metadatabase
+  Generating static pages using 7 workers (37/50) 
+✓ Generating static pages using 7 workers (50/50) in 1105ms
+  Finalizing page optimization ...
 
-Import trace:
-  Server Component:
-    [next]/internal/font/google/poppins_2c75aa0f.module.css
-    [next]/internal/font/google/poppins_2c75aa0f.js
-    ./apps/web/src/app/layout.tsx
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /admin
+├ ○ /admin/access-logs
+├ ○ /admin/category-zone-templates
+├ ○ /admin/contract-link
+├ ○ /admin/contracts
+├ ○ /admin/contracts-confirmation
+├ ○ /admin/crm
+├ ○ /admin/customers
+├ ○ /admin/features
+├ ○ /admin/inbox
+├ ○ /admin/login
+├ ○ /admin/notifications
+├ ○ /admin/payment-review
+├ ○ /admin/pricing-rules
+├ ○ /admin/properties
+├ ƒ /admin/properties/[id]/edit
+├ ƒ /admin/properties/[id]/owner
+├ ○ /admin/properties/new
+├ ○ /admin/propietarios
+├ ○ /admin/reorder
+├ ○ /admin/reservations
+├ ○ /admin/roles
+├ ○ /admin/sections
+├ ○ /admin/users
+├ ○ /admin/ventas
+├ ○ /admin/whatsapp-temporal-message
+├ ƒ /anfitrion/[reference]
+├ ƒ /api/admin/calendar-callback
+├ ƒ /api/admin/upload
+├ ƒ /api/bookings
+├ ƒ /api/bookings/[id]
+├ ƒ /api/bookings/[id]/checkin-guests
+├ ƒ /api/bookings/[id]/client-observaciones
+├ ƒ /api/bookings/[id]/guest-list-unlock
+├ ƒ /api/bookings/[id]/owner-portal-share
+├ ƒ /api/bookings/[id]/payments
+├ ƒ /api/bookings/[id]/payments/sync
+├ ƒ /api/bookings/by-contract
+├ ƒ /api/bookings/check-availability
+├ ƒ /api/bookings/checkin/templates
+├ ƒ /api/bookings/contract-codes
+├ ƒ /api/bookings/contract-snapshot
+├ ƒ /api/bookings/contracts/[contractNumber]
+├ ƒ /api/bookings/owner/[reference]
+├ ƒ /api/bookings/owner/[reference]/accept-offer
+├ ƒ /api/bookings/owner/[reference]/deposit-approval
+├ ƒ /api/bookings/owner/[reference]/guests-pdf
+├ ƒ /api/bookings/owner/[reference]/owner-offer-comment
+├ ƒ /api/bookings/owner/[reference]/receiver
+├ ƒ /api/bookings/owner/[reference]/reject-offer
+├ ƒ /api/contracts/[contractNumber]/document-file
+├ ƒ /api/fincas/[id]/calculate-stay-price
+├ ƒ /api/fincas/[id]/direct-booking-contract
+├ ƒ /api/fincas/contract-docx-to-pdf
+├ ƒ /api/fincas/contract-pdf
+├ ƒ /api/fincas/html-to-pdf
+├ ƒ /api/habeas-data
+├ ƒ /api/payment/[reference]
+├ ƒ /api/sale-links/[token]/document-file
+├ ƒ /api/sale-links/[token]/generate-contract
+├ ƒ /api/sale-links/[token]/generate-cr
+├ ○ /blog
+├ ƒ /blog/[id]
+├ ○ /centro-de-ayuda
+├ ƒ /checkin/[reference]
+├ ○ /como-funciona
+├ ○ /contacto
+├ ƒ /fincas/[slug]
+├ ○ /habeas-data
+├ ○ /marketplace
+├ ○ /politica-de-cancelacion
+├ ○ /politica-de-privacidad
+├ ○ /quienes-somos
+├ ○ /terminos-y-condiciones
+├ ƒ /venta/[token]
+└ ○ /vinculate
 
 
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
 
-> Build error occurred
-Error: Turbopack build failed with 1 errors:
-[next]/internal/font/google/poppins_2c75aa0f.module.css
-next/font: error:
-Failed to fetch `Poppins` from Google Fonts.
-
-Import trace:
-  Server Component:
-    [next]/internal/font/google/poppins_2c75aa0f.module.css
-    [next]/internal/font/google/poppins_2c75aa0f.js
-    ./apps/web/src/app/layout.tsx
-
-
-    at processTicksAndRejections (null:7:39)
-error: script "build" exited with code 1

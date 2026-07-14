@@ -312,12 +312,19 @@ export const curateHistory = internalAction({
     const BATCH = 40;
     for (let offset = 0; offset < pending.length; offset += BATCH) {
       const batch = pending.slice(offset, offset + BATCH);
-      const withMessages = await ctx.runQuery(
+      const withMessages: ConversationMessages[] = await ctx.runQuery(
         internal.curation.getMessagesForConversations,
-        { conversationIds: batch.map((c) => c.conversationId) },
+        {
+          conversationIds: batch.map(
+            (c: ConversationForCuration) => c.conversationId,
+          ),
+        },
       );
-      const messagesByConv = new Map(
-        withMessages.map((w) => [w.conversationId, w.messages]),
+      const messagesByConv = new Map<string, CurationMessage[]>(
+        withMessages.map((w: ConversationMessages) => [
+          w.conversationId,
+          w.messages,
+        ]),
       );
 
       const labels: Array<{
@@ -338,7 +345,8 @@ export const curateHistory = internalAction({
       }> = [];
 
       for (const conv of batch) {
-        const messages = messagesByConv.get(String(conv.conversationId)) ?? [];
+        const messages: CurationMessage[] =
+          messagesByConv.get(String(conv.conversationId)) ?? [];
         const phone10 = conv.phone.replace(/\D+/g, '').slice(-10);
         const hasBooking =
           bookingContacts.has(conv.contactId) ||
@@ -385,7 +393,12 @@ export const curateHistory = internalAction({
     }
 
     // Playbook del equipo (35 plantillas curadas a mano): oro directo al RAG.
-    const playbook = await ctx.runQuery(internal.curation.listPlaybookForImport, {});
+    const playbook: Array<{
+      key: string;
+      situation: string;
+      clientExamples: string[];
+      response: string;
+    }> = await ctx.runQuery(internal.curation.listPlaybookForImport, {});
     if (playbook.length > 0) {
       const items = playbook.map((p) => ({
         clientMessage:
@@ -404,7 +417,8 @@ export const curateHistory = internalAction({
     // FAQs oficiales del equipo: entran al RAG como CONTEXTO. Los datos
     // (tarifas, proceso de reserva, horarios) son exactos; la redaccion la
     // adapta la IA al hilo (regla en prompts.ts).
-    const faqsPending = await ctx.runQuery(internal.curation.listFaqsForImport, {});
+    const faqsPending: Array<{ key: string; title: string; text: string }> =
+      await ctx.runQuery(internal.curation.listFaqsForImport, {});
     if (faqsPending.length > 0) {
       const items = faqsPending.map((f) => ({
         clientMessage: f.title,
@@ -449,7 +463,11 @@ export const embedPending = internalAction({
   handler: async (ctx): Promise<{ embedded: number }> => {
     let total = 0;
     for (;;) {
-      const pending = await ctx.runQuery(internal.exemplars.listUnembedded, {
+      const pending: Array<{
+        _id: Id<'exemplars'>;
+        clientMessage: string;
+        situation?: string;
+      }> = await ctx.runQuery(internal.exemplars.listUnembedded, {
         limit: 100,
       });
       if (pending.length === 0) break;

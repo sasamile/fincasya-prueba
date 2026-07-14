@@ -4,6 +4,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const CATEGORIES: Array<{ id: string; label: string; emojis: string[] }> = [
   {
@@ -40,9 +41,11 @@ const CATEGORIES: Array<{ id: string; label: string; emojis: string[] }> = [
 export function EmojiPicker({
   onPick,
   onClose,
+  align = 'left',
 }: {
   onPick: (emoji: string) => void;
   onClose: () => void;
+  align?: 'left' | 'right';
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
@@ -65,7 +68,10 @@ export function EmojiPicker({
   return (
     <div
       ref={ref}
-      className="absolute bottom-full left-2 z-50 mb-2 flex h-[340px] w-[360px] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+      className={cn(
+        'absolute bottom-full z-50 mb-2 flex h-[340px] w-[360px] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl',
+        align === 'right' ? 'right-0' : 'left-2',
+      )}
     >
       <div className="px-3 pb-1 pt-3">
         <div className="relative">

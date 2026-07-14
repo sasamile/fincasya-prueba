@@ -32,7 +32,8 @@ export function fullNameForGreeting(rawName?: string | null): string | null {
 
 /**
  * Heuristica de genero por terminacion del primer nombre (es-CO): -o → hombre,
- * -a → mujer. Nombres ambiguos o atipicos → null (se usa Señor/Señora).
+ * -a → mujer. Nombres ambiguos o atipicos → null (NO se adivina el titulo:
+ * el saludo va sin "señor"/"señora").
  */
 export function inferGenderFromFirstName(
   first: string,
@@ -80,6 +81,9 @@ export function firstNameForGreeting(rawName?: string | null): string | null {
 
 /**
  * Trato formal para saludo: "señor Juan Pérez" / "señora María Gómez".
+ * Si el genero no se puede inferir del nombre (o el nombre es basura tipo
+ * "i🐶"), devuelve null: NUNCA adivinamos "señor" por defecto — el trato
+ * sin titulo lo resuelve el caller (saludo generico, tuteo sin nombre).
  */
 export function formalSalutationName(
   contactName?: string | null,
@@ -89,6 +93,7 @@ export function formalSalutationName(
   if (!fullName) return null;
   const first = fullName.split(' ')[0] ?? '';
   const effective = gender ?? inferGenderFromFirstName(first);
+  if (!effective) return null;
   const title = effective === 'female' ? 'señora' : 'señor';
   return `${title} ${fullName}`;
 }
@@ -144,21 +149,21 @@ export function timeOfDayGreeting(now: Date = new Date()): string {
 
 function timeOfDayCourtesyPhrase(
   slot: TimeSlot,
-  gender: 'male' | 'female' | null,
+  _gender: 'male' | 'female' | null,
 ): string {
+  // Tuteo SIEMPRE (regla de la casa: prompts.ts prohibe el "usted" y la guia de
+  // tono lo marca como el rompimiento #1 del sello tuteo+titulo).
   if (slot === 'morning') {
-    return 'gracias por comunicarse con nosotros. ¿En qué podemos ayudarle?';
+    return 'gracias por comunicarte con nosotros. ¿En qué te podemos ayudar?';
   }
   if (slot === 'afternoon') {
-    return gender === 'female'
-      ? 'es un gusto atenderla. ¿Cómo podemos colaborarle?'
-      : 'es un gusto atenderlo. ¿Cómo podemos colaborarle?';
+    return 'es un gusto atenderte. ¿En qué te podemos colaborar?';
   }
-  return 'gracias por escribirnos. Estamos atentos para ayudarle.';
+  return 'gracias por escribirnos. Estamos atentos para ayudarte.';
 }
 
 /**
- * Apertura oficial del saludo: "Hola, señor Juan Pérez. Buenos días, ..."
+ * Apertura oficial del saludo: "¡Hola! señor Juan Pérez. Buenos días, ..."
  */
 export function buildGreetingOpener(
   contactName?: string | null,
@@ -173,31 +178,39 @@ export function buildGreetingOpener(
   const effectiveGender = gender ?? (first ? inferGenderFromFirstName(first) : null);
   const courtesy = timeOfDayCourtesyPhrase(slot, effectiveGender);
 
-  if (fullName) {
+  // Sin genero claro NO adivinamos "señor": saludo generico sin nombre.
+  if (fullName && effectiveGender) {
     const title = effectiveGender === 'female' ? 'señora' : 'señor';
-    return `Hola, ${title} ${fullName}. ${timeGreeting}, ${courtesy}`;
+    return `¡Hola! ${title} ${fullName}. ${timeGreeting}, ${courtesy}`;
   }
-  return `Hola. ${timeGreeting}, ${courtesy}`;
+  return `¡Hola! ${timeGreeting}, ${courtesy}`;
 }
 
-/** Mensaje de bienvenida oficial (verbatim del equipo). */
+/** Mensaje de bienvenida oficial (verbatim del equipo, formato 13-jul). */
 export function buildWelcomeMessage(
   contactName?: string | null,
   gender?: 'male' | 'female' | null,
   now: Date = new Date(),
 ): string {
-  const opener = buildGreetingOpener(contactName, gender, now);
+  const timeGreeting = timeOfDayGreeting(now);
+  const fullName = fullNameForGreeting(contactName);
+  const first = fullName?.split(' ')[0] ?? '';
+  const effectiveGender = gender ?? (first ? inferGenderFromFirstName(first) : null);
+  // Sin genero claro NO adivinamos "señor": bienvenida generica sin nombre.
+  const opener =
+    fullName && effectiveGender
+      ? `¡Hola! ${effectiveGender === 'female' ? 'señora' : 'señor'} ${fullName}. ${timeGreeting}, 🙋`
+      : `¡Hola! ${timeGreeting}, 🙋`;
   return `${opener}
-
-En *FINCASYA.COM* ®️ 💻 te brindamos atención personalizada. Para agilizar tu proceso, indícanos por favor la siguiente información:
+Gracias por comunicarte con *FINCASYA.COM*®️ 💻 En breve te brindaremos atención personalizada, para agilizar tu proceso indícanos por favor la siguiente información:
 
 📅 Fecha probable de ingreso y salida
 👥 Número de personas entre adultos y niños
 🫂 Si es grupo de familia, amigos o empresarial
 🪅 Si es evento, fiesta familiar o reunión empresarial
 🐕 Indícanos si traes mascotas y cuántas
-📄 Si ya tienes un alquiler con nosotros, tu número de *(confirmación de reserva)*
-🏡 Si eres propietario y deseas vincular tu propiedad para alquiler o venta
+📄 Si ya tienes un alquiler con nosotros indícanos por favor tu número de *(confirmación de reserva)*
+🏡 Si eres propietario y deseas información sobre cómo vincular tu propiedad para alquiler o venta
 
 ${HORARIO_SIMPLE}`;
 }
@@ -206,8 +219,30 @@ ${HORARIO_SIMPLE}`;
  * Horario CORTO para la bienvenida (asi lo pone el equipo: una sola linea,
  * sin desglose de sabado/domingo).
  */
-export const HORARIO_SIMPLE = `🕛 Horario de atención:
+export const HORARIO_SIMPLE = `🕛 Horarios de atención:
 ✔️ 07:30 AM A 07:00 PM`;
+
+/**
+ * Politica oficial de MASCOTAS (verbatim del equipo, con sus emojis exactos).
+ * Se envia TAL CUAL con la tool enviar_politica_mascotas — el LLM no la
+ * redacta ni la resume. NUNCA bloquea el envio del catalogo.
+ */
+export const MASCOTAS_POLITICA = `✨🐶 Tus mascotas son bienvenidas en la mayoría de nuestras propiedades. Para garantizar una excelente estancia, ten en cuenta las siguientes condiciones: 🐾
+
+💰 Depósito: Se requiere un depósito reembolsable de $100.000 por cada mascota 🐕
+
+✅️ Tarifas adicionales: A partir de la tercera (3ra) mascota, se cobrará una tarifa de ingreso de $30.000 por cada una
+
+🧹 Limpieza adicional: Si viajas con 3 o más mascotas, aplica un cargo único de aseo de $70.000.
+
+📌 Recomendaciones importantes:
+🚫 No ingresar las mascotas a la piscina.
+🐾 Evitar orina o pelaje en zonas interiores.
+🛋️ No subirlas a muebles ni camas.
+🦴 Cuidar que no muerdan implementos de la casa.
+💩 Recoger sus necesidades constantemente.
+
+❗Recuerda: El incumplimiento de estas normas puede generar descuentos en el depósito de garantía. ¡Gracias por cuidar la propiedad mientras disfrutas con tus peluditos! 💚`;
 
 /**
  * Intro oficial ANTES de las fichas del catalogo (verbatim del equipo).
@@ -215,7 +250,9 @@ export const HORARIO_SIMPLE = `🕛 Horario de atención:
  */
 export const CATALOGO_INTRO = `Con gusto en atenderte 🙋
 
-A continuación, te comparto las opciones disponibles para tus fechas 📅 Si alguna de estas propiedades te gusta, dímelo y te ayudaré a gestionar el mejor precio posible 🤝`;
+A continuación, te comparto las opciones disponibles para tus fechas 📅
+💰 Tarifa: El valor reflejado corresponde al precio por noche en temporada actual.
+🏊 Gestión: Si alguna de estas propiedades te gusta, dímelo y te ayudaré a gestionar el mejor precio posible 🤝`;
 
 /**
  * Horario DETALLADO (de la respuesta rapida oficial "/fuera de horario").
@@ -385,16 +422,29 @@ export function replyAlreadyOpensWithTimeGreeting(reply: string): boolean {
   const head = reply.slice(0, 160).toLowerCase();
   return (
     /buenos\s*d[ií]as|buenas\s*tardes|buenas\s*noches/.test(head) ||
-    /^hola,?\s+señor/.test(head)
+    /^¡?\s*hola[,!]?\s+(señor|señora)/.test(head)
   );
 }
 
-/** Quita un "Hola Don/Doña X" generado por el LLM para no duplicar. */
+/**
+ * Quita un "Hola Don/Doña X" generado por el LLM para no duplicar.
+ * Consume la puntuacion que sigue (coma/punto) para no dejar una coma colgando
+ * del tipo ", señor Camilo. Buenos dias...".
+ */
 export function stripRedundantHolaPrefix(reply: string): string {
   return reply
-    .replace(/^¡?\s*hola\s+(don|doña|señor|señora)\s+[^!.\n]+!?\s*/i, '')
-    .replace(/^¡?\s*hola!?\s*/i, '')
+    .replace(/^¡?\s*hola[!,.\s]+(don|doña|señor|señora)\s+[^!.\n]+[!.,]?\s*/i, '')
+    .replace(/^¡?\s*hola[!,.]?\s*/i, '')
     .trim();
+}
+
+/** Garantiza que el mensaje ABRA con "Hola" (cordialidad de apertura). */
+function ensureHolaOpening(reply: string): string {
+  if (/^\s*¡?\s*hola\b/i.test(reply)) return reply;
+  const trimmed = reply.replace(/^\s+/, '');
+  if (!trimmed) return reply;
+  const lowered = trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
+  return `Hola, ${lowered}`;
 }
 
 /**
@@ -407,8 +457,11 @@ export function prependGreetingIfNeeded(
   now: Date = new Date(),
 ): string {
   if (!burstContainsGreeting(userBurst)) return reply;
+  // Si la respuesta YA abre con un saludo valido, la dejamos intacta: solo nos
+  // aseguramos de que arranque con "Hola". (Antes le quitabamos el "Hola" y
+  // dejaba una coma colgando: ", señor Camilo. Buenos dias...").
   if (replyAlreadyOpensWithTimeGreeting(reply)) {
-    return stripRedundantHolaPrefix(reply);
+    return ensureHolaOpening(reply);
   }
   const opener = buildGreetingOpener(contactName, undefined, now);
   const body = stripRedundantHolaPrefix(reply);

@@ -1,10 +1,11 @@
 import { Lock } from 'lucide-react';
 import { StartChatIllustration } from '@/features/inbox/components/StartChatIllustration';
 
-/** Pantalla vacía estilo WhatsApp Web (sin chat seleccionado). */
+/** Pantalla vacía estilo WhatsApp Web (sin chat seleccionado). En móvil se
+ * oculta: la lista de chats ocupa toda la pantalla. */
 export function ChatHomeScreen() {
   return (
-    <div className=" relative flex flex-1 flex-col border-l border-border">
+    <div className="relative hidden flex-1 flex-col border-l border-border md:flex">
       <div className="flex flex-1 flex-col items-center justify-center px-8 pb-24 pt-12">
         <StartChatIllustration className="mb-10 h-auto w-[min(320px,85vw)] max-w-full select-none" />
 

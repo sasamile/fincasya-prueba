@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { checkinGuestFields } from './lib/checkinGuest';
 
 /**
  * FincasYa v2 — schema.
@@ -633,16 +634,7 @@ export default defineSchema(
       ownerOfferRejectedReason: v.optional(v.string()),
       ownerOfferComment: v.optional(v.string()),
       ownerOfferCommentAt: v.optional(v.number()),
-      checkinGuests: v.optional(
-        v.array(
-          v.object({
-            nombreCompleto: v.string(),
-            cedula: v.optional(v.string()),
-            tipoDocumento: v.optional(v.string()),
-            esMenor: v.optional(v.boolean()),
-          }),
-        ),
-      ),
+      checkinGuests: v.optional(v.array(v.object(checkinGuestFields))),
       checkinMenoresDe2: v.optional(v.number()),
       checkinMascotas: v.optional(v.number()),
       checkinPlacas: v.optional(v.string()),
@@ -909,18 +901,7 @@ export default defineSchema(
        * `esMenor` y no requieren cédula. Se permite guardado parcial (el turista
        * puede llenar unos hoy y los demás otro día con el mismo link).
        */
-      checkinGuests: v.optional(
-        v.array(
-          v.object({
-            nombreCompleto: v.string(),
-            /** Número de documento (cédula, TI, pasaporte, etc.). */
-            cedula: v.optional(v.string()),
-            /** Tipo de documento: CC, TI, RC, CE o PA. Por defecto CC en datos antiguos. */
-            tipoDocumento: v.optional(v.string()),
-            esMenor: v.optional(v.boolean()),
-          }),
-        ),
-      ),
+      checkinGuests: v.optional(v.array(v.object(checkinGuestFields))),
       /** El turista indicó que necesita empleada de servicio (portal de check-in). */
       checkinNeedsEmpleada: v.optional(v.boolean()),
       /** El turista indicó que necesita team (portal de check-in). */
@@ -1545,11 +1526,47 @@ export default defineSchema(
       connectedByName: v.optional(v.string()),
       tokenExpiresAt: v.optional(v.number()),
       lastError: v.optional(v.string()),
+      /** Respuesta automática a comentarios nuevos vía webhook. */
+      autoReplyComments: v.optional(v.boolean()),
+      autoReplyMessage: v.optional(v.string()),
+      autoReplyTemplateId: v.optional(v.string()),
+      /** Plantillas de respuesta creadas por el operador (por página). */
+      commentTemplates: v.optional(
+        v.array(
+          v.object({
+            id: v.string(),
+            label: v.string(),
+            text: v.string(),
+          }),
+        ),
+      ),
+      /** Respuestas guardadas para mensajes directos (atajo + texto). */
+      dmTemplates: v.optional(
+        v.array(
+          v.object({
+            id: v.string(),
+            shortcut: v.string(),
+            text: v.string(),
+          }),
+        ),
+      ),
       createdAt: v.number(),
       updatedAt: v.number(),
     })
       .index('by_page', ['pageId'])
       .index('by_ig', ['igUserId']),
+
+    /** Respuestas enviadas a comentarios (manual o automática). */
+    metaCommentReplies: defineTable({
+      pageId: v.string(),
+      provider: v.union(v.literal('facebook'), v.literal('instagram')),
+      commentId: v.string(),
+      replyText: v.string(),
+      repliedAt: v.number(),
+      auto: v.optional(v.boolean()),
+    })
+      .index('by_comment', ['provider', 'commentId'])
+      .index('by_page', ['pageId']),
 
     /**
      * Log de eventos entrantes del webhook de Meta (comentarios, menciones,
@@ -1575,6 +1592,102 @@ export default defineSchema(
       .index('by_page', ['pageId'])
       .index('by_receivedAt', ['receivedAt'])
       .index('by_comment', ['commentId']),
+
+    /** Hilos de Messenger e Instagram DM sincronizados desde Meta. */
+    metaDmThreads: defineTable({
+      pageId: v.string(),
+      platform: v.union(v.literal('messenger'), v.literal('instagram')),
+      metaConversationId: v.optional(v.string()),
+      participantId: v.string(),
+      participantName: v.optional(v.string()),
+      participantPictureUrl: v.optional(v.string()),
+      lastMessageText: v.optional(v.string()),
+      lastMessageAt: v.number(),
+      lastReadAt: v.optional(v.number()),
+      updatedAt: v.number(),
+    })
+      .index('by_page_time', ['pageId', 'lastMessageAt'])
+      .index('by_page_platform_participant', ['pageId', 'platform', 'participantId']),
+
+    metaDmMessages: defineTable({
+      threadId: v.id('metaDmThreads'),
+      pageId: v.string(),
+      metaMessageId: v.optional(v.string()),
+      direction: v.union(v.literal('inbound'), v.literal('outbound')),
+      text: v.optional(v.string()),
+      attachmentType: v.optional(
+        v.union(
+          v.literal('image'),
+          v.literal('audio'),
+          v.literal('video'),
+          v.literal('file'),
+        ),
+      ),
+      attachmentUrl: v.optional(v.string()),
+      fromId: v.optional(v.string()),
+      fromName: v.optional(v.string()),
+      createdAt: v.number(),
+    })
+      .index('by_thread', ['threadId', 'createdAt'])
+      .index('by_meta_message', ['metaMessageId']),
+
+    /** Oportunidades comerciales — embudo de ventas (CRM-3). */
+    opportunities: defineTable({
+      /** Contacto dueño de la oportunidad (puede ser undefined en deals sin lead vinculado). */
+      contactId: v.optional(v.id('contacts')),
+      /** Conversación de origen (si viene del bot/inbox). */
+      conversationId: v.optional(v.id('conversations')),
+      /** Link de venta vinculado (si el asesor creó uno). */
+      saleLinkId: v.optional(v.id('saleLinks')),
+      /** Reserva vinculada (cuando se ganó). */
+      bookingId: v.optional(v.id('bookings')),
+
+      /** Etapa del embudo comercial. */
+      stage: v.union(
+        v.literal('nuevo'),        // lead sin contexto de reserva
+        v.literal('calificado'),   // bot detectó finca + fechas (dealLabel)
+        v.literal('propuesta'),    // asesor creó link de venta
+        v.literal('negociacion'),  // cliente subió comprobante (paso intermedio)
+        v.literal('ganada'),       // pago validado
+        v.literal('perdida'),      // cerrada manualmente como perdida
+      ),
+
+      /** Label del deal: "Quinta Montebello · 15pax · 07→10 ago" */
+      dealLabel: v.optional(v.string()),
+      /** Nombre de la finca (para mostrar en el kanban). */
+      propertyName: v.optional(v.string()),
+      /** Valor estimado o confirmado (COP). */
+      estimatedValue: v.optional(v.number()),
+      /** Check-in (timestamp ms). */
+      checkIn: v.optional(v.number()),
+      /** Check-out (timestamp ms). */
+      checkOut: v.optional(v.number()),
+      /** Número de huéspedes. */
+      guests: v.optional(v.number()),
+
+      /** Motivo de pérdida (libre). */
+      lostReason: v.optional(v.string()),
+      /** Asesor asignado (Convex user _id como string). */
+      assignedUserId: v.optional(v.string()),
+      /** Nombre del asesor asignado. */
+      assignedUserName: v.optional(v.string()),
+      /** Canal de origen. */
+      source: v.optional(
+        v.union(
+          v.literal('bot'),
+          v.literal('sale_link'),
+          v.literal('manual'),
+        ),
+      ),
+
+      createdAt: v.number(),
+      updatedAt: v.optional(v.number()),
+    })
+      .index('by_contact', ['contactId'])
+      .index('by_stage', ['stage'])
+      .index('by_sale_link', ['saleLinkId'])
+      .index('by_conversation', ['conversationId'])
+      .index('by_created_at', ['createdAt']),
   },
   // Tablas importadas aun sin declarar (contracts, payments, reviews, ...)
   { strictTableNameTypes: false },

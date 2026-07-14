@@ -55,26 +55,73 @@ function ymdRangeInclusive(a: string, b: string): string[] {
   return out;
 }
 
+/** Día de la semana (0=domingo … 6=sábado) de una fecha YYYY-MM-DD. */
+function dayOfWeekYmd(ymd: string): number {
+  const [y, m, d] = ymd.split('-').map((x) => parseInt(x, 10));
+  return new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
+}
+
+function isWeekendYmd(ymd: string): boolean {
+  const dow = dayOfWeekYmd(ymd);
+  return dow === 0 || dow === 6;
+}
+
 /**
- * ¿El rango de fechas cae en un PUENTE FESTIVO? Es puente si hay un festivo del
- * calendario colombiano dentro de la ventana {checkIn-1 … checkOut+1}. Cubre:
+ * Bloque de puente de un festivo: el festivo extendido sobre los fines de
+ * semana y festivos contiguos, y arrancando desde el VIERNES (regla del
+ * equipo: lunes 20 festivo → el puente es viernes 17, sábado 18, domingo 19
+ * y lunes 20 — reservar 1 sola noche dentro de ese bloque no se permite).
+ */
+export function puenteBlockForHoliday(holidayYmd: string): {
+  start: string;
+  end: string;
+} {
+  let start = holidayYmd;
+  for (let i = 0; i < 10; i++) {
+    const prev = ymdAddDays(start, -1);
+    if (isWeekendYmd(prev) || isColombiaPublicHolidayYmd(prev)) start = prev;
+    else break;
+  }
+  // El puente cuenta desde el viernes: si el bloque arranca en sábado, se
+  // incluye el viernes anterior (la gente viaja desde el viernes).
+  if (dayOfWeekYmd(start) === 6) start = ymdAddDays(start, -1);
+  let end = holidayYmd;
+  for (let i = 0; i < 10; i++) {
+    const next = ymdAddDays(end, 1);
+    if (isWeekendYmd(next) || isColombiaPublicHolidayYmd(next)) end = next;
+    else break;
+  }
+  return { start, end };
+}
+
+/**
+ * ¿La estadía cae en un PUENTE FESTIVO? Es puente si alguna NOCHE de la
+ * estadía (checkIn … checkOut-1) cae dentro del bloque de puente de un
+ * festivo colombiano. Cubre:
+ *   - Viernes→Sábado con Lunes festivo (el puente arranca el viernes).
  *   - Sábado→Domingo con Lunes festivo (puente Emiliani clásico).
- *   - Domingo→Lunes festivo.
- *   - Viernes festivo→Sábado, Jueves→Viernes festivo (Semana Santa), etc.
- *   - Cualquier estadía que incluya o linde con un festivo.
+ *   - Domingo→Lunes festivo, Viernes festivo→Sábado, Semana Santa, etc.
  */
 export function detectPuenteFestivo(
   checkInYmd: string,
   checkOutYmd: string,
 ): { puente: boolean; holidayYmd: string | null } {
   if (!checkInYmd || !checkOutYmd) return { puente: false, holidayYmd: null };
-  const window = [
-    ymdAddDays(checkInYmd, -1),
-    ...ymdRangeInclusive(checkInYmd, checkOutYmd),
-    ymdAddDays(checkOutYmd, 1),
-  ];
-  for (const d of window) {
-    if (isColombiaPublicHolidayYmd(d)) return { puente: true, holidayYmd: d };
+  const lastNight = ymdAddDays(checkOutYmd, -1);
+  if (lastNight < checkInYmd) return { puente: false, holidayYmd: null };
+  // Festivos cercanos: un bloque de puente se extiende como mucho unos días
+  // alrededor de la estadía (viernes previo, festivos encadenados).
+  const scan = ymdRangeInclusive(
+    ymdAddDays(checkInYmd, -5),
+    ymdAddDays(checkOutYmd, 5),
+  );
+  for (const d of scan) {
+    if (!isColombiaPublicHolidayYmd(d)) continue;
+    const block = puenteBlockForHoliday(d);
+    // ¿Alguna noche de la estadía se solapa con el bloque del puente?
+    if (checkInYmd <= block.end && lastNight >= block.start) {
+      return { puente: true, holidayYmd: d };
+    }
   }
   return { puente: false, holidayYmd: null };
 }

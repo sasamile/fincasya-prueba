@@ -5,7 +5,9 @@ import { useAction, useMutation, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import {
+  ArrowLeft,
   Bot,
+  BriefcaseBusiness,
   Download,
   FileText,
   Image,
@@ -37,6 +39,7 @@ import { EmojiPicker } from '@/features/inbox/components/EmojiPicker';
 import { MessageMenu } from '@/features/inbox/components/MessageMenu';
 import { LabelPicker } from '@/features/inbox/components/LabelPicker';
 import { QuickReplyManager } from '@/features/inbox/components/QuickReplyManager';
+import { ASESOR_TOOLS, type AsesorTool } from '@/features/inbox/components/IconRail';
 import { SharedMedia } from '@/features/inbox/components/SharedMedia';
 import type { ConversationRow, Message } from '@/features/inbox/types';
 
@@ -377,10 +380,16 @@ function MessageBubble({
     !!message.mediaUrl && (message.type === 'image' || message.type === 'video');
 
   return (
-    <div className={cn('flex flex-col', message.reaction ? 'mb-5' : 'mb-1', isUser ? 'items-start' : 'items-end')}>
+    <div
+      className={cn(
+        'flex w-full',
+        message.reaction ? 'mb-5' : 'mb-1',
+        isUser ? 'justify-start' : 'justify-end',
+      )}
+    >
       <div
         className={cn(
-          'group relative max-w-[min(75%,26rem)]',
+          'group relative w-fit max-w-[min(80%,26rem)]',
           hasProduct || isMedia ? 'p-1.5' : 'px-2 py-1.5',
           isUser ? 'bubble-in' : 'bubble-out',
         )}
@@ -452,7 +461,7 @@ function MessageBubble({
               <AudioMessage message={message} contactName={contactName} />
             )}
             {message.type === 'document' && message.mediaUrl && (
-              <div className="mb-1 overflow-hidden rounded-lg bg-black/[0.06] dark:bg-white/[0.06]">
+              <div className="mb-1 overflow-hidden rounded-lg bg-black/6 dark:bg-white/6">
                 {(message.mediaMime?.includes('pdf') ||
                   /\.pdf$/i.test(message.mediaFilename ?? '')) && (
                   <PdfThumbnail url={message.mediaUrl} />
@@ -462,7 +471,7 @@ function MessageBubble({
                   target="_blank"
                   rel="noopener noreferrer"
                   download={message.mediaFilename ?? undefined}
-                  className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+                  className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-black/5 dark:hover:bg-white/6"
                 >
                   <DocThumbIcon
                     filename={message.mediaFilename}
@@ -517,7 +526,19 @@ function MessageBubble({
   );
 }
 
-export function ChatPanel({ conv }: { conv: ConversationRow }) {
+export function ChatPanel({
+  conv,
+  onBack,
+  onOpenTool,
+  className,
+}: {
+  conv: ConversationRow;
+  /** Vuelve a la lista de chats (solo visible en móvil). */
+  onBack?: () => void;
+  /** Abre una herramienta del asesor (menú visible solo en móvil). */
+  onOpenTool?: (tool: AsesorTool) => void;
+  className?: string;
+}) {
   const liveMessages = useQuery(api.inbox.getMessages, {
     conversationId: conv.conversationId,
   });
@@ -543,6 +564,7 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
   const [showQuickReplyMgr, setShowQuickReplyMgr] = useState(false);
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
   const [showSearch, setShowSearch] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
@@ -724,10 +746,20 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
   }, [messages]);
 
   return (
-    <div className="flex h-full min-w-0 flex-1">
+    <div className={cn('relative flex h-full min-w-0 flex-1', className)}>
       <div className="relative flex h-full min-w-0 flex-1 flex-col bg-background">
         {/* Header */}
-        <header className="wa-panel flex items-center justify-between gap-4 border-b border-border px-4 py-2.5">
+        <header className="wa-panel flex items-center justify-between gap-2 border-b border-border px-2 py-2.5 md:gap-4 md:px-4">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted md:hidden"
+              aria-label="Volver a la lista de chats"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowInfo(true)}
@@ -741,7 +773,7 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
             </div>
           </button>
 
-          <div className="flex shrink-0 items-center gap-3">
+          <div className="flex shrink-0 items-center gap-1.5 md:gap-3">
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5">
                 <Bot className="h-3.5 w-3.5 text-primary" />
@@ -764,9 +796,54 @@ export function ChatPanel({ conv }: { conv: ConversationRow }) {
             
             </div>
 
-            <LabelPicker conversationId={conv.conversationId} assigned={conv.labels} />
+            {/* En móvil las etiquetas viven en la info del contacto; aquí no caben. */}
+            <div className="hidden sm:block">
+              <LabelPicker conversationId={conv.conversationId} assigned={conv.labels} />
+            </div>
 
             <div className="flex items-center gap-0.5">
+              {/* Herramientas del asesor — en móvil el rail está oculto con el
+                  chat abierto, así que se accede desde este menú. */}
+              {onOpenTool && (
+                <div className="relative md:hidden">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn('h-9 w-9 rounded-full', showToolsMenu && 'text-primary')}
+                    onClick={() => setShowToolsMenu((v) => !v)}
+                    title="Herramientas del asesor"
+                    aria-label="Herramientas del asesor"
+                  >
+                    <BriefcaseBusiness className="h-4 w-4" />
+                  </Button>
+                  {showToolsMenu && (
+                    <>
+                      <button
+                        type="button"
+                        className="fixed inset-0 z-30 cursor-default"
+                        aria-label="Cerrar menú de herramientas"
+                        onClick={() => setShowToolsMenu(false)}
+                      />
+                      <div className="absolute right-0 top-11 z-40 w-56 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-2xl">
+                        {ASESOR_TOOLS.map((tool) => (
+                          <button
+                            key={tool.id}
+                            type="button"
+                            onClick={() => {
+                              setShowToolsMenu(false);
+                              onOpenTool(tool.id);
+                            }}
+                            className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[13.5px] transition-colors hover:bg-muted"
+                          >
+                            <tool.icon className="h-4 w-4 text-muted-foreground" />
+                            {tool.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               <Button
                 variant="ghost"
                 size="icon"

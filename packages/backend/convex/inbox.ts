@@ -682,6 +682,85 @@ export const deliverAdvisorMedia = internalAction({
   },
 });
 
+/**
+ * Envía un documento por URL como Experto (ej. PDF de confirmación de
+ * reserva que ya vive en una URL — no pasa por _storage).
+ */
+export const sendAdvisorDocumentByUrl = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    documentUrl: v.string(),
+    filename: v.string(),
+    caption: v.optional(v.string()),
+  },
+  handler: async (ctx, { conversationId, documentUrl, filename, caption }) => {
+    const conversation = await ctx.db.get(conversationId);
+    if (!conversation) throw new Error('Conversacion no existe');
+    const now = Date.now();
+    const cap = caption?.trim() || undefined;
+    const messageId = await ctx.db.insert('messages', {
+      conversationId,
+      sender: 'assistant',
+      content: cap ?? `[documento] ${filename}`,
+      type: 'document',
+      mediaUrl: documentUrl,
+      mediaFilename: filename,
+      mediaMime: 'application/pdf',
+      sentByUserId: ADVISOR_SENDER_ID,
+      createdAt: now,
+    });
+    // El Experto toma el control: el agente IA deja de responder este chat.
+    await ctx.db.patch(conversationId, {
+      status: 'human',
+      lastMessageAt: now,
+      aiManualOverride: false,
+    });
+    await ctx.scheduler.runAfter(0, internal.inbox.deliverAdvisorDocumentByUrl, {
+      messageId,
+      conversationId,
+      documentUrl,
+      filename,
+      caption: cap,
+    });
+    return { messageId };
+  },
+});
+
+export const deliverAdvisorDocumentByUrl = internalAction({
+  args: {
+    messageId: v.id('messages'),
+    conversationId: v.id('conversations'),
+    documentUrl: v.string(),
+    filename: v.string(),
+    caption: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    { messageId, conversationId, documentUrl, filename, caption },
+  ): Promise<void> => {
+    const info = await ctx.runMutation(internal.inbox.getDeliveryInfo, {
+      messageId,
+      conversationId,
+    });
+    if (!info) return;
+    let wamid: string | undefined;
+    let failed = false;
+    try {
+      const sent = await sendDocumentToYcloud({
+        to: info.phone,
+        documentUrl,
+        filename,
+        caption,
+      });
+      wamid = sent.wamid;
+    } catch (err) {
+      failed = true;
+      console.error('[inbox] fallo el envio del documento por URL', err);
+    }
+    await ctx.runMutation(internal.inbox.markDelivery, { messageId, wamid, failed });
+  },
+});
+
 /* ─────────────────────────────────────────────────────────────
  * Menú por burbuja: reaccionar a un mensaje del cliente.
  * ───────────────────────────────────────────────────────────── */

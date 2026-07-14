@@ -30,6 +30,7 @@ import {
   CATALOGO_INTRO,
   formalSalutationName,
   getUserBurstSinceLastBot,
+  MASCOTAS_POLITICA,
   prependGreetingIfNeeded,
 } from './lib/copys';
 import { detectPriceLoopEscalation, isPriceDeflection, isPriceQuestion } from './lib/agentEscalation';
@@ -606,7 +607,7 @@ const TOOL_DEFS: ToolDef[] = [
     function: {
       name: 'enviar_catalogo',
       description:
-        'Envia al cliente las fichas del catalogo de WhatsApp (foto + precio por finca). Usar EN CUANTO tengas fechas + numero de personas — asi trabaja el equipo: no se describe en texto, se envian las fichas. La zona es OPCIONAL: sin zona se envian las favoritas de distintos municipios; con municipio, filtrado personalizado. Si el cliente pide "otras opciones", llamala de nuevo (excluye automaticamente las ya enviadas). Las fichas salen ANTES de tu mensaje final: tu texto las acompaña (aclara que el valor es por noche en temporada actual y ofrece ayudar a elegir), NO las describas una por una.',
+        'Envia al cliente las fichas del catalogo de WhatsApp (foto + precio por finca). Usar EN CUANTO tengas fechas + numero de personas — asi trabaja el equipo: no se describe en texto, se envian las fichas. OBLIGATORIO pasar fechaEntrada y fechaSalida (YYYY-MM-DD) con las fechas que dio el cliente: la tool valida los minimos de noches (temporadas especiales y puentes festivos de Colombia) y NO envia fichas si las fechas no cumplen — en ese caso avisa al cliente y pide ajustar. La zona es OPCIONAL: sin zona se envian las favoritas de distintos municipios; con municipio, filtrado personalizado. Si el cliente pide "otras opciones", llamala de nuevo (excluye automaticamente las ya enviadas). Las fichas salen ANTES de tu mensaje final: tu texto las acompaña (aclara que el valor es por noche en temporada actual y ofrece ayudar a elegir), NO las describas una por una.',
       parameters: {
         type: 'object',
         properties: {
@@ -617,7 +618,18 @@ const TOOL_DEFS: ToolDef[] = [
           },
           mascotas: {
             type: 'boolean',
-            description: 'true si el cliente lleva mascotas (filtra pet friendly)',
+            description:
+              'true si el cliente lleva mascotas (filtra fincas que aceptan mascotas)',
+          },
+          fechaEntrada: {
+            type: 'string',
+            description:
+              'Fecha de entrada que dio el cliente (YYYY-MM-DD). OBLIGATORIA para validar minimos de noches.',
+          },
+          fechaSalida: {
+            type: 'string',
+            description:
+              'Fecha de salida que dio el cliente (YYYY-MM-DD). OBLIGATORIA para validar minimos de noches.',
           },
         },
       },
@@ -637,6 +649,15 @@ const TOOL_DEFS: ToolDef[] = [
         },
         required: ['fechaEntrada', 'fechaSalida'],
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'enviar_politica_mascotas',
+      description:
+        'Envia al cliente el mensaje OFICIAL de mascotas del equipo (deposito, tarifas desde la 3ra, recomendaciones) TAL CUAL, como mensaje aparte. Usala la PRIMERA vez que el cliente pregunte por mascotas o confirme que lleva. NO reemplaza el catalogo: si ya tienes fechas + personas, llama TAMBIEN enviar_catalogo (con mascotas:true) EN ESTE MISMO TURNO — las mascotas NUNCA frenan el envio de opciones. No la repitas si ya se envio en esta conversacion.',
+      parameters: { type: 'object', properties: {} },
     },
   },
   {
@@ -706,8 +727,8 @@ function parseDateMs(iso: string): number {
 function buildPriceHandoffReply(contactName: string): string {
   const name = formalSalutationName(contactName);
   return name
-    ? `Listo, ${name}, un Experto de nuestro equipo le confirma el valor exacto y los detalles de la finca 🤝✨`
-    : `Listo, un Experto de nuestro equipo le confirma el valor exacto y los detalles de la finca 🤝✨`;
+    ? `Listo, ${name}, un Experto de nuestro equipo te confirma el valor exacto y los detalles de la finca 🤝✨`
+    : `Listo, un Experto de nuestro equipo te confirma el valor exacto y los detalles de la finca 🤝✨`;
 }
 
 export const runAgentTurn = internalAction({
@@ -718,9 +739,12 @@ export const runAgentTurn = internalAction({
     triggerMessageId: v.optional(v.id('messages')),
   },
   handler: async (ctx, { conversationId, triggerMessageId }) => {
-    const context = await ctx.runQuery(internal.agent.getAgentContext, {
-      conversationId,
-    });
+    const context: AgentContext | null = await ctx.runQuery(
+      internal.agent.getAgentContext,
+      {
+        conversationId,
+      },
+    );
     if (!context) return;
     if (context.status !== 'ai') return;
 
@@ -840,6 +864,7 @@ export const runAgentTurn = internalAction({
     ];
 
     let escalated = false;
+    let mascotasSentThisTurn = false;
     let skipFinalReply = false;
     let finalText: string | null = null;
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
@@ -872,6 +897,45 @@ export const runAgentTurn = internalAction({
               fechaSalida: parseDateMs(String(args.fechaSalida ?? '')),
             });
           } else if (call.function.name === 'enviar_catalogo') {
+            // Candado de temporada: si el cliente dio fechas, se validan los
+            // minimos de noches (temporadas especiales y puentes festivos)
+            // ANTES de enviar fichas — el modelo no puede saltarse la regla.
+            const fechaEntrada =
+              typeof args.fechaEntrada === 'string' ? args.fechaEntrada : '';
+            const fechaSalida =
+              typeof args.fechaSalida === 'string' ? args.fechaSalida : '';
+            let bloqueoTemporada: string | null = null;
+            if (fechaEntrada && fechaSalida) {
+              const temp = await ctx.runQuery(
+                internal.agent.toolConsultarTemporada,
+                { fechaEntrada, fechaSalida },
+              );
+              const incumplidas = temp.reglas.filter((r) => !r.cumple);
+              if (incumplidas.length > 0) {
+                bloqueoTemporada = incumplidas
+                  .map(
+                    (r) =>
+                      `${r.temporada}: minimo ${r.minimoNoches} noches${
+                        r.maximoNoches ? `, maximo ${r.maximoNoches}` : ''
+                      } (el cliente pide ${temp.noches})`,
+                  )
+                  .join('; ');
+              }
+            }
+            if (bloqueoTemporada) {
+              result = {
+                enviadas: [],
+                error: `fechas NO validas para reservar: ${bloqueoTemporada}`,
+                nota: 'NO se enviaron fichas. Explica con empatia el minimo de noches de esas fechas (puente festivo / temporada especial) y pide ajustar la fecha de salida o entrada ANTES de enviar opciones. NO vuelvas a llamar enviar_catalogo hasta tener fechas que cumplan.',
+              };
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: JSON.stringify(result),
+              });
+              console.log('[agent] catalogo bloqueado por temporada', bloqueoTemporada);
+              continue;
+            }
             const pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
               conversationId,
               personas: typeof args.personas === 'number' ? args.personas : undefined,
@@ -953,6 +1017,46 @@ export const runAgentTurn = internalAction({
               fechaEntrada: String(args.fechaEntrada ?? ''),
               fechaSalida: String(args.fechaSalida ?? ''),
             });
+          } else if (call.function.name === 'enviar_politica_mascotas') {
+            // Anti-duplicado: una sola vez por conversacion (y por turno,
+            // por si el modelo la llama dos veces en la misma ronda).
+            const yaEnviada =
+              mascotasSentThisTurn ||
+              context.history.some(
+                (m) =>
+                  m.sender === 'assistant' &&
+                  m.content.startsWith('✨🐶 Tus mascotas son bienvenidas'),
+              );
+            if (yaEnviada) {
+              result = {
+                enviado: false,
+                nota: 'La politica de mascotas YA se habia enviado en esta conversacion — NO se envio de nuevo. No la repitas ni la parafrasees: continua con el flujo (catalogo si ya tienes fechas + personas, o pide el dato que falte).',
+              };
+            } else {
+              mascotasSentThisTurn = true;
+              let mascotasWamid: string | undefined;
+              try {
+                const sentMascotas = await sendWhatsappText({
+                  to: context.contactPhone,
+                  text: MASCOTAS_POLITICA,
+                });
+                mascotasWamid = sentMascotas.wamid;
+              } catch (err) {
+                console.error(
+                  '[agent] fallo el envio de la politica de mascotas',
+                  err,
+                );
+              }
+              await ctx.runMutation(internal.agent.saveAssistantMessage, {
+                conversationId,
+                content: MASCOTAS_POLITICA,
+                wamid: mascotasWamid,
+              });
+              result = {
+                enviado: true,
+                nota: 'El mensaje oficial de mascotas YA se envio TAL CUAL como mensaje aparte. NO repitas la politica ni sus cifras ni sus recomendaciones. Continua con el flujo: si ya tienes fechas + personas y no has enviado catalogo, llama enviar_catalogo (mascotas:true) AHORA MISMO; si falta un dato (fechas o personas), pidelo en una linea corta. PROHIBIDO decir "pet friendly".',
+              };
+            }
           } else if (call.function.name === 'iniciar_reserva') {
             const handoffText = buildPropertySelectionHandoff(
               context.contactName,

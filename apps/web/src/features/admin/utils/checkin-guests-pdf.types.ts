@@ -36,4 +36,4 @@ export function buildCheckinGuestsPdfFilename(
 }
 
 export const CHECKIN_GUESTS_PDF_SUBTITLE =
-  "Recuerda que Fincas Ya está 24 horas para brindarte soporte para lo que puedas necesitar durante tu estadía";
+  "Fincas Ya está disponible 24 horas para apoyarte durante tu estadía. Guarda este documento y compártelo al ingresar.";

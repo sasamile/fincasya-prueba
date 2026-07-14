@@ -7,6 +7,7 @@ import {
   internalQuery,
   type QueryCtx,
 } from "./_generated/server";
+import { internal } from "./_generated/api";
 
 const MAX_CONVERSATION_TAGS = 25;
 const MAX_TAG_LENGTH = 64;
@@ -99,6 +100,13 @@ export const setLeadDealLabel = internalMutation({
       ...(contact.crmType === "client" ? {} : { crmType: "lead" as const }),
       updatedAt: Date.now(),
     });
+
+    // CRM-3: crear/actualizar oportunidad en el pipeline
+    await ctx.scheduler.runAfter(0, internal.opportunities.upsertFromDealLabel, {
+      contactId: args.contactId,
+      dealLabel: newLabel,
+    });
+
     return { updated: true };
   },
 });

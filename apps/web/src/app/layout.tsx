@@ -4,6 +4,7 @@ import { Poppins } from 'next/font/google';
 import { Toaster } from 'sileo';
 import { Toaster as SonnerToaster } from 'sonner';
 import { ConsentBootstrap } from '@/features/legal/components/consent-bootstrap';
+import { SiteVisitTracker } from '@/features/landing/components/SiteVisitTracker';
 import { MetaPixel, MetaPixelRouteTracker } from '@/lib/meta-pixel';
 import { Providers } from './providers';
 import './globals.css';
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Providers>
         <MetaPixel />
         <MetaPixelRouteTracker />
+        <SiteVisitTracker />
       </body>
     </html>
   );

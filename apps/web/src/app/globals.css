@@ -63,6 +63,44 @@ body:has(.inbox) {
   color-scheme: dark;
 }
 
+/* ── Redes sociales CRM · pantalla completa (tema claro FincasYa) ─ */
+.social-crm {
+  --background: #f4f6f5;
+  --foreground: #1a2e24;
+  --card: #ffffff;
+  --panel-header: #ffffff;
+  --muted: #eef2ef;
+  --muted-foreground: #5c6f64;
+  --border: #dde5e0;
+  --input: #ffffff;
+  --primary: #21c063;
+  --primary-foreground: #ffffff;
+  --secondary: #eef2ef;
+  --accent: #e8f5ee;
+  --destructive: #e5484d;
+  --ring: #21c063;
+  --bubble-in: #f0f2f5;
+  --bubble-out: #0084ff;
+  color-scheme: light;
+  background: var(--background);
+  color: var(--foreground);
+  min-height: 100dvh;
+}
+
+html:has(.social-crm),
+body:has(.social-crm) {
+  background-color: #f4f6f5;
+  color-scheme: light;
+}
+
+/* Bandeja unificada (inbox DM): acento naranja FincasYa en lugar de verde */
+.social-crm-inbox {
+  --primary: #fe4a19;
+  --ring: #fe4a19;
+  --accent: #fff0eb;
+  --primary-foreground: #ffffff;
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);

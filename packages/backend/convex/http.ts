@@ -11,6 +11,10 @@ import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
 import { authComponent, buildTrustedOrigins, createAuth } from './betterAuth/auth';
+import {
+  inferDmPlatformFromWebhook,
+  normalizeWebhookTimestamp,
+} from './lib/metaDmWebhook';
 
 const http = httpRouter();
 
@@ -285,9 +289,34 @@ http.route({
     };
 
     const isSubmit = body?.action === 'submit';
-    const result = isSubmit
-      ? await ctx.runMutation(internal.checkinPortal.submitCheckin, payload)
-      : await ctx.runMutation(internal.checkinPortal.saveDraft, payload);
+    let result: { ok: boolean; reason?: string };
+    try {
+      result = isSubmit
+        ? await ctx.runMutation(internal.checkinPortal.submitCheckin, payload)
+        : await ctx.runMutation(internal.checkinPortal.saveDraft, payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message.includes('ArgumentValidationError') ||
+        message.includes('extra field')
+      ) {
+        return jsonResponse(
+          {
+            error: 'invalid_guest_data',
+            message:
+              'Los datos del invitado no son válidos. Recarga la página e intenta de nuevo.',
+          },
+          422,
+          CHECKIN_CORS,
+        );
+      }
+      console.error('[checkin] mutation failed', message);
+      return jsonResponse(
+        { error: 'server_error', message: 'No se pudo procesar el check-in.' },
+        500,
+        CHECKIN_CORS,
+      );
+    }
 
     if (!result.ok) {
       const reason = (result as { reason?: string }).reason ?? 'error';
@@ -419,6 +448,80 @@ http.route({
           text: value.message || value.text,
           permalink: value.permalink_url,
           payload: change,
+        });
+      }
+
+      let resolvedPageId = pageId;
+      let conn: {
+        pageId: string;
+        igUserId?: string;
+        webhookSubscribed?: boolean;
+        pageAccessToken?: string;
+        connected?: boolean;
+      } | null = null;
+
+      if (object === 'instagram') {
+        const connByIg = await ctx.runQuery(
+          internal.metaChannels.getConnectionByIgId,
+          { igUserId: entry?.id },
+        );
+        resolvedPageId = connByIg?.pageId ?? pageId;
+        conn = connByIg;
+      } else if (resolvedPageId) {
+        conn = await ctx.runQuery(internal.metaChannels.getConnectionByPageId, {
+          pageId: resolvedPageId,
+        });
+      }
+
+      for (const messaging of entry?.messaging ?? []) {
+        const senderId: string | undefined = messaging?.sender?.id;
+        const recipientId: string | undefined = messaging?.recipient?.id;
+        const message = messaging?.message;
+        if (!senderId || !message?.mid) continue;
+
+        if (!resolvedPageId) continue;
+
+        if (!conn && resolvedPageId) {
+          conn = await ctx.runQuery(internal.metaChannels.getConnectionByPageId, {
+            pageId: resolvedPageId,
+          });
+        }
+
+        const platform = inferDmPlatformFromWebhook({
+          pageId: resolvedPageId,
+          igUserId: conn?.igUserId,
+          senderId,
+          recipientId,
+          isInstagramEcho: message.is_instagram_echo === true,
+          webhookObject: object,
+        });
+
+        const ownIds = new Set(
+          [resolvedPageId, conn?.igUserId].filter(Boolean) as string[],
+        );
+        const isEcho = message.is_echo === true || message.is_instagram_echo === true;
+        const fromPage =
+          isEcho || ownIds.has(senderId) || senderId === entry?.id;
+        const direction = fromPage ? 'outbound' : 'inbound';
+        const participantId =
+          direction === 'inbound' ? senderId : recipientId ?? senderId;
+
+        const text =
+          typeof message.text === 'string'
+            ? message.text
+            : message.attachments?.length
+              ? '[Adjunto]'
+              : undefined;
+
+        await ctx.runMutation(internal.metaChannels.ingestDmMessage, {
+          pageId: resolvedPageId,
+          platform,
+          participantId,
+          metaMessageId: message.mid,
+          direction,
+          text,
+          fromId: senderId,
+          createdAt: normalizeWebhookTimestamp(messaging.timestamp),
         });
       }
     }

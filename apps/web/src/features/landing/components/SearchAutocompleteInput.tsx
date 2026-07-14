@@ -141,7 +141,7 @@ export function SearchAutocompleteInput({
         <ul
           id={listId}
           role="listbox"
-          className="absolute left-0 right-0 top-[calc(100%+6px)] z-[120] max-h-56 overflow-y-auto rounded-xl border border-border/80 bg-popover py-1 text-left shadow-xl"
+          className="absolute left-0 right-0 top-[calc(100%+6px)] z-120 max-h-56 overflow-y-auto rounded-xl border border-border/80 bg-popover py-1 text-left shadow-xl"
         >
           {suggestions.length > 0 ? (
             suggestions.map((suggestion, index) => (

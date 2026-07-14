@@ -95,6 +95,14 @@ function bookingColor(b: CalendarBooking): {
       text: "text-emerald-800 dark:text-emerald-200",
       dot: "bg-emerald-500",
     };
+  // Turquesa SÓLIDO: el turista TERMINÓ el check-in (lo diferencia del
+  // abono parcial amarillo; va relleno para que se note de una).
+  if (b.checkinCompleted === true)
+    return {
+      bar: "bg-cyan-500 hover:bg-cyan-600 border-l-2 border-cyan-700",
+      text: "text-white",
+      dot: "bg-cyan-500",
+    };
   if (s === "PARTIAL")
     return {
       bar: "bg-amber-500/20 hover:bg-amber-500/30 border-l-2 border-amber-500",
@@ -732,7 +740,7 @@ export function ReservationCalendarView(props: Props) {
       {/* Menú contextual (clic derecho sobre una reserva) */}
       {menu && (
         <div
-          className="fixed z-[100] min-w-[180px] overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-xl"
+          className="fixed z-100 min-w-[180px] overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-xl"
           style={{ left: menu.x, top: menu.y }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -783,6 +791,9 @@ export function ReservationCalendarView(props: Props) {
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-amber-500" /> Abono parcial
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-cyan-500" /> Check-in completado
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-emerald-500" /> Pagada

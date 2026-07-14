@@ -12,10 +12,20 @@ import {
 
 type LoadedLogo = { dataUri: string; width: number; height: number };
 
-/**
- * Carga el logo oficial (colibrí horizontal) como data URI + sus dimensiones
- * naturales, para embeberlo en el PDF conservando la relación de aspecto.
- */
+const MARGIN = 36;
+const PAGE_W = 595.28; // A4 pt
+
+const BRAND = {
+  emerald: [33, 192, 99] as [number, number, number],
+  emeraldDark: [18, 128, 68] as [number, number, number],
+  orange: [254, 74, 25] as [number, number, number],
+  ink: [15, 23, 42] as [number, number, number],
+  muted: [100, 116, 139] as [number, number, number],
+  line: [226, 232, 240] as [number, number, number],
+  surface: [248, 250, 252] as [number, number, number],
+  white: [255, 255, 255] as [number, number, number],
+};
+
 async function loadOfficialLogo(): Promise<LoadedLogo | null> {
   try {
     const res = await fetch("/gml/Logo.png", { cache: "force-cache" });
@@ -45,7 +55,6 @@ async function loadOfficialLogo(): Promise<LoadedLogo | null> {
   }
 }
 
-/** Filas de metadatos (etiqueta / valor) de la reserva para la cabecera del PDF. */
 function buildMetaRows(input: CheckinGuestsPdfInput): [string, string][] {
   const empleadaLabel = input.needsTeam
     ? "Sí (varias)"
@@ -54,13 +63,12 @@ function buildMetaRows(input: CheckinGuestsPdfInput): [string, string][] {
       : "No";
 
   const rows: ([string, string] | null)[] = [
-    ["Propiedad", input.propertyTitle],
+    ["Titular", input.guestName],
     input.propertyLocation ? ["Ubicación", input.propertyLocation] : null,
-    ["Titular de la reserva", input.guestName],
-    input.contractNumber ? ["Contrato", input.contractNumber] : null,
-    ["Entrada", input.checkInDate],
-    ["Salida", input.checkOutDate],
-    ["Estado del check-in", input.checkinCompleted ? "Completado" : "Pendiente"],
+    [
+      "Estado",
+      input.checkinCompleted ? "Completado ✓" : "Pendiente",
+    ],
     ["Empleada de servicio", empleadaLabel],
     input.petsAllowed
       ? [
@@ -71,7 +79,7 @@ function buildMetaRows(input: CheckinGuestsPdfInput): [string, string][] {
         ]
       : null,
     input.minorsUnder2
-      ? ["Menores de 2 años (no listados)", String(input.minorsUnder2)]
+      ? ["Menores de 2 años", String(input.minorsUnder2)]
       : null,
     input.vehiclePlates?.trim()
       ? ["Placas vehiculares", input.vehiclePlates.trim()]
@@ -84,7 +92,6 @@ function buildMetaRows(input: CheckinGuestsPdfInput): [string, string][] {
   return rows.filter((row): row is [string, string] => row !== null);
 }
 
-/** Filas (#, nombre, documento) de las personas registradas. */
 function buildGuestRows(input: CheckinGuestsPdfInput): string[][] {
   return input.guests.map((guest, index) => {
     const name = guest.nombreCompleto?.trim() || "—";
@@ -114,8 +121,150 @@ function triggerBlobDownload(blob: Blob, filename: string) {
   }, 1000);
 }
 
-const MARGIN = 40;
-const ORANGE: [number, number, number] = [249, 115, 22];
+function drawHeaderBand(doc: jsPDF, logo: LoadedLogo | null): number {
+  const bandH = 88;
+  doc.setFillColor(...BRAND.emeraldDark);
+  doc.rect(0, 0, PAGE_W, bandH, "F");
+
+  doc.setFillColor(...BRAND.orange);
+  doc.rect(0, bandH - 4, PAGE_W, 4, "F");
+
+  let cursorY = 22;
+
+  if (logo) {
+    const logoH = 34;
+    const logoW = Math.min(260, (logo.width / logo.height) * logoH);
+    const logoX = (PAGE_W - logoW) / 2;
+    doc.setFillColor(...BRAND.white);
+    doc.roundedRect(logoX - 10, cursorY - 6, logoW + 20, logoH + 12, 6, 6, "F");
+    doc.addImage(logo.dataUri, "PNG", logoX, cursorY, logoW, logoH);
+    cursorY += logoH + 18;
+  } else {
+    doc.setTextColor(...BRAND.white);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("FINCASYA.COM", PAGE_W / 2, cursorY + 10, { align: "center" });
+    cursorY += 28;
+  }
+
+  doc.setTextColor(...BRAND.white);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text("Lista de invitados · Check-in", PAGE_W / 2, cursorY, {
+    align: "center",
+  });
+
+  return bandH + 20;
+}
+
+function drawContractBadge(
+  doc: jsPDF,
+  contractNumber: string | undefined,
+  y: number,
+): number {
+  if (!contractNumber?.trim()) return y;
+
+  const label = `CR ${contractNumber.trim()}`;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  const textW = doc.getTextWidth(label);
+  const padX = 14;
+  const badgeW = textW + padX * 2;
+  const badgeH = 22;
+  const badgeX = (PAGE_W - badgeW) / 2;
+
+  doc.setFillColor(...BRAND.emerald);
+  doc.roundedRect(badgeX, y, badgeW, badgeH, 11, 11, "F");
+  doc.setTextColor(...BRAND.white);
+  doc.text(label, PAGE_W / 2, y + 15, { align: "center" });
+
+  return y + badgeH + 16;
+}
+
+function drawPropertyHero(doc: jsPDF, input: CheckinGuestsPdfInput, y: number): number {
+  const contentW = PAGE_W - MARGIN * 2;
+
+  doc.setFillColor(...BRAND.surface);
+  doc.roundedRect(MARGIN, y, contentW, 54, 8, 8, "F");
+  doc.setDrawColor(...BRAND.line);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(MARGIN, y, contentW, 54, 8, 8, "S");
+
+  doc.setTextColor(...BRAND.muted);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text("PROPIEDAD", MARGIN + 14, y + 16);
+
+  doc.setTextColor(...BRAND.ink);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  const titleLines = doc.splitTextToSize(
+    input.propertyTitle,
+    contentW - 28,
+  ) as string[];
+  doc.text(titleLines.slice(0, 2), MARGIN + 14, y + 32);
+
+  return y + 54 + 14;
+}
+
+function drawDateCards(
+  doc: jsPDF,
+  checkIn: string,
+  checkOut: string,
+  y: number,
+): number {
+  const gap = 12;
+  const cardW = (PAGE_W - MARGIN * 2 - gap) / 2;
+  const cardH = 48;
+
+  const cards: Array<{ label: string; value: string; x: number }> = [
+    { label: "ENTRADA", value: checkIn, x: MARGIN },
+    { label: "SALIDA", value: checkOut, x: MARGIN + cardW + gap },
+  ];
+
+  for (const card of cards) {
+    doc.setFillColor(...BRAND.white);
+    doc.setDrawColor(...BRAND.line);
+    doc.setLineWidth(0.6);
+    doc.roundedRect(card.x, y, cardW, cardH, 6, 6, "FD");
+
+    doc.setFillColor(...BRAND.emerald);
+    doc.rect(card.x, y, 4, cardH, "F");
+
+    doc.setTextColor(...BRAND.muted);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.text(card.label, card.x + 14, y + 16);
+
+    doc.setTextColor(...BRAND.ink);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(card.value, card.x + 14, y + 34);
+  }
+
+  return y + cardH + 18;
+}
+
+function drawFooter(doc: jsPDF, y: number) {
+  const footerY = Math.max(y + 24, 780);
+  doc.setDrawColor(...BRAND.emerald);
+  doc.setLineWidth(1.2);
+  doc.line(MARGIN, footerY, PAGE_W - MARGIN, footerY);
+
+  doc.setTextColor(...BRAND.muted);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text(CHECKIN_GUESTS_PDF_SUBTITLE, PAGE_W / 2, footerY + 14, {
+    align: "center",
+    maxWidth: PAGE_W - MARGIN * 2,
+  });
+
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.emeraldDark);
+  doc.text("fincasya.com · Soporte 24 horas", PAGE_W / 2, footerY + 30, {
+    align: "center",
+  });
+}
 
 export async function downloadCheckinGuestsPdf(
   input: CheckinGuestsPdfInput,
@@ -126,90 +275,79 @@ export async function downloadCheckinGuestsPdf(
 
   try {
     const doc = new jsPDF({ unit: "pt", format: "a4" });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const centerX = pageWidth / 2;
-
-    // --- Cabecera: logo oficial (o texto de respaldo) ---
     const logo = await loadOfficialLogo();
-    let cursorY = MARGIN;
-    if (logo) {
-      const logoHeight = 42;
-      const logoWidth = Math.min(
-        320,
-        (logo.width / logo.height) * logoHeight,
-      );
-      doc.addImage(
-        logo.dataUri,
-        "PNG",
-        centerX - logoWidth / 2,
-        cursorY,
-        logoWidth,
-        logoHeight,
-      );
-      cursorY += logoHeight + 16;
-    } else {
-      doc.setFontSize(15);
-      doc.setFont("helvetica", "bold");
-      doc.text("FINCASYA.COM", centerX, cursorY + 14, { align: "center" });
-      cursorY += 34;
-    }
 
-    // --- Título + subtítulo ---
-    doc.setTextColor(17, 17, 17);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("Lista de invitados — Check-in", centerX, cursorY, {
-      align: "center",
-    });
-    cursorY += 16;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(110, 110, 110);
-    doc.text(CHECKIN_GUESTS_PDF_SUBTITLE, centerX, cursorY, {
-      align: "center",
-      maxWidth: pageWidth - MARGIN * 2,
-    });
-    cursorY += 20;
+    let cursorY = drawHeaderBand(doc, logo);
+    cursorY = drawContractBadge(doc, input.contractNumber, cursorY);
+    cursorY = drawPropertyHero(doc, input, cursorY);
+    cursorY = drawDateCards(doc, input.checkInDate, input.checkOutDate, cursorY);
 
-    // --- Tabla de metadatos de la reserva ---
     autoTable(doc, {
       startY: cursorY,
       margin: { left: MARGIN, right: MARGIN },
-      theme: "grid",
-      styles: { fontSize: 9, cellPadding: 5, textColor: [30, 30, 30] },
+      theme: "plain",
+      styles: {
+        fontSize: 9,
+        cellPadding: { top: 6, right: 8, bottom: 6, left: 8 },
+        textColor: BRAND.ink,
+        lineColor: BRAND.line,
+        lineWidth: 0.4,
+      },
       columnStyles: {
         0: {
-          cellWidth: (pageWidth - MARGIN * 2) * 0.34,
+          cellWidth: (PAGE_W - MARGIN * 2) * 0.36,
           fontStyle: "bold",
-          fillColor: [245, 245, 245],
+          textColor: BRAND.muted,
         },
       },
       body: buildMetaRows(input),
     });
 
-    // --- Tabla de personas registradas ---
     const afterMetaY =
       (doc as unknown as { lastAutoTable?: { finalY: number } })
         .lastAutoTable?.finalY ?? cursorY;
+
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(17, 17, 17);
+    doc.setFontSize(11);
+    doc.setTextColor(...BRAND.ink);
     doc.text(
       `Personas registradas (${input.guests.length})`,
       MARGIN,
-      afterMetaY + 24,
+      afterMetaY + 22,
     );
 
     autoTable(doc, {
-      startY: afterMetaY + 32,
+      startY: afterMetaY + 30,
       margin: { left: MARGIN, right: MARGIN },
-      theme: "grid",
-      headStyles: { fillColor: ORANGE, textColor: [255, 255, 255], fontSize: 10 },
-      styles: { fontSize: 9, cellPadding: 5, textColor: [30, 30, 30] },
-      columnStyles: { 0: { cellWidth: 32, halign: "center" } },
+      theme: "striped",
+      headStyles: {
+        fillColor: BRAND.emeraldDark,
+        textColor: BRAND.white,
+        fontSize: 9,
+        fontStyle: "bold",
+        cellPadding: 7,
+      },
+      alternateRowStyles: { fillColor: BRAND.surface },
+      styles: {
+        fontSize: 9,
+        cellPadding: 7,
+        textColor: BRAND.ink,
+        lineColor: BRAND.line,
+        lineWidth: 0.3,
+      },
+      columnStyles: {
+        0: { cellWidth: 28, halign: "center", fontStyle: "bold" },
+        1: { cellWidth: "auto" },
+        2: { cellWidth: "auto" },
+      },
       head: [["#", "Nombre completo", "Documento"]],
       body: buildGuestRows(input),
     });
+
+    const afterGuestsY =
+      (doc as unknown as { lastAutoTable?: { finalY: number } })
+        .lastAutoTable?.finalY ?? afterMetaY;
+    drawFooter(doc, afterGuestsY);
 
     const filename = buildCheckinGuestsPdfFilename(
       input.propertyTitle,

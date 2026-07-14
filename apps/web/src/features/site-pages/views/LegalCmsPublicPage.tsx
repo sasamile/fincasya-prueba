@@ -62,7 +62,7 @@ export function LegalCmsPublicPage({
   return (
     <main className="landing min-h-screen bg-white">
       <LegalHeader />
-      <section className="bg-gradient-to-br from-[#E8571F] to-[#D14A15] px-4 py-14 text-center text-white">
+      <section className="bg-linear-to-br from-[#E8571F] to-[#D14A15] px-4 py-14 text-center text-white">
         <h1 className="mb-2 text-3xl font-extrabold md:text-4xl">{data.heroTitle}</h1>
         {data.heroSubtitle ? (
           <p className="mx-auto max-w-2xl text-sm text-white/90 md:text-base">{data.heroSubtitle}</p>

@@ -82,7 +82,7 @@ export function BlogPublicPage() {
                   href={`/blog/${post.id}`}
                   className="group block cursor-pointer overflow-hidden rounded-xl border bg-card shadow-sm transition-all hover:border-primary/30 hover:shadow-lg"
                 >
-                  <div className="relative aspect-video bg-gradient-to-br from-secondary to-secondary/50">
+                  <div className="relative aspect-video bg-linear-to-br from-secondary to-secondary/50">
                     <BlogFeaturedMedia
                       imageUrl={post.imageUrl}
                       contentHtml={post.content}
