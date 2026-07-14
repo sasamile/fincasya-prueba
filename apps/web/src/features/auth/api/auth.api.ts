@@ -124,8 +124,14 @@ export interface SessionLogEntry {
   logoutAt?: number;
   ipAddress?: string;
   userAgent?: string;
+  sessionToken?: string;
   durationMs: number;
   isActive: boolean;
+  deviceLabel?: string;
+  browser?: string;
+  os?: string;
+  deviceKind?: string;
+  isCurrentSession?: boolean;
 }
 
 export async function getSessionLogs(params?: {
@@ -177,4 +183,29 @@ export async function recordSessionLogout(
  */
 export async function ensureSessionLogged(user: AuthUser): Promise<void> {
   await recordSessionLogin(user);
+}
+
+/** Cierra sesiones concretas seleccionadas en el historial. */
+export async function revokeSelectedSessions(logIds: string[]): Promise<{
+  sessionsDeleted: number;
+  logsClosed: number;
+  skippedOwn: number;
+  skippedInactive: number;
+}> {
+  const { api } = await import('@fincasya/backend/convex/_generated/api');
+  const { convex } = await import('@/lib/convex-client');
+  return convex.mutation(api.adminSessionLogs.revokeSelectedSessions, {
+    logIds: logIds as any,
+  });
+}
+
+/** Cierra todas las sesiones del personal (excepto la tuya y superadmins). */
+export async function revokeAllStaffSessions(): Promise<{
+  usersRevoked: number;
+  sessionsDeleted: number;
+  logsClosed: number;
+}> {
+  const { api } = await import('@fincasya/backend/convex/_generated/api');
+  const { convex } = await import('@/lib/convex-client');
+  return convex.mutation(api.adminSessionLogs.revokeAllStaffSessions, {});
 }

@@ -17,6 +17,11 @@ import {
 import { cn } from '@/lib/utils';
 import { authClient } from '@/lib/auth-client';
 import { useSidebar } from '@/components/ui/sidebar';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 export type AsesorTool =
   | 'contrato'
@@ -31,10 +36,10 @@ export const ASESOR_TOOLS: {
   label: string;
   needsChat: boolean;
 }[] = [
-  { id: 'contrato', icon: FileText, label: 'Generar contrato', needsChat: true },
+  { id: 'contrato', icon: FileText, label: 'Contrato', needsChat: true },
   { id: 'calendario', icon: CalendarDays, label: 'Reservas', needsChat: false },
   { id: 'venta', icon: Link2, label: 'Links de venta', needsChat: false },
-  { id: 'checkin', icon: DoorOpen, label: 'Check-ins', needsChat: false },
+  { id: 'checkin', icon: DoorOpen, label: 'Check-in', needsChat: false },
   { id: 'confirmar', icon: BadgeCheck, label: 'Confirmar reserva', needsChat: false },
 ];
 
@@ -53,26 +58,37 @@ function RailIcon({
   dot?: boolean;
   onClick?: () => void;
 }) {
+  const tooltip = disabled
+    ? `${label} — selecciona un chat primero`
+    : label;
+
   return (
-    <button
-      type="button"
-      title={disabled ? `${label} — selecciona un chat primero` : label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'relative flex h-11 w-11 items-center justify-center rounded-2xl transition-colors',
-        active
-          ? 'bg-primary text-primary-foreground shadow-sm'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-        disabled && 'opacity-40 hover:bg-transparent hover:text-muted-foreground',
-      )}
-    >
-      <Icon className="h-[21px] w-[21px]" strokeWidth={active ? 2.3 : 1.9} />
-      {dot && (
-        <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background" />
-      )}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          disabled={disabled}
+          onClick={onClick}
+          className={cn(
+            'relative flex h-11 w-11 items-center justify-center rounded-2xl transition-colors',
+            active
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            disabled &&
+              'opacity-40 hover:bg-transparent hover:text-muted-foreground',
+          )}
+        >
+          <Icon className="h-[21px] w-[21px]" strokeWidth={active ? 2.3 : 1.9} />
+          {dot && (
+            <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background" />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={8}>
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -134,22 +150,34 @@ export function IconRail({
 
       <div className="flex flex-col items-center gap-3">
         <RailIcon icon={Settings} label="Ajustes" />
-        <button
-          type="button"
-          onClick={() => void handleLogout()}
-          title="Cerrar sesión"
-          aria-label="Cerrar sesión"
-          className="flex h-11 w-11 items-center justify-center rounded-2xl text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
-        >
-          <LogOut className="h-[20px] w-[20px]" strokeWidth={1.9} />
-        </button>
-        <img
-          src="/inbox-avatar.png"
-          alt="FincasYa"
-          title="FincasYa"
-          className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-border/40"
-          draggable={false}
-        />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              aria-label="Cerrar sesión"
+              className="flex h-11 w-11 items-center justify-center rounded-2xl text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+            >
+              <LogOut className="h-[20px] w-[20px]" strokeWidth={1.9} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>
+            Cerrar sesión
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <img
+              src="/inbox-avatar.png"
+              alt="FincasYa"
+              className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-border/40"
+              draggable={false}
+            />
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>
+            FincasYa
+          </TooltipContent>
+        </Tooltip>
       </div>
     </nav>
   );

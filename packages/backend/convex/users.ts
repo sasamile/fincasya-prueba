@@ -3,6 +3,7 @@ import { query, mutation, action } from './_generated/server';
 import { components, api } from './_generated/api';
 // Import the standalone hashing utility from Better Auth
 import { hashPassword } from 'better-auth/crypto';
+import { isSuperAdminRole } from './lib/roles';
 
 /**
  * Reset a user's password using Better Auth's own standalone hasher.
@@ -41,8 +42,10 @@ export const list = query({
         numItems: args.limit ?? 100,
       },
     });
-    // result.page contains the array of users
-    return result.page;
+    // Superadmins (devs) no aparecen en el listado del panel.
+    return (result.page as Array<{ role?: string | null }>).filter(
+      (u) => !isSuperAdminRole(u.role),
+    );
   },
 });
 
@@ -76,6 +79,9 @@ export const update = mutation({
   },
   handler: async (ctx, args) => {
     const { id, ...updates } = args;
+    if (isSuperAdminRole(updates.role)) {
+      throw new Error('No se puede asignar el rol superadmin desde el panel');
+    }
     const cleanUpdates = Object.fromEntries(
       Object.entries(updates).filter(([k, v]) => !(k === 'role' && v === null)),
     );
@@ -107,6 +113,9 @@ export const updateByEmail = mutation({
   },
   handler: async (ctx, args) => {
     const { email, ...updates } = args;
+    if (isSuperAdminRole(updates.role)) {
+      throw new Error('No se puede asignar el rol superadmin desde el panel');
+    }
     const result = await ctx.runMutation(
       components.betterAuth.adapter.updateOne,
       {

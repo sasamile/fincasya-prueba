@@ -32,7 +32,7 @@ Si nos escribes fuera de ese horario, tu mensaje queda recibido y te respondemos
   {
     key: 'sit:mascotas-respuesta',
     situation:
-      'El cliente pregunta si puede llevar mascotas o confirma que lleva una. El mensaje oficial de mascotas se envia TAL CUAL con la tool enviar_politica_mascotas (el bot NO lo redacta ni lo resume). Las mascotas NUNCA frenan el catalogo: con fechas + personas se envia catalogo en el mismo turno (mascotas:true). PROHIBIDO decir "pet friendly".',
+      'El cliente pregunta si puede llevar mascotas o confirma que lleva una. El mensaje oficial de mascotas se envia TAL CUAL con la tool enviar_politica_mascotas (el bot NO lo redacta ni lo resume). LIMITE OFICIAL: maximo 2 mascotas de raza pequeña — con 3 o mas (o razas grandes) NO se promete cupo: un experto valida el caso (escalar_a_humano en el mismo turno). Con 1-2 mascotas pequeñas NUNCA se frena el catalogo: con fechas + personas se envia catalogo en el mismo turno (mascotas:true). PROHIBIDO decir "pet friendly".',
     clientExamples: [
       'Puedo llevar mascotas?',
       'Aceptan perros?',
@@ -132,8 +132,8 @@ Esta información es clave para verificar la disponibilidad según las normas de
       'No tienen nada en ese pueblo?',
       'Busco finca en un municipio donde no hay inventario',
     ],
-    response: `Hola, gusto saludarte. Desafortunadamente, para el sector solicitado no contamos con disponibilidad en este momento🏡
-✅ Si gustas, podemos enviarte opciones increíbles en zonas cercanas para tus fechas`,
+    response: `Lamentablemente, para el sector solicitado no contamos con disponibilidad en este momento 🏡
+✅ Sin embargo, con mucho gusto podemos enviarte opciones increíbles en zonas cercanas para tus fechas. ¿Te gustaría que hiciéramos la búsqueda?`,
   },
   {
     key: 'qr:sectores-disponibles',
@@ -182,7 +182,7 @@ Esta información es clave para verificar la disponibilidad según las normas de
       'Tienen numero para llamar?',
       'Prefiero hablar por telefono',
     ],
-    response: `¡Hola! Un gusto saludarte. Para brindarte un mejor servicio, te atendemos por este medio ya que, al ser un chat center, debemos dejar constancia de todos los detalles de tu reserva 🤝.
+    response: `Un gusto atenderte. Para brindarte un mejor servicio, te atendemos por este medio ya que, al ser un chat center, debemos dejar constancia de todos los detalles de tu reserva 🤝.
 Si te resulta más cómodo, puedes enviarnos audios y con gusto te responderemos de la misma forma 😊`,
   },
   {
@@ -270,9 +270,7 @@ A la mayor brevedad te compartiremos la información detallada de esta casa y ot
       'Para el 31 de diciembre una noche',
       'Finca para recibir el año nuevo',
     ],
-    response: `Hola, gusto saludarte 👋🏻
-
-Por favor ten presente que en temporadas especiales como *Fin de año*, *Navidad* y *puente de Reyes*, los costos y condiciones de alquiler son distintos ☝️🎄
+    response: `Por favor ten presente que en temporadas especiales como *Fin de año*, *Navidad* y *puente de Reyes*, los costos y condiciones de alquiler son distintos ☝️🎄
 
 🏡 Las propiedades tienen una *estancia mínima de noches*, que varía según la fecha:
 
@@ -295,15 +293,20 @@ Si tus fechas cumplen el mínimo, con gusto te compartimos las opciones disponib
   {
     key: 'sit:puente-festivo',
     situation:
-      'El cliente pide fechas que caen en un puente festivo (o una sola noche en puente). Aviso oficial de estancia minima en puentes: minimo 2 noches / 3 dias.',
+      'El cliente pide fechas que caen en un puente festivo con menos noches del mínimo (2). Estructura del aviso: (1) la regla con calidez y el beneficio, (2) propuesta concreta de ajustar la salida con la fecha exacta, (3) cierre corto invitando a responder. NUNCA abre con "Hola" si ya se saludó. Los datos (mes, fecha de salida, personas) se adaptan al caso real.',
     clientExamples: [
       'Sería el 5 de septiembre al 6 de septiembre',
       'Para el puente de agosto una sola noche',
       'Quiero la finca solo el sábado del puente',
+      'Del 16 al 17 de agosto para 20 personas',
     ],
-    response: `Hola buen día, gusto saludarte 🙋
+    response: `Por supuesto, será un gusto ayudarte 😊
 
-🗓️ Por favor no olvides tener presente que para las fechas con puente festivo, las propiedades cuentan con disponibilidad mínimo (2) noches (3) días 🏡`,
+Para el puente festivo de agosto, las reservas tienen una estadía mínima de 2 noches, para que puedas disfrutar con mayor tranquilidad y aprovechar mejor tu experiencia.
+
+¿Te parece bien ajustar la fecha de salida para el 17 de agosto? Así podré compartirte las mejores fincas disponibles para tu grupo de 20 personas ✨🏡
+
+Quedo muy atento a tu respuesta para continuar ayudándote.`,
   },
   {
     key: 'sit:evento-detalles',

@@ -1929,7 +1929,7 @@ export function ManualReservationModal({
                     className="p-0 w-(--radix-popover-trigger-width) min-w-[320px] rounded-2xl overflow-hidden border border-border bg-popover shadow-xl"
                     align="start"
                   >
-                    <div className="p-3 border-b bg-muted/10">
+                    <div className="p-3 border-b border-border bg-muted/10">
                       <div className="relative group">
                         <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground group-focus-within:text-foreground transition-colors" />
                         <Input
@@ -2137,7 +2137,7 @@ export function ManualReservationModal({
                     className="p-0 w-(--radix-popover-trigger-width) min-w-[320px] rounded-2xl overflow-hidden border border-border bg-popover shadow-xl"
                     align="start"
                   >
-                    <div className="p-3 border-b bg-muted/10">
+                    <div className="p-3 border-b border-border bg-muted/10">
                       <div className="relative group">
                         <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground group-focus-within:text-foreground transition-colors" />
                         <Input
@@ -2240,9 +2240,9 @@ export function ManualReservationModal({
                                     Contactos CRM
                                   </p>
                                 )}
-                                {crmContactsFiltered.map((c: any) => (
+                                {crmContactsFiltered.map((c: any, i: number) => (
                                   <button
-                                    key={c._id}
+                                    key={c.id ?? c._id ?? `crm-${c.phone ?? ""}-${c.cedula ?? ""}-${i}`}
                                     type="button"
                                     className="w-full flex items-center gap-4 p-3 rounded-xl transition-all hover:bg-accent/80 text-left group"
                                     onClick={() => applyGuestFromPicker(c)}

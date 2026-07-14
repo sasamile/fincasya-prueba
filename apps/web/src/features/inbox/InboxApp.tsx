@@ -7,11 +7,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
+import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import { Archive, Bot, ChevronRight, MoreVertical, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LoadingArea } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
+import { getAutomationSettings } from '@/features/admin/api/automation-settings.api';
 import { ChatHomeScreen } from '@/features/inbox/components/ChatHomeScreen';
 import { TemplatesModal } from '@/features/inbox/components/TemplatesModal';
 import { ConversationContextMenu } from '@/features/inbox/components/ConversationContextMenu';
@@ -43,6 +45,9 @@ export default function App() {
   const [ctxMenu, setCtxMenu] = useState<CtxTarget | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [pendingTemplatePhone, setPendingTemplatePhone] = useState<string | null>(
+    null,
+  );
   const labels = useQuery(api.labels.listLabels);
 
   const archived = useMemo(
@@ -84,29 +89,55 @@ export default function App() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Escape') return;
-      if (showTemplates) return; // el modal de plantillas maneja su propio Esc
+      if (showTemplates || pendingTemplatePhone) return; // el modal de plantillas maneja su propio Esc
       if (showArchived) { setShowArchived(false); return; }
       setSelectedId(null);
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showArchived, showTemplates]);
+  }, [showArchived, showTemplates, pendingTemplatePhone]);
 
   function openConversation(conv: ConversationRow) {
     setSelectedId(conv.conversationId);
     if (conv.unread > 0) void markRead({ conversationId: conv.conversationId });
   }
 
-  /** Abre el chat cuyo número coincida (herramientas del asesor: check-in, etc.). */
-  function openChatByPhone(phone: string) {
+  /** Abre el chat cuyo número coincida. Si no existe, ofrece iniciar con plantilla
+   * (requiere mensajes/plantillas habilitados en Automatizaciones). */
+  async function openChatByPhone(phone: string) {
     const d = phone.replace(/\D/g, '');
-    if (d.length < 7) return toast.error('Número inválido.');
+    if (d.length < 7) {
+      toast.error('Número inválido.');
+      return;
+    }
     const match = conversations.find((c) => {
       const cd = c.phone.replace(/\D/g, '');
       return cd.endsWith(d.slice(-10)) || d.endsWith(cd.slice(-10));
     });
-    if (!match) return toast.error('No hay un chat con ese número.');
-    openConversation(match);
+    if (match) {
+      openConversation(match);
+      return;
+    }
+
+    try {
+      const settings = await getAutomationSettings();
+      if (!settings.scheduledMessagingEnabled) {
+        toast.error('No hay un chat con ese número', {
+          description:
+            'Para iniciar uno con plantilla, activa Automatizaciones cuando las plantillas estén listas.',
+          action: {
+            label: 'Automatizaciones',
+            onClick: () => {
+              window.open('/admin/automatizaciones', '_blank', 'noopener,noreferrer');
+            },
+          },
+        });
+        return;
+      }
+      setPendingTemplatePhone(phone);
+    } catch {
+      toast.error('No se pudo verificar Automatizaciones. Intenta de nuevo.');
+    }
   }
 
   const globalBotHint = agentSettings?.globalAiEnabled
@@ -132,7 +163,7 @@ export default function App() {
           tool={activeTool}
           conversation={selected}
           onClose={() => setActiveTool(null)}
-          onOpenChat={openChatByPhone}
+          onOpenChat={(phone) => void openChatByPhone(phone)}
         />
       ) : (
       <aside
@@ -309,11 +340,21 @@ export default function App() {
         <ChatHomeScreen />
       )}
 
-      {/* Centro de plantillas de WhatsApp (botón "+") */}
-      {showTemplates && (
+      {/* Centro de plantillas de WhatsApp (botón "+" o número sin chat) */}
+      {(showTemplates || pendingTemplatePhone) && (
         <TemplatesModal
-          conversation={selected}
-          onClose={() => setShowTemplates(false)}
+          conversation={pendingTemplatePhone ? null : selected}
+          phoneTarget={
+            pendingTemplatePhone ? { phone: pendingTemplatePhone } : null
+          }
+          onClose={() => {
+            setShowTemplates(false);
+            setPendingTemplatePhone(null);
+          }}
+          onStarted={(conversationId: Id<'conversations'>) => {
+            setSelectedId(conversationId);
+            setActiveTool(null);
+          }}
         />
       )}
 

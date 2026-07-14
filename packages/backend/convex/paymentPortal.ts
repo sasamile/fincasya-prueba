@@ -297,6 +297,8 @@ async function buildPortalView(ctx: { db: any }, key: string) {
     paymentMedia: media,
     boldLink: booking.paymentPortalConfig?.boldLink ?? null,
     boldSurcharge: booking.paymentPortalConfig?.boldSurcharge ?? null,
+    clientPaymentProofUploadEnabled:
+      booking.clientPaymentProofUploadEnabled === true,
     receipts: (booking.paymentPortalReceipts ?? []).map((r) => ({
       id: r.id,
       bankAccountId: r.bankAccountId,
@@ -333,6 +335,10 @@ export const submitReceipt = internalMutation({
   handler: async (ctx, args) => {
     const booking = await findBooking(ctx, args.key);
     if (!booking) return { ok: false as const, reason: 'not_found' };
+
+    if (booking.clientPaymentProofUploadEnabled !== true) {
+      return { ok: false as const, reason: 'upload_disabled' };
+    }
 
     const url = args.receiptUrl.trim();
     if (!url) return { ok: false as const, reason: 'missing_receipt' };

@@ -543,6 +543,12 @@ export const validatePayment = internalMutation({
     await ctx.scheduler.runAfter(0, internal.opportunities.markWon, {
       saleLinkId: link._id,
     });
+    // Correo al cliente: pago validado.
+    await ctx.scheduler.runAfter(
+      0,
+      internal.notifications.emailClientPaymentValidated,
+      { saleLinkId: link._id },
+    );
     return { ok: true };
   },
 });
@@ -577,6 +583,12 @@ export const validatePaymentAdmin = mutation({
     await ctx.scheduler.runAfter(0, internal.opportunities.markWon, {
       saleLinkId: link._id,
     });
+    // Correo al cliente: pago validado.
+    await ctx.scheduler.runAfter(
+      0,
+      internal.notifications.emailClientPaymentValidated,
+      { saleLinkId: link._id },
+    );
     return { ok: true };
   },
 });
@@ -789,6 +801,13 @@ export const submitClientData = mutation({
       ciudad: args.ciudad,
       fechaNacimiento,
     });
+
+    // Notifica al admin que hay un soporte de pago por revisar.
+    await ctx.scheduler.runAfter(
+      0,
+      internal.notifications.notifyAdminSaleLinkPayment,
+      { saleLinkId: link._id },
+    );
 
     return { ok: true, appended: !isFirstSubmission };
   },
@@ -1519,6 +1538,100 @@ export const getPublicByToken = query({
       checkinCompleted: link.checkinCompleted,
       checkinGuests: link.checkinGuests,
     };
+  },
+});
+
+/**
+ * Página pública `/validar-pago/[token]?key=…` — no requiere sesión admin.
+ * Quien tenga el enlace del correo puede ver el resumen y validar.
+ */
+export const getPaymentReviewByKey = query({
+  args: { token: v.string(), validationKey: v.string() },
+  handler: async (ctx, { token, validationKey }) => {
+    const trimmedToken = token.trim();
+    const trimmedKey = validationKey.trim();
+    if (!trimmedToken || !trimmedKey) {
+      return { ok: false as const, reason: 'key_required' as const };
+    }
+
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', trimmedToken))
+      .unique();
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    if (link.paymentValidationKey?.trim() !== trimmedKey) {
+      return { ok: false as const, reason: 'invalid_key' as const };
+    }
+
+    let propertyName: string | undefined;
+    try {
+      const prop = await ctx.db.get(link.propertyId);
+      propertyName =
+        (prop as { title?: string; nombre?: string } | null)?.title ??
+        (prop as { title?: string; nombre?: string } | null)?.nombre;
+    } catch {
+      /* no crítico */
+    }
+
+    return {
+      ok: true as const,
+      token: link.token,
+      clientName: link.clientData?.nombre,
+      clientEmail: link.clientData?.email,
+      propertyName,
+      totalValue: link.totalValue,
+      proofAmount: link.paymentProofAmount,
+      proofFileName: link.paymentProofFileName,
+      proofMimeType: link.paymentProofMimeType,
+      checkIn: link.checkIn,
+      checkOut: link.checkOut,
+      guests: link.guests,
+      createdByName: link.createdByName,
+      paymentValidated: !!link.paymentValidated,
+      hasProof: !!link.paymentProofUrl?.trim(),
+    };
+  },
+});
+
+/** Valida el pago desde el enlace del correo (token + key), sin login admin. */
+export const validatePaymentByKey = mutation({
+  args: {
+    token: v.string(),
+    validationKey: v.string(),
+    validatedBy: v.optional(v.string()),
+  },
+  handler: async (ctx, { token, validationKey, validatedBy }) => {
+    const trimmedToken = token.trim();
+    const trimmedKey = validationKey.trim();
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', trimmedToken))
+      .unique();
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    if (link.paymentValidationKey !== trimmedKey) {
+      return { ok: false as const, reason: 'invalid_key' as const };
+    }
+    if (link.paymentValidated) {
+      return { ok: true as const, alreadyValidated: true as const };
+    }
+    const by = String(validatedBy ?? '').trim() || 'correo magic link';
+    await ctx.db.patch(link._id, {
+      paymentValidated: true,
+      paymentValidatedAt: Date.now(),
+      paymentValidatedBy: by,
+      clientStep: 4,
+      updatedAt: Date.now(),
+    });
+    await provisionBookingOnPayment(ctx, link._id);
+    await ctx.scheduler.runAfter(0, internal.opportunities.markWon, {
+      saleLinkId: link._id,
+    });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.notifications.emailClientPaymentValidated,
+      { saleLinkId: link._id },
+    );
+    return { ok: true as const };
   },
 });
 

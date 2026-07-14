@@ -1,10 +1,9 @@
 import { isReservationEndedForCheckin } from "@/features/checkin/utils/checkin-portal-access";
+import { buildOgImageUrl } from "@/lib/og-image";
 
 const CONVEX_SITE_URL =
   process.env.NEXT_PUBLIC_CONVEX_SITE_URL ??
   "https://modest-husky-871.convex.site";
-
-const DEFAULT_OG_IMAGE = "https://fincasya.com/icons/fincasya-link-logo.png";
 
 export const CHECKIN_EXPIRED_REDIRECT_URL = "https://fincasya.com";
 
@@ -68,14 +67,7 @@ export async function isCheckinPortalExpired(reference: string): Promise<boolean
   }
 }
 
+/** @deprecated Prefer `buildOgImageUrl` from `@/lib/og-image`. */
 export function buildCheckinOgImageUrl(imageUrl: string | null | undefined) {
-  const absoluteImageUrl = imageUrl
-    ? imageUrl.startsWith("http")
-      ? imageUrl
-      : `https://fincasya.com${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`
-    : DEFAULT_OG_IMAGE;
-
-  if (!imageUrl) return absoluteImageUrl;
-
-  return `https://images.weserv.nl/?url=${encodeURIComponent(absoluteImageUrl)}&w=800&h=418&fit=cover&output=jpg&q=75`;
+  return buildOgImageUrl(imageUrl);
 }

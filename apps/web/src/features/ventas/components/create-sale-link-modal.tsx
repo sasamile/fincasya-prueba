@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -142,6 +142,8 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
+  /** `inbox` = tema oscuro WhatsApp, más compacto (desde admin/inbox). */
+  variant?: "admin" | "inbox";
 }
 
 function formatCOP(n: number) {
@@ -377,6 +379,7 @@ function HolderSection({
   onAddAccount,
   addLabel,
   emptyHint,
+  headerExtra,
 }: {
   title: string;
   description?: string;
@@ -390,6 +393,7 @@ function HolderSection({
   onAddAccount?: () => void;
   addLabel?: string;
   emptyHint?: string;
+  headerExtra?: ReactNode;
 }) {
   return (
     <div className="space-y-2">
@@ -400,7 +404,10 @@ function HolderSection({
               {title}
             </p>
             {badge ? (
-              <Badge variant="outline" className="text-[9px] font-semibold">
+              <Badge
+                variant="secondary"
+                className="border border-border/60 text-[9px] font-semibold"
+              >
                 {badge}
               </Badge>
             ) : null}
@@ -414,7 +421,7 @@ function HolderSection({
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 shrink-0 rounded-lg px-2 text-[10px] font-bold"
+            className="h-7 shrink-0 rounded-lg border-border/60 px-2 text-[10px] font-bold"
             onClick={onAddAccount}
           >
             <Plus className="mr-1 h-3 w-3" />
@@ -422,6 +429,7 @@ function HolderSection({
           </Button>
         ) : null}
       </div>
+      {headerExtra}
       {holders.length > 0 ? (
         <PaymentHoldersAccordion
           holders={holders}
@@ -438,7 +446,13 @@ function HolderSection({
   );
 }
 
-export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
+export function CreateSaleLinkModal({
+  open,
+  onOpenChange,
+  onCreated,
+  variant = "admin",
+}: Props) {
+  const isInbox = variant === "inbox";
   const [propertySearch, setPropertySearch] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [bankDialogOpen, setBankDialogOpen] = useState(false);
@@ -538,6 +552,16 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
 
   const { fincasya: fincasyaHolders, hernan: hernanHolders, other: otherHolders } =
     useMemo(() => splitGlobalHolders(globalHolders), [globalHolders]);
+
+  // Misma empresa: Angela y Hernán son titulares del catálogo empresa (no
+  // bloques separados — las cuentas de Hernán = cuentas de la empresa).
+  const empresaHolders = useMemo(
+    () =>
+      [...fincasyaHolders, ...hernanHolders].sort((a, b) =>
+        a.name.localeCompare(b.name, "es"),
+      ),
+    [fincasyaHolders, hernanHolders],
+  );
 
   const ownerHolders = useMemo(
     () => groupAccountsByHolder(ownerBankAccounts),
@@ -852,19 +876,30 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
   };
 
   const hasAnyBankHolders =
-    fincasyaHolders.length > 0 ||
-    hernanHolders.length > 0 ||
+    empresaHolders.length > 0 ||
     otherHolders.length > 0 ||
     ownerHolders.length > 0;
 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="admin flex max-h-[92vh] w-[min(96vw,56rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
-        <DialogHeader className="shrink-0 border-b border-border bg-muted/30 px-6 py-4 text-left">
-          <DialogTitle className="text-base font-bold">Crear link de venta</DialogTitle>
-          <p className="text-xs text-muted-foreground">
-            El cliente abre el link, completa sus datos y sube el comprobante de pago.
+        <DialogContent
+          className={cn(
+            "flex max-h-[min(88vh,720px)] w-[min(96vw,42rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none",
+            isInbox
+              ? "inbox z-100 border-border bg-card text-foreground shadow-2xl"
+              : "admin",
+          )}
+        >
+        <DialogHeader
+          className={cn(
+            "shrink-0 border-b border-border/60 px-4 py-3 text-left sm:px-5",
+            isInbox ? "bg-card" : "bg-background",
+          )}
+        >
+          <DialogTitle className="text-[15px] font-bold">Crear link de venta</DialogTitle>
+          <p className="text-[11px] text-muted-foreground">
+            El cliente abre el link, completa sus datos y sube el comprobante.
           </p>
         </DialogHeader>
 
@@ -873,24 +908,24 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
             onSubmit={form.handleSubmit(onSubmit)}
             className="flex min-h-0 flex-1 flex-col"
           >
-            <div className="scrollbar-hide min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 py-4">
+            <div className="scrollbar-hide min-h-0 flex-1 space-y-3.5 overflow-y-auto overflow-x-hidden px-4 py-3 sm:px-5">
             {/* Finca — mismo patrón que contrato */}
             <FormField
               control={form.control}
               name="propertyId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Finca *</FormLabel>
+                  <FormLabel className="text-xs">Finca *</FormLabel>
                   <Select
                     onValueChange={field.onChange}
                     value={field.value || undefined}
                   >
                     <FormControl>
-                      <SelectTrigger className="group h-auto! min-h-20 w-full whitespace-normal rounded-2xl border border-border bg-muted/40 py-3 pl-3 pr-10 text-left **:data-[slot=select-value]:line-clamp-none **:data-[slot=select-value]:items-start **:data-[slot=select-value]:whitespace-normal">
-                        <div className="flex min-h-0 w-full min-w-0 items-center gap-3 text-left">
+                      <SelectTrigger className="group h-auto! min-h-12 w-full whitespace-normal rounded-xl border border-border bg-background py-2 pl-2.5 pr-9 text-left **:data-[slot=select-value]:line-clamp-none **:data-[slot=select-value]:items-start **:data-[slot=select-value]:whitespace-normal">
+                        <div className="flex min-h-0 w-full min-w-0 items-center gap-2.5 text-left">
                           {selectedProperty ? (
                             <>
-                              <div className="relative size-14 shrink-0 overflow-hidden rounded-xl border border-border shadow-sm">
+                              <div className="relative size-10 shrink-0 overflow-hidden rounded-lg border border-border">
                                 {selectedProperty.images?.[0] ? (
                                   <img
                                     src={selectedProperty.images[0]}
@@ -899,12 +934,12 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
                                   />
                                 ) : (
                                   <div className="flex h-full w-full items-center justify-center bg-muted">
-                                    <Home className="h-6 w-6 text-muted-foreground" />
+                                    <Home className="h-4 w-4 text-muted-foreground" />
                                   </div>
                                 )}
                               </div>
-                              <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
-                                <span className="line-clamp-2 text-left text-sm font-bold leading-snug sm:text-base">
+                              <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
+                                <span className="line-clamp-1 text-left text-sm font-bold leading-snug">
                                   {selectedProperty.title}
                                 </span>
                                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
@@ -921,27 +956,30 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
                     <SelectContent
                       position="popper"
                       sideOffset={4}
-                      className="z-200 w-(--radix-select-trigger-width) overflow-hidden rounded-2xl p-2"
+                      className={cn(
+                        "z-200 w-(--radix-select-trigger-width) overflow-hidden rounded-xl p-2",
+                        isInbox && "inbox border-border bg-card text-foreground",
+                      )}
                     >
-                      <div className="sticky top-0 z-10 mb-2 border-b bg-popover p-2">
+                      <div className="sticky top-0 z-10 mb-2 border-b border-border bg-popover p-2">
                         <Input
                           placeholder="Buscar fincas por nombre o código..."
                           value={propertySearch}
                           onChange={(e) => setPropertySearch(e.target.value)}
                           onKeyDown={(e) => e.stopPropagation()}
-                          className="h-10 rounded-xl"
+                          className="h-9 rounded-lg"
                         />
                       </div>
-                      <div className="max-h-[320px] space-y-1 overflow-y-auto">
+                      <div className="max-h-[240px] space-y-1 overflow-y-auto">
                         {isLoadingProperties ? (
-                          <div className="flex flex-col items-center gap-2 p-8">
-                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                          <div className="flex flex-col items-center gap-2 p-6">
+                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                             <span className="text-xs text-muted-foreground">
                               Cargando inventario...
                             </span>
                           </div>
                         ) : filteredProperties.length === 0 ? (
-                          <div className="p-8 text-center text-xs text-muted-foreground">
+                          <div className="p-6 text-center text-xs text-muted-foreground">
                             No se encontraron fincas.
                           </div>
                         ) : (
@@ -1037,7 +1075,13 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
                           </Button>
                         </FormControl>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
+                      <PopoverContent
+                        className={cn(
+                          "w-auto p-0",
+                          isInbox && "inbox border-border bg-card text-foreground",
+                        )}
+                        align="start"
+                      >
                         <Calendar
                           mode="single"
                           selected={field.value}
@@ -1082,7 +1126,13 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
                           </Button>
                         </FormControl>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
+                      <PopoverContent
+                        className={cn(
+                          "w-auto p-0",
+                          isInbox && "inbox border-border bg-card text-foreground",
+                        )}
+                        align="start"
+                      >
                         <Calendar
                           mode="single"
                           selected={field.value}
@@ -1321,45 +1371,46 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
                       <strong>Configuración → Contrato</strong>.
                     </p>
                   ) : (
-                    <div className="scrollbar-hide max-h-80 space-y-4 overflow-x-hidden overflow-y-auto">
+                    <div className="scrollbar-hide max-h-52 space-y-3 overflow-x-hidden overflow-y-auto">
                       <HolderSection
-                        title="Empresa · FincasYa"
-                        description="Cuentas de Angela / administración central"
+                        title="Empresa"
+                        description="Cuentas de FincasYa (Angela y Hernán — mismo catálogo empresa)"
                         badge="Empresa"
-                        holders={fincasyaHolders}
-                        sectionPrefix="fincasya"
+                        holders={empresaHolders}
+                        sectionPrefix="empresa"
                         selectedBankIds={selectedBankIds}
                         globalAccountImages={globalAccountImages}
                         onToggleAccount={toggleBankAccount}
                         onToggleHolder={(holderId, checked) =>
                           toggleHolderAccounts(
-                            fincasyaHolders,
+                            empresaHolders,
                             holderId,
                             checked,
                           )
                         }
-                        onAddAccount={() => openBankDialog("fincasya")}
-                        addLabel="Cuenta empresa"
-                        emptyHint="Sin cuentas de FincasYa. Agrega una con el botón."
-                      />
-
-                      <Separator />
-
-                      <HolderSection
-                        title="Empresa · Hernán Aguilera"
-                        description="Cuentas de Hernán (empresa, titular aparte)"
-                        badge="Empresa"
-                        holders={hernanHolders}
-                        sectionPrefix="hernan"
-                        selectedBankIds={selectedBankIds}
-                        globalAccountImages={globalAccountImages}
-                        onToggleAccount={toggleBankAccount}
-                        onToggleHolder={(holderId, checked) =>
-                          toggleHolderAccounts(hernanHolders, holderId, checked)
+                        onAddAccount={
+                          empresaHolders.length > 0
+                            ? () => openBankDialog("fincasya")
+                            : undefined
                         }
-                        onAddAccount={() => openBankDialog("hernan")}
-                        addLabel="Cuenta Hernán"
-                        emptyHint="Sin cuentas de Hernán. Agrega una con el botón."
+                        addLabel="Cuenta empresa"
+                        emptyHint="Sin cuentas de empresa. Agrega una con el botón."
+                        headerExtra={
+                          empresaHolders.length === 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 rounded-lg border-border/60 px-2 text-[10px] font-bold"
+                                onClick={() => openBankDialog("fincasya")}
+                              >
+                                <Plus className="mr-1 h-3 w-3" />
+                                Cuenta empresa
+                              </Button>
+                            </div>
+                          ) : undefined
+                        }
                       />
 
                       {otherHolders.length > 0 ? (
@@ -1428,16 +1479,17 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
               name="notes"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Notas de negociación (internas)</FormLabel>
+                  <FormLabel className="text-xs">Notas de negociación (internas)</FormLabel>
                   <FormControl>
                     <Textarea
                       placeholder="Detalles del acuerdo, descuentos aplicados, etc."
-                      rows={3}
+                      rows={2}
                       value={field.value}
                       onChange={field.onChange}
                       onBlur={field.onBlur}
                       name={field.name}
                       ref={field.ref}
+                      className="min-h-16 resize-none text-sm"
                     />
                   </FormControl>
                 </FormItem>
@@ -1446,15 +1498,22 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
 
             </div>
 
-            <DialogFooter className="shrink-0 border-t bg-background px-6 py-4">
+            <DialogFooter
+              className={cn(
+                "shrink-0 gap-2 border-t border-border/60 px-4 py-3 sm:px-5",
+                isInbox ? "bg-card" : "bg-background",
+              )}
+            >
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
+                className="h-9"
                 onClick={() => onOpenChange(false)}
               >
                 Cancelar
               </Button>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" size="sm" className="h-9" disabled={submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1475,6 +1534,9 @@ export function CreateSaleLinkModal({ open, onOpenChange, onCreated }: Props) {
       prefill={bankDialogPrefill}
       lockHolderFields={bankDialogTarget !== "other"}
       onSave={handleBankDialogSave}
+      contentClassName={
+        isInbox ? "inbox z-110 border-border bg-card text-foreground" : undefined
+      }
     />
     </>
   );

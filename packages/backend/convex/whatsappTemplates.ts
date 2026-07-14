@@ -8,11 +8,24 @@
  *  - POST /v2/whatsapp/messages/sendDirectly type=template (enviar)
  *  - GET  /v2/whatsapp/phoneNumbers                     (resolver wabaId)
  */
-import { action, internalMutation, internalQuery } from './_generated/server';
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+} from './_generated/server';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
 
 const ADVISOR_SENDER_ID = 'panel-Experto';
+
+/** Normaliza a dígitos; celulares locales CO (10 dígitos que empiezan en 3) → 57… */
+function normalizeOutboundPhone(raw: string | undefined | null): string {
+  const cleaned = String(raw ?? '').replace(/[^\d]/g, '');
+  if (!cleaned) return '';
+  if (cleaned.length === 10 && cleaned.startsWith('3')) return `57${cleaned}`;
+  return cleaned;
+}
 
 function requireYcloudEnv() {
   const apiKey = process.env.YCLOUD_API_KEY;
@@ -296,5 +309,106 @@ export const sendTemplate = action({
       templateName: name,
     });
     return { ok: true };
+  },
+});
+
+/**
+ * Busca o crea contacto + conversación WhatsApp para un teléfono.
+ * Sirve para iniciar un chat nuevo enviando una plantilla cuando el número
+ * aún no tiene conversación en el inbox.
+ */
+export const ensureConversationByPhone = mutation({
+  args: {
+    phone: v.string(),
+    name: v.optional(v.string()),
+  },
+  handler: async (ctx, { phone, name }) => {
+    const normalized = normalizeOutboundPhone(phone);
+    if (normalized.length < 10) {
+      throw new Error('Número de teléfono inválido');
+    }
+    const last10 = normalized.slice(-10);
+    const now = Date.now();
+
+    const exact = await ctx.db
+      .query('contacts')
+      .withIndex('by_phone', (q) => q.eq('phone', normalized))
+      .first();
+
+    let contact = exact;
+    if (!contact) {
+      // Variantes comunes: local 10 dígitos y con indicativo 57.
+      for (const candidate of [last10, `57${last10}`]) {
+        if (candidate === normalized) continue;
+        const hit = await ctx.db
+          .query('contacts')
+          .withIndex('by_phone', (q) => q.eq('phone', candidate))
+          .first();
+        if (hit) {
+          contact = hit;
+          break;
+        }
+      }
+    }
+
+    let createdContact = false;
+    if (!contact) {
+      const contactId = await ctx.db.insert('contacts', {
+        phone: normalized,
+        name: name?.trim() || normalized,
+        createdAt: now,
+      });
+      contact = await ctx.db.get(contactId);
+      createdContact = true;
+    } else if (name?.trim() && (!contact.name || contact.name === contact.phone)) {
+      await ctx.db.patch(contact._id, { name: name.trim(), updatedAt: now });
+      contact = (await ctx.db.get(contact._id))!;
+    }
+    if (!contact) throw new Error('No se pudo crear el contacto');
+
+    // Preferir teléfono E.164 si el viejo no lo estaba.
+    if (contact.phone !== normalized && normalizeOutboundPhone(contact.phone) === normalized) {
+      await ctx.db.patch(contact._id, { phone: normalized, updatedAt: now });
+    }
+
+    const conversations = await ctx.db
+      .query('conversations')
+      .withIndex('by_contact', (q) => q.eq('contactId', contact!._id))
+      .collect();
+    const existing =
+      conversations
+        .filter((c) => !c.deletedAt && c.channel !== 'web')
+        .sort(
+          (a, b) =>
+            (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt),
+        )[0] ?? null;
+
+    if (existing) {
+      return {
+        conversationId: existing._id,
+        phone: contact.phone,
+        name: contact.name,
+        created: false as const,
+        createdContact,
+      };
+    }
+
+    const conversationId = await ctx.db.insert('conversations', {
+      contactId: contact._id,
+      channel: 'whatsapp',
+      status: 'human',
+      operationalState: 'pending_data',
+      aiManualOverride: false,
+      createdAt: now,
+      lastMessageAt: now,
+    });
+
+    return {
+      conversationId,
+      phone: contact.phone,
+      name: contact.name,
+      created: true as const,
+      createdContact,
+    };
   },
 });

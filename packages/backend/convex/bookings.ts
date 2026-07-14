@@ -220,6 +220,8 @@ export const list = query({
                 title: property.title,
                 location: property.location,
                 image: firstImage,
+                requiresGuestList:
+                  (property as { requiresGuestList?: boolean }).requiresGuestList,
                 propietarioNombre: ownerContact.propietarioNombre ?? null,
                 propietarioTelefono: ownerContact.propietarioTelefono ?? null,
                 propietarioTratamiento:
@@ -1535,6 +1537,36 @@ export const setGuestListUnlocked = mutation({
       updatedAt: Date.now(),
     });
     return { ok: true as const, guestListUnlocked: args.unlocked };
+  },
+});
+
+/** Toggle: el cliente puede subir soportes de pago en el portal (vs solo WhatsApp). */
+export const setClientPaymentProofUpload = mutation({
+  args: { bookingId: v.id('bookings'), enabled: v.boolean() },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) throw new Error('Reserva no encontrada');
+    await ctx.db.patch(args.bookingId, {
+      clientPaymentProofUploadEnabled: args.enabled,
+      updatedAt: Date.now(),
+    });
+    return {
+      ok: true as const,
+      clientPaymentProofUploadEnabled: args.enabled,
+    };
+  },
+});
+
+/** Marca/desmarca el mensaje al propietario (/anfitrion) como enviado. */
+export const markOwnerPortalSent = mutation({
+  args: { id: v.id('bookings'), sent: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const sent = args.sent ?? true;
+    await ctx.db.patch(args.id, {
+      ownerPortalSentAt: sent ? Date.now() : undefined,
+      updatedAt: Date.now(),
+    });
+    return { ok: true as const, sent };
   },
 });
 

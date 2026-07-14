@@ -6,13 +6,15 @@ import { es } from "date-fns/locale";
 import {
   CheckCircle2,
   Clock,
+  Eye,
+  FileText,
   Loader2,
   Mail,
-  ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { saleLinkDocumentPreviewSrc } from "@/lib/sale-link-document-preview";
+import { SaleLinkDocumentViewerDialog } from "./sale-link-document-viewer";
 import type { SaleLinkPublicData } from "./venta-page-content";
 
 interface Props {
@@ -22,7 +24,7 @@ interface Props {
 }
 
 export function StepEnRevision({ data, onViewStep }: Props) {
-  const [resending, setResending] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   const submittedAt = data.paymentProofSubmittedAt
     ? format(new Date(data.paymentProofSubmittedAt), "d 'de' MMMM, h:mm a", {
@@ -30,15 +32,14 @@ export function StepEnRevision({ data, onViewStep }: Props) {
       })
     : null;
 
-  const resendAdminPaymentAlert = async () => {
-    setResending(true);
-    try {
-      // TODO(etapa-2): endpoint real de reenvío
-      toast.success("Le avisamos a tu asesor.");
-    } finally {
-      setResending(false);
-    }
-  };
+  const proofFileName = data.paymentProofFileName?.trim() || "comprobante";
+  const proofPreviewSrc = saleLinkDocumentPreviewSrc(
+    data.token,
+    "payment-proof",
+  );
+  const proofMime =
+    data.paymentProofs?.find((p) => p.fileName === proofFileName)?.mimeType ??
+    data.paymentProofs?.[0]?.mimeType;
 
   return (
     <div className="space-y-6">
@@ -72,6 +73,30 @@ export function StepEnRevision({ data, onViewStep }: Props) {
         ) : null}
       </div>
 
+      {data.paymentProofSubmitted ? (
+        <div className="rounded-xl border bg-card p-4 space-y-3 shadow-sm">
+          <div className="flex items-start gap-3">
+            <FileText className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Tu comprobante</p>
+              <p className="text-xs text-muted-foreground truncate mt-0.5">
+                {proofFileName}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setViewerOpen(true)}
+            className="w-full sm:w-auto"
+          >
+            <Eye className="w-4 h-4 mr-2" />
+            Ver comprobante aquí
+          </Button>
+        </div>
+      ) : null}
+
       <div className="rounded-2xl bg-amber-50 border border-amber-200 p-6 text-center space-y-4">
         <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
           <Clock className="w-8 h-8 text-amber-500 animate-pulse" />
@@ -97,50 +122,7 @@ export function StepEnRevision({ data, onViewStep }: Props) {
         </div>
       </div>
 
-      <div className="rounded-xl bg-card p-4 space-y-3 text-sm shadow-sm">
-        <div className="flex items-start gap-3">
-          <ShieldCheck className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-          <p className="text-muted-foreground">
-            Si el equipo aún no recibió el correo con tu comprobante, puedes
-            reenviarlo. Llegará al buzón del administrador con un botón{" "}
-            <strong className="text-foreground">Validar pago</strong> para
-            aprobar y liberar el siguiente paso de tu reserva.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={resending}
-          onClick={() => void resendAdminPaymentAlert()}
-          className="w-full sm:w-auto"
-        >
-          {resending ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Reenviando al equipo...
-            </>
-          ) : (
-            <>
-              <Mail className="w-4 h-4 mr-2" />
-              Reenviar comprobante al equipo para validación
-            </>
-          )}
-        </Button>
-      </div>
-
-      {data.clientData?.email ? (
-        <div className="rounded-xl bg-muted/20 p-4 text-sm text-muted-foreground shadow-sm">
-          <div className="flex items-start gap-3">
-            <Mail className="w-4 h-4 mt-0.5 shrink-0" />
-            <p>
-              También enviamos confirmación a{" "}
-              <strong className="text-foreground">{data.clientData.email}</strong>
-              . Revisa spam si no la ves.
-            </p>
-          </div>
-        </div>
-      ) : null}
+   
 
       <div className="rounded-xl bg-card p-4 space-y-3 shadow-sm">
         <p className="text-sm font-semibold flex items-center gap-2">
@@ -217,6 +199,15 @@ export function StepEnRevision({ data, onViewStep }: Props) {
           </Button>
         </div>
       ) : null}
+
+      <SaleLinkDocumentViewerDialog
+        open={viewerOpen}
+        onOpenChange={setViewerOpen}
+        title="Tu comprobante de pago"
+        fileName={proofFileName}
+        mimeType={proofMime}
+        previewSrc={proofPreviewSrc}
+      />
     </div>
   );
 }

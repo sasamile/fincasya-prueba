@@ -23,7 +23,7 @@ export const tables = {
     /**
      * Rol interno del usuario. String flexible: la app maneja varios roles
      * (admin, vendedor, asesor_limitado, contabilidad, propietario, client,
-     * user, operador, assistant) y pueden crecer. No usar unión de literales
+     * user, operador, assistant, superadmin) y pueden crecer. No usar unión de literales
      * aquí para no romper la creación de usuarios cuando se agregue un rol.
      */
     role: v.optional(v.union(v.null(), v.string())),

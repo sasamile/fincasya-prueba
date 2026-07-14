@@ -39,10 +39,11 @@ export const ADMIN_NAV_PERMISSIONS: Record<
   "/admin/reviews": { module: "reviews", action: "read" },
   "/admin/notifications": { module: "inbox", action: "read" },
   "/admin/whatsapp-temporal-message": { module: "inbox", action: "read" },
+  "/admin/automatizaciones": "admin_only",
 };
 
 export function isFullAdminRole(role: string | undefined): boolean {
-  return role === "admin" || role === "assistant";
+  return role === "admin" || role === "assistant" || role === "superadmin";
 }
 
 export function hasModulePermission(
@@ -135,6 +136,7 @@ export const ADMIN_ROUTE_PRIORITY = [
   "/admin/sections",
   "/admin/notifications",
   "/admin/whatsapp-temporal-message",
+  "/admin/automatizaciones",
   "/admin/users",
   "/admin/access-logs",
 ] as const;

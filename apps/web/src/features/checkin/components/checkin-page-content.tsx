@@ -94,6 +94,7 @@ type PaymentPortalSnapshot = {
   bankAccounts?: CheckinBankAccount[];
   boldLink?: string | null;
   boldSurcharge?: number | null;
+  clientPaymentProofUploadEnabled?: boolean;
 };
 
 type GuestRow = {
@@ -1031,6 +1032,9 @@ export function CheckinPageContent({
               reference={reference}
               boldLink={paymentPortal?.boldLink}
               boldSurcharge={paymentPortal?.boldSurcharge}
+              allowPaymentProofUpload={
+                paymentPortal?.clientPaymentProofUploadEnabled === true
+              }
               onPendingReceiptsChange={setPendingReceipts}
             />
 

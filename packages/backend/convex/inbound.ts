@@ -10,6 +10,7 @@ import {
   ineligibilityLabel,
   isConversationEligibleForAi,
 } from './lib/agentEligibility';
+import { isAppAutoReply } from './lib/appAutoReply';
 
 const AGENT_DEBOUNCE_MS = 7000;
 const SETTINGS_KEY = 'default';
@@ -30,11 +31,11 @@ function titleCase(s: string): string {
     .join(' ');
 }
 
-/** Normaliza el tratamiento registrado ("Sr", "sra", "señora"...) a señor/señora. */
+/** Normaliza el tratamiento registrado ("Sr", "señora"...) a Sr./Sra. (abreviado). */
 function normalizeTratamiento(raw?: string): string {
   const t = (raw ?? '').trim().toLowerCase().replace(/\./g, '');
-  if (t === 'sr' || t === 'señor' || t === 'senor') return 'señor';
-  if (t === 'sra' || t === 'señora' || t === 'senora') return 'señora';
+  if (t === 'sr' || t === 'señor' || t === 'senor') return 'Sr.';
+  if (t === 'sra' || t === 'señora' || t === 'senora') return 'Sra.';
   return '';
 }
 
@@ -45,7 +46,7 @@ function buildOwnerGreeting(name?: string, tratamiento?: string): string {
   const t = normalizeTratamiento(tratamiento);
   const nombreMostrado = n ? `${t ? `${t} ` : ''}${n}` : '';
   const saludo = nombreMostrado ? `¡Hola, ${nombreMostrado}!` : '¡Hola!';
-  return `${saludo} 🏡✨ Te saluda el equipo de FincasYa.com. En un momentito uno de nuestros Expertos se comunica contigo para atenderte personalmente 🤝`;
+  return `${saludo} 🏡✨ Te saluda el equipo de FincasYa.com. En un momento uno de nuestros Expertos se comunica contigo para atenderte personalmente 🤝`;
 }
 
 /** Orden de estados de WhatsApp: solo se avanza hacia adelante, nunca atrás. */
@@ -100,10 +101,43 @@ export const setMessageReaction = internalMutation({
 });
 
 /**
+ * Migración one-shot: los mensajes de ausencia capturados ANTES de detectar
+ * auto-replies quedaron como Experto ('ycloud_smb_echo' + sentByUserId) y
+ * siguen bloqueando el welcome/la elegibilidad en esas conversaciones.
+ * Los re-marca como automáticos. Correr con:
+ *   bunx convex run inbound:fixAutoReplyEchoes
+ */
+export const fixAutoReplyEchoes = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    // El echo de coexistencia existe desde el 13-jul-2026 ~22:45 (Bogotá).
+    const since = Date.parse('2026-07-14T03:00:00Z');
+    const recent = await ctx.db
+      .query('messages')
+      .withIndex('by_creation_time', (q) => q.gte('_creationTime', since))
+      .collect();
+    let fixed = 0;
+    for (const m of recent) {
+      const source = (m.metadata as { source?: string } | null)?.source;
+      if (source !== 'ycloud_smb_echo') continue;
+      if (!isAppAutoReply(m.content)) continue;
+      await ctx.db.patch(m._id, {
+        sentByUserId: undefined,
+        metadata: { source: 'ycloud_smb_echo_auto' },
+      });
+      fixed++;
+    }
+    return { revisados: recent.length, corregidos: fixed };
+  },
+});
+
+/**
  * Mensaje enviado por el EQUIPO desde la app de WhatsApp Business
  * (coexistencia YCloud: evento whatsapp.smb.message.echoes). Se guarda como
  * mensaje de Experto para que el panel lo muestre, y el bot SE DETIENE en ese
  * chat — apenas un humano escribe (web o app), el bot para.
+ * EXCEPCIÓN: las respuestas automáticas de la app (mensaje de ausencia) no
+ * detienen el bot — las manda la app sola, no una persona.
  */
 export const ingestAdvisorAppMessage = internalMutation({
   args: {
@@ -120,6 +154,8 @@ export const ingestAdvisorAppMessage = internalMutation({
     ),
     mediaUrl: v.optional(v.string()),
     wamid: v.optional(v.string()),
+    /** wamid del mensaje citado (Responder desde la app). */
+    replyToWamid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const seen = await ctx.db
@@ -181,6 +217,11 @@ export const ingestAdvisorAppMessage = internalMutation({
       conversation = created;
     }
 
+    // Respuesta automática de la app (mensaje de ausencia): se guarda SIN
+    // sentByUserId (no cuenta como Experto para la elegibilidad) y NO detiene
+    // el bot.
+    const autoReply = args.msgType === 'text' && isAppAutoReply(args.content);
+
     await ctx.db.insert('messages', {
       conversationId: conversation._id,
       sender: 'assistant',
@@ -188,14 +229,21 @@ export const ingestAdvisorAppMessage = internalMutation({
       type: args.msgType,
       mediaUrl: args.mediaUrl,
       wamid: args.wamid,
-      sentByUserId: 'whatsapp-app',
+      replyToWamid: args.replyToWamid,
+      sentByUserId: autoReply ? undefined : 'whatsapp-app',
       whatsappStatus: 'sent',
-      metadata: { source: 'ycloud_smb_echo' },
+      metadata: {
+        source: autoReply ? 'ycloud_smb_echo_auto' : 'ycloud_smb_echo',
+      },
       createdAt: now,
     });
 
     // Un humano del equipo escribió desde el teléfono: el bot se detiene.
-    if (conversation.status === 'ai' || conversation.aiManualOverride === true) {
+    // (Las respuestas automáticas de la app NO cuentan como humano.)
+    if (
+      !autoReply &&
+      (conversation.status === 'ai' || conversation.aiManualOverride === true)
+    ) {
       await ctx.db.patch(conversation._id, {
         status: 'human',
         aiManualOverride: false,
@@ -204,7 +252,7 @@ export const ingestAdvisorAppMessage = internalMutation({
     } else {
       await ctx.db.patch(conversation._id, { lastMessageAt: now });
     }
-    return { duplicate: false };
+    return { duplicate: false, autoReply };
   },
 });
 
@@ -292,6 +340,7 @@ export const ingestInboundMessage = internalMutation({
     );
     // Activa = no eliminada del panel ni resuelta (como WhatsApp: eliminar abre hilo nuevo al volver).
     let conversation = sorted.find((c) => !c.deletedAt && c.status !== 'resolved');
+    let isNewConversation = false;
 
     if (!conversation) {
       const conversationId = await ctx.db.insert('conversations', {
@@ -306,6 +355,7 @@ export const ingestInboundMessage = internalMutation({
       const created = await ctx.db.get(conversationId);
       if (!created) return { duplicate: false };
       conversation = created;
+      isNewConversation = true;
     }
 
     const messageId = await ctx.db.insert('messages', {
@@ -351,6 +401,18 @@ export const ingestInboundMessage = internalMutation({
         text: buildOwnerGreeting(contact.ownerName, contact.ownerTratamiento),
       });
       return { duplicate: false, owner: true };
+    }
+
+    // Mensaje temporal del panel: una sola vez al ABRIR conversación nueva.
+    if (isNewConversation) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.whatsappTemporalMessage.sendIfActive,
+        {
+          conversationId: conversation._id,
+          to: args.phone,
+        },
+      );
     }
 
     if (conversation.status === 'ai') {

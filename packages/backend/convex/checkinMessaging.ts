@@ -1,0 +1,1420 @@
+import { v } from "convex/values";
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
+import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
+import { sendTemplateToYcloud } from "./lib/ycloud/senders";
+import {
+  ALL_TEMPLATE_KEYS,
+  ALL_TEMPLATES,
+  buildBodyParams,
+  buildRegisterPayload,
+  assertBodyParamsCount,
+  buildSendComponents,
+  CHECKIN_TEMPLATES,
+  formatTemplateSendError,
+  getTemplateDef,
+  MANUAL_TEMPLATE_KEYS,
+  renderTemplateBody,
+  type CheckinTemplateKey,
+  type TemplateDef,
+} from "./lib/ycloud/templateCatalog";
+import {
+  ownerSalutationName,
+  resolveOwnerContactFields,
+} from "./lib/ownerSalutation";
+import {
+  bogotaHourNow,
+  bogotaWeekdayNow,
+  mergeSchedules,
+} from "./lib/automationSchedules";
+
+const YCLOUD_TEMPLATES_BASE = "https://api.ycloud.com/v2/whatsapp/templates";
+
+function siteBase(): string {
+  return (
+    process.env.SITE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    "https://fincasya.com"
+  ).replace(/\/$/, "");
+}
+
+function checkinPortalBase(): string {
+  return (
+    process.env.CHECKIN_PORTAL_BASE_URL || `${siteBase()}/checkin`
+  ).replace(/\/+$/, "");
+}
+
+function ownerPortalBase(): string {
+  return (
+    process.env.OWNER_PORTAL_BASE_URL || `${siteBase()}/anfitrion`
+  ).replace(/\/+$/, "");
+}
+
+/** Fecha corta para aviso al propietario. Ej: "viernes 26 de junio". */
+function formatFechaLlegadaOwnerAviso(ms: number): string {
+  if (!Number.isFinite(ms)) return "próximamente";
+  const date = new Date(ms);
+  const dia = new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  const dayMonth = new Intl.DateTimeFormat("es-CO", {
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  return `${dia.toLowerCase()} ${dayMonth}`;
+}
+
+function ownerArrivalTemplateValues(
+  b: {
+    _id: string;
+    reference?: string;
+    fechaEntrada: number;
+    propietarioTratamiento?: string;
+    propietarioNombre?: string;
+  },
+  finca: string,
+  nombrePropietario?: string,
+): Record<string, string> {
+  const cr = (b.reference || b._id) as string;
+  return {
+    nombrePropietario:
+      nombrePropietario ?? ownerTemplateRecipientName(b),
+    fechaLlegada: formatFechaLlegadaOwnerAviso(b.fechaEntrada),
+    nombreFinca: finca,
+    linkAnfitrion: `${ownerPortalBase()}/${cr}`,
+  };
+}
+
+/** Primer nombre, para un saludo más natural en la plantilla. */
+function firstName(full: string | undefined | null): string {
+  const s = String(full ?? "").trim();
+  if (!s) return "";
+  return s.split(/\s+/)[0];
+}
+
+function formatHoraEntrada(hora?: string | null, ms?: number): string {
+  const s = String(hora ?? "").trim();
+  const match = /^(\d{1,2}):(\d{2})$/.exec(s);
+  if (match) {
+    let h = parseInt(match[1], 10);
+    const m = match[2];
+    const ampm = h >= 12 ? "PM" : "AM";
+    if (h === 0) h = 12;
+    else if (h > 12) h -= 12;
+    return `${h}:${m} ${ampm}`;
+  }
+  if (s) return s; // ya viene formateada (ej. "10:00 AM")
+  // Sin campo horaEntrada: derivar la hora del timestamp de llegada
+  // (hora Colombia), igual que la página de check-in.
+  if (ms != null && Number.isFinite(ms)) {
+    return new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/Bogota",
+    }).format(new Date(ms));
+  }
+  return "10:00 AM";
+}
+
+/** Fecha de llegada legible en español (hora Colombia). Ej: "sábado 15 de junio de 2026, 3:00 PM". */
+function formatFechaLlegada(ms: number): string {
+  if (!Number.isFinite(ms)) return "tu fecha de llegada";
+  const date = new Date(ms);
+  const dia = new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  const fecha = new Intl.DateTimeFormat("es-CO", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "America/Bogota",
+  }).format(date);
+  const diaCapitalizado = dia.charAt(0).toUpperCase() + dia.slice(1);
+  // Solo la fecha: la hora de ingreso va en su propia línea/variable.
+  return `${diaCapitalizado} ${fecha}`;
+}
+
+/** Día del viaje en minúscula y sin año, para frases tipo "El {{x}} estarán viajando". Ej: "sábado 15 de junio". */
+function formatDiaViaje(ms: number): string {
+  if (!Number.isFinite(ms)) return "tu fecha de viaje";
+  const date = new Date(ms);
+  const dia = new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  const fecha = new Intl.DateTimeFormat("es-CO", {
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  return `${dia} ${fecha}`;
+}
+
+/**
+ * Normaliza un teléfono a formato apto para YCloud (E.164 sin `+`, con
+ * indicativo). Asume Colombia (57) para celulares locales de 10 dígitos.
+ */
+function normalizeOutboundPhone(raw: string | undefined | null): string {
+  const cleaned = String(raw ?? "").replace(/[^\d]/g, "");
+  if (!cleaned) return "";
+  if (cleaned.length === 10 && cleaned.startsWith("3")) return `57${cleaned}`;
+  return cleaned;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catálogo (lectura para UI / NestJS)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TEMPLATE_AUDIENCE: Record<
+  CheckinTemplateKey,
+  "turista" | "propietario"
+> = {
+  tourist_checkin_start: "turista",
+  tourist_checkin_pending: "turista",
+  tourist_travel_tomorrow: "turista",
+  tourist_departure: "turista",
+  owner_arrival_tomorrow: "propietario",
+  owner_week_reminder: "propietario",
+};
+
+const TEMPLATE_WHEN: Record<CheckinTemplateKey, string> = {
+  tourist_checkin_start: "9:00 AM · 3 días antes del ingreso",
+  tourist_checkin_pending: "9:00 AM · día antes del ingreso",
+  tourist_travel_tomorrow: "9:00 AM · día antes del ingreso",
+  tourist_departure: "9:00 AM · día de salida",
+  owner_arrival_tomorrow: "9:00 AM · día antes",
+  owner_week_reminder: "Lunes 9:00 AM",
+};
+
+export const listCheckinTemplates = query({
+  args: {},
+  handler: async () =>
+    ALL_TEMPLATE_KEYS.map((key) => {
+      const def = CHECKIN_TEMPLATES[key];
+      return {
+        key: def.key,
+        name: def.name,
+        language: def.language,
+        category: def.category,
+        bodyText: def.bodyText,
+        paramKeys: def.paramKeys,
+        footer: def.footer ?? null,
+        audience: TEMPLATE_AUDIENCE[key],
+        when: TEMPLATE_WHEN[key],
+      };
+    }),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Envío MANUAL de plantillas desde el inbox (cualquier conversación)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Lista las plantillas que un asesor puede enviar manualmente desde el chat
+ * (set curado: check-in + transaccionales como `tratamiento_de_datos`). Cada
+ * una expone su cuerpo, las variables `{{n}}` a rellenar y sus botones.
+ */
+export const listManualTemplates = query({
+  args: {},
+  handler: async () =>
+    MANUAL_TEMPLATE_KEYS.map((key) => {
+      const def = ALL_TEMPLATES[key];
+      const buttons = def.buttons ?? (def.button ? [def.button] : []);
+      return {
+        key: def.key,
+        name: def.name,
+        language: def.language,
+        category: def.category,
+        bodyText: def.bodyText,
+        paramKeys: def.paramKeys,
+        exampleParams: def.exampleParams,
+        footer: def.footer ?? null,
+        buttons: buttons.map((b) => ({ type: b.type, text: b.text })),
+      };
+    }),
+});
+
+/** Destinatario (teléfono + nombre) de una conversación, para el envío manual. */
+export const getConversationRecipient = internalQuery({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const conv = await ctx.db.get(args.conversationId);
+    if (!conv) return null;
+    const contact = await ctx.db.get(conv.contactId);
+    if (!contact) return null;
+    return {
+      channel: conv.channel,
+      phone: contact.phone,
+      name: contact.baseName?.trim() || contact.name?.trim() || "",
+    };
+  },
+});
+
+/**
+ * Envía una plantilla preaprobada a la conversación abierta en el inbox (envío
+ * manual del asesor). Resuelve el teléfono del contacto, manda la plantilla por
+ * YCloud y deja registrado en el inbox el texto renderizado (con los mismos
+ * `{{n}}` que verá el cliente) marcado como envío humano.
+ */
+export const sendTemplateToConversation = action({
+  args: {
+    conversationId: v.id("conversations"),
+    templateKey: v.string(),
+    bodyParams: v.optional(v.array(v.string())),
+    sentByUserId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const def = getTemplateDef(args.templateKey);
+    if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
+
+    const recipient = (await ctx.runQuery(
+      internal.checkinMessaging.getConversationRecipient,
+      { conversationId: args.conversationId },
+    )) as { channel: string; phone: string; name: string } | null;
+    if (!recipient) throw new Error("Conversación o contacto no encontrado");
+    if (recipient.channel === "web") {
+      throw new Error(
+        "Las plantillas de WhatsApp solo se pueden enviar a conversaciones de WhatsApp.",
+      );
+    }
+
+    const to = normalizeOutboundPhone(recipient.phone);
+    if (!to) throw new Error("El contacto no tiene un teléfono válido.");
+
+    const bodyParams = (args.bodyParams ?? []).map((p) => String(p ?? ""));
+    assertBodyParamsCount(def, bodyParams);
+
+    let wamid: string | undefined;
+    let status: string | undefined;
+    try {
+      const components = buildSendComponents(def, bodyParams);
+      const sent = await sendTemplateToYcloud({
+        to,
+        templateName: def.name,
+        languageCode: def.language,
+        ...(components ? { components } : { bodyParams }),
+      });
+      wamid = sent.wamid;
+      status = sent.status;
+    } catch (err) {
+      throw new Error(formatTemplateSendError(err, def));
+    }
+
+    const tplButtons = (def.buttons ?? (def.button ? [def.button] : [])).map(
+      (b) => ({ type: b.type, text: b.text }),
+    );
+    const now = Date.now();
+    await ctx.runMutation(internal.checkinMessaging.insertTemplateInboxMessage, {
+      conversationId: args.conversationId,
+      content: renderTemplateBody(def, bodyParams),
+      createdAt: now,
+      sentByUserId: args.sentByUserId,
+      wamid: wamid && wamid.length > 6 ? wamid : undefined,
+      metadata: {
+        source: "manual_template",
+        templateName: def.name,
+        templateKey: def.key,
+        templateFooter: def.footer ?? undefined,
+        templateButtons: tplButtons,
+      },
+    });
+
+    return {
+      ok: true as const,
+      to,
+      wamid,
+      status,
+      preview: renderTemplateBody(def, bodyParams),
+    };
+  },
+});
+
+/** Inserta en el inbox un mensaje de plantilla ya enviado por YCloud. */
+export const insertTemplateInboxMessage = internalMutation({
+  args: {
+    conversationId: v.id("conversations"),
+    content: v.string(),
+    createdAt: v.number(),
+    sentByUserId: v.optional(v.string()),
+    wamid: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("messages", {
+      conversationId: args.conversationId,
+      sender: "assistant",
+      content: args.content,
+      type: "text",
+      createdAt: args.createdAt,
+      sentByUserId: args.sentByUserId,
+      wamid: args.wamid,
+      whatsappStatus: "sent",
+      metadata: args.metadata,
+    });
+    await ctx.db.patch(args.conversationId, {
+      lastMessageAt: args.createdAt,
+      status: "human",
+    });
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Registro de plantillas en YCloud/Meta ("toca hacerlas")
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const registerCheckinTemplates = action({
+  args: {
+    wabaId: v.optional(v.string()),
+    onlyKeys: v.optional(v.array(v.string())),
+  },
+  handler: async (_ctx, args) => {
+    const apiKey = process.env.YCLOUD_API_KEY;
+    if (!apiKey) throw new Error("Configura YCLOUD_API_KEY en Convex");
+    const wabaId = (args.wabaId || process.env.YCLOUD_WABA_ID || "").trim();
+    if (!wabaId) {
+      throw new Error(
+        "Falta wabaId (arg) o la variable YCLOUD_WABA_ID en Convex",
+      );
+    }
+
+    const keys = (
+      args.onlyKeys && args.onlyKeys.length > 0
+        ? args.onlyKeys
+        : ALL_TEMPLATE_KEYS
+    ).filter((k): k is CheckinTemplateKey => Boolean(getTemplateDef(k)));
+
+    const results: Array<{
+      key: string;
+      name: string;
+      ok: boolean;
+      status?: number;
+      error?: string;
+    }> = [];
+
+    for (const key of keys) {
+      const def = CHECKIN_TEMPLATES[key];
+      const payload = buildRegisterPayload(def, wabaId);
+      try {
+        const res = await fetch(YCLOUD_TEMPLATES_BASE, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "X-API-Key": apiKey,
+          },
+          body: JSON.stringify(payload),
+        });
+        const text = await res.text();
+        results.push({
+          key: def.key,
+          name: def.name,
+          ok: res.ok,
+          status: res.status,
+          error: res.ok ? undefined : text.slice(0, 300),
+        });
+      } catch (e) {
+        results.push({
+          key: def.key,
+          name: def.name,
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    return results;
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trazabilidad: dedupe + log a inbox
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const recordScheduledMessage = internalMutation({
+  args: {
+    bookingId: v.id("bookings"),
+    key: v.string(),
+    recipient: v.string(),
+    wamid: v.optional(v.string()),
+    status: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) return;
+    const entries = booking.scheduledMessages ?? [];
+    entries.push({
+      key: args.key,
+      recipient: args.recipient,
+      sentAt: Date.now(),
+      wamid: args.wamid,
+      status: args.status,
+    });
+    const patch: Record<string, unknown> = {
+      scheduledMessages: entries,
+      updatedAt: Date.now(),
+    };
+    // Tras enviar el check-in oficial, pasa a morado en el calendario.
+    if (
+      args.key === "tourist_checkin_start" ||
+      args.key === "tourist_checkin_pending"
+    ) {
+      patch.checkinSentManualAt = Date.now();
+    }
+    if (args.key === "owner_arrival_tomorrow" || args.key === "owner_week_reminder") {
+      patch.ownerPortalSentAt = Date.now();
+    }
+    await ctx.db.patch(args.bookingId, patch);
+  },
+});
+
+/** Persiste en el inbox lo que se envió por plantilla (texto renderizado). */
+export const logTemplateToInbox = internalMutation({
+  args: {
+    phone: v.string(),
+    name: v.optional(v.string()),
+    content: v.string(),
+    wamid: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const phone = normalizeOutboundPhone(args.phone);
+    if (!phone) return;
+
+    const contacts = await ctx.db
+      .query("contacts")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .collect();
+    // También matchea últimos 10 dígitos si el contact está sin código país.
+    let contactId: Id<"contacts"> | null = contacts[0]?._id ?? null;
+    if (!contactId) {
+      const all = await ctx.db.query("contacts").collect();
+      const last10 = phone.slice(-10);
+      const match = all.find((c) =>
+        normalizeOutboundPhone(c.phone).endsWith(last10),
+      );
+      contactId = match?._id ?? null;
+    }
+    if (!contactId) return;
+
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_contact", (q) => q.eq("contactId", contactId))
+      .collect();
+    const conversation =
+      conversations.find((c) => c.channel !== "web") ?? conversations[0];
+    if (!conversation) return;
+
+    const now = Date.now();
+    await ctx.db.insert("messages", {
+      conversationId: conversation._id,
+      sender: "assistant",
+      content: args.content,
+      type: "text",
+      createdAt: now,
+      wamid: args.wamid && args.wamid.length > 6 ? args.wamid : undefined,
+      whatsappStatus: "sent",
+      metadata: { source: "checkin_scheduled_template" },
+    });
+    await ctx.db.patch(conversation._id, { lastMessageAt: now });
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Destinatarios por momento del timeline (spec §3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type EnrichedBooking = {
+  _id: Id<"bookings">;
+  nombreCompleto: string;
+  celular: string;
+  fechaEntrada: number;
+  fechaSalida: number;
+  horaEntrada?: string;
+  horaSalida?: string;
+  reference?: string;
+  checkinCompleted?: boolean;
+  broadcastTag?: string;
+  scheduledMessages?: Array<{ key: string; recipient: string }>;
+  propertyTitle: string;
+  propietarioNombre?: string;
+  propietarioTratamiento?: string;
+  propietarioTelefono?: string;
+  encargadoNombre?: string;
+  encargadoTelefono?: string;
+};
+
+function ownerTemplateRecipientName(b: {
+  propietarioTratamiento?: string;
+  propietarioNombre?: string;
+}): string {
+  return ownerSalutationName(
+    b.propietarioTratamiento,
+    b.propietarioNombre,
+  );
+}
+
+export const bookingsInWindow = internalQuery({
+  args: {
+    dateField: v.union(v.literal("fechaEntrada"), v.literal("fechaSalida")),
+    minDate: v.number(),
+    maxDate: v.number(),
+    tag: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<EnrichedBooking[]> => {
+    const all = await ctx.db.query("bookings").collect();
+
+    const inWindow = all.filter((b) => {
+      const value = args.dateField === "fechaEntrada" ? b.fechaEntrada : b.fechaSalida;
+      const okDate = value >= args.minDate && value <= args.maxDate;
+      const okStatus = b.status === "CONFIRMED" || b.status === "PAID";
+      const okTag = !args.tag || b.broadcastTag === args.tag;
+      return okDate && okStatus && okTag;
+    });
+
+    return await Promise.all(
+      inWindow.map(async (b) => {
+        const property = await ctx.db.get(b.propertyId);
+        const ownerContact = property
+          ? await resolveOwnerContactFields(
+              ctx,
+              property._id,
+              property as Record<string, unknown>,
+            )
+          : {};
+        return {
+          _id: b._id,
+          nombreCompleto: b.nombreCompleto,
+          celular: b.celular,
+          fechaEntrada: b.fechaEntrada,
+          fechaSalida: b.fechaSalida,
+          horaEntrada: b.horaEntrada,
+          horaSalida: b.horaSalida,
+          reference: b.reference,
+          checkinCompleted: b.checkinCompleted,
+          broadcastTag: b.broadcastTag,
+          scheduledMessages: (b.scheduledMessages ?? []).map((m) => ({
+            key: m.key,
+            recipient: m.recipient,
+          })),
+          propertyTitle: (property as { title?: string } | null)?.title || "tu finca",
+          propietarioNombre: ownerContact.propietarioNombre,
+          propietarioTelefono: ownerContact.propietarioTelefono,
+          propietarioTratamiento: ownerContact.propietarioTratamiento,
+          encargadoNombre: (property as { encargadoNombre?: string } | null)
+            ?.encargadoNombre,
+          encargadoTelefono: (property as { encargadoTelefono?: string } | null)
+            ?.encargadoTelefono,
+        };
+      }),
+    );
+  },
+});
+
+type PlannedSend = {
+  bookingId: Id<"bookings">;
+  to: string;
+  recipientName: string;
+  recipientType: "tourist" | "owner" | "manager";
+  bodyParams: string[];
+  logToInbox: boolean;
+};
+
+/** Traduce un momento del timeline en envíos concretos para cada reserva. */
+function planSendsForMoment(
+  key: CheckinTemplateKey,
+  def: TemplateDef,
+  bookings: EnrichedBooking[],
+): PlannedSend[] {
+  const portal = checkinPortalBase();
+  const plans: PlannedSend[] = [];
+
+  const alreadySent = (b: EnrichedBooking, recipient: string) =>
+    (b.scheduledMessages ?? []).some(
+      (m) => m.key === key && m.recipient === recipient,
+    );
+
+  for (const b of bookings) {
+    const finca = b.propertyTitle;
+    const cr = (b.reference || b._id) as string;
+    const link = `${portal}/${cr}`;
+    const touristTo = normalizeOutboundPhone(b.celular);
+    const ownerTo = normalizeOutboundPhone(b.propietarioTelefono);
+    const managerTo = normalizeOutboundPhone(b.encargadoTelefono);
+
+    switch (key) {
+      case "owner_week_reminder":
+        if (ownerTo && !alreadySent(b, ownerTo)) {
+          plans.push({
+            bookingId: b._id,
+            to: ownerTo,
+            recipientName: b.propietarioNombre || "propietario",
+            recipientType: "owner",
+            bodyParams: buildBodyParams(def, {
+              nombrePropietario: ownerTemplateRecipientName(b),
+              nombreFinca: finca,
+            }),
+            logToInbox: false,
+          });
+        }
+        break;
+      case "tourist_checkin_start":
+        if (touristTo && !alreadySent(b, touristTo)) {
+          plans.push({
+            bookingId: b._id,
+            to: touristTo,
+            recipientName: b.nombreCompleto,
+            recipientType: "tourist",
+            bodyParams: buildBodyParams(def, {
+              nombreTurista: firstName(b.nombreCompleto),
+              nombreFinca: finca,
+              referenciaReserva: cr,
+              fechaLlegada: formatFechaLlegada(b.fechaEntrada),
+              horaIngreso: formatHoraEntrada(b.horaEntrada, b.fechaEntrada),
+              linkCheckin: link,
+            }),
+            logToInbox: true,
+          });
+        }
+        break;
+      case "tourist_checkin_pending":
+        if (touristTo && b.checkinCompleted !== true && !alreadySent(b, touristTo)) {
+          plans.push({
+            bookingId: b._id,
+            to: touristTo,
+            recipientName: b.nombreCompleto,
+            recipientType: "tourist",
+            bodyParams: buildBodyParams(def, {
+              nombreTurista: firstName(b.nombreCompleto),
+              nombreFinca: finca,
+              linkCheckin: link,
+            }),
+            logToInbox: true,
+          });
+        }
+        break;
+      case "tourist_travel_tomorrow":
+        // Solo a quien YA hizo check-in (a los pendientes los cubre
+        // `tourist_checkin_pending`) para no duplicar el mensaje del día antes.
+        if (touristTo && b.checkinCompleted === true && !alreadySent(b, touristTo)) {
+          plans.push({
+            bookingId: b._id,
+            to: touristTo,
+            recipientName: b.nombreCompleto,
+            recipientType: "tourist",
+            bodyParams: buildBodyParams(def, {
+              nombreTurista: firstName(b.nombreCompleto),
+              nombreFinca: finca,
+            }),
+            logToInbox: true,
+          });
+        }
+        break;
+      case "owner_arrival_tomorrow":
+        if (ownerTo && !alreadySent(b, ownerTo)) {
+          plans.push({
+            bookingId: b._id,
+            to: ownerTo,
+            recipientName: b.propietarioNombre || "propietario",
+            recipientType: "owner",
+            bodyParams: buildBodyParams(
+              def,
+              ownerArrivalTemplateValues(b, finca),
+            ),
+            logToInbox: false,
+          });
+        }
+        if (managerTo && !alreadySent(b, managerTo)) {
+          plans.push({
+            bookingId: b._id,
+            to: managerTo,
+            recipientName: b.encargadoNombre || "encargado",
+            recipientType: "manager",
+            bodyParams: buildBodyParams(
+              def,
+              ownerArrivalTemplateValues(
+                b,
+                finca,
+                firstName(b.encargadoNombre) || "encargado",
+              ),
+            ),
+            logToInbox: false,
+          });
+        }
+        break;
+      case "tourist_departure":
+        if (touristTo && !alreadySent(b, touristTo)) {
+          plans.push({
+            bookingId: b._id,
+            to: touristTo,
+            recipientName: b.nombreCompleto,
+            recipientType: "tourist",
+            bodyParams: buildBodyParams(def, {
+              nombreTurista: firstName(b.nombreCompleto),
+              nombreFinca: finca,
+              horaSalida: b.horaSalida || "la hora acordada",
+            }),
+            logToInbox: true,
+          });
+        }
+        break;
+    }
+  }
+  return plans;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Envío manual por reserva (desde el modal de Reservas)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const getBookingForSend = internalQuery({
+  args: { bookingId: v.id("bookings") },
+  handler: async (ctx, args): Promise<EnrichedBooking | null> => {
+    const b = await ctx.db.get(args.bookingId);
+    if (!b) return null;
+    const property = await ctx.db.get(b.propertyId);
+    const ownerContact = property
+      ? await resolveOwnerContactFields(
+          ctx,
+          property._id,
+          property as Record<string, unknown>,
+        )
+      : {};
+    return {
+      _id: b._id,
+      nombreCompleto: b.nombreCompleto,
+      celular: b.celular,
+      fechaEntrada: b.fechaEntrada,
+      fechaSalida: b.fechaSalida,
+      horaEntrada: b.horaEntrada,
+      horaSalida: b.horaSalida,
+      reference: b.reference,
+      checkinCompleted: b.checkinCompleted,
+      broadcastTag: b.broadcastTag,
+      scheduledMessages: (b.scheduledMessages ?? []).map((m) => ({
+        key: m.key,
+        recipient: m.recipient,
+      })),
+      propertyTitle: (property as { title?: string } | null)?.title || "tu finca",
+      propietarioNombre: ownerContact.propietarioNombre,
+      propietarioTelefono: ownerContact.propietarioTelefono,
+      propietarioTratamiento: ownerContact.propietarioTratamiento,
+      encargadoNombre: (property as { encargadoNombre?: string } | null)
+        ?.encargadoNombre,
+      encargadoTelefono: (property as { encargadoTelefono?: string } | null)
+        ?.encargadoTelefono,
+    };
+  },
+});
+
+/** Resuelve destinatario y variables para un envío manual (sin dedupe ni fecha). */
+function resolveManualSend(
+  key: CheckinTemplateKey,
+  def: TemplateDef,
+  b: EnrichedBooking,
+): { to: string; recipientName: string; recipientType: string; bodyParams: string[] } | null {
+  const finca = b.propertyTitle;
+  const cr = (b.reference || b._id) as string;
+  const link = `${checkinPortalBase()}/${cr}`;
+  const isOwnerTemplate =
+    key === "owner_week_reminder" || key === "owner_arrival_tomorrow";
+
+  if (isOwnerTemplate) {
+    const to = normalizeOutboundPhone(b.propietarioTelefono);
+    if (!to) return null;
+    const ownerValues =
+      key === "owner_arrival_tomorrow"
+        ? ownerArrivalTemplateValues(b, finca)
+        : {
+            nombrePropietario: ownerTemplateRecipientName(b),
+            nombreFinca: finca,
+          };
+    return {
+      to,
+      recipientName: b.propietarioNombre || "propietario",
+      recipientType: "owner",
+      bodyParams: buildBodyParams(def, ownerValues),
+    };
+  }
+
+  const to = normalizeOutboundPhone(b.celular);
+  if (!to) return null;
+  return {
+    to,
+    recipientName: b.nombreCompleto,
+    recipientType: "tourist",
+    bodyParams: buildBodyParams(def, {
+      nombreTurista: firstName(b.nombreCompleto),
+      nombreFinca: finca,
+      referenciaReserva: cr,
+      fechaLlegada: formatFechaLlegada(b.fechaEntrada),
+      horaIngreso: formatHoraEntrada(b.horaEntrada, b.fechaEntrada),
+      linkCheckin: link,
+      horaSalida: b.horaSalida || "la hora acordada",
+    }),
+  };
+}
+
+/**
+ * Devuelve el link del portal de check-in de una reserva (mismo que va en la
+ * plantilla de WhatsApp), para copiarlo manualmente cuando NO se quiere enviar
+ * por WhatsApp.
+ */
+export const getCheckinLink = query({
+  args: { bookingId: v.id("bookings") },
+  handler: async (ctx, args): Promise<{
+    link: string;
+    reference: string;
+    checkinUbicacionUrl?: string;
+    checkinWazeUrl?: string;
+    checkinIndicacionesLlegada?: string;
+    checkinRecomendaciones?: string;
+    checkinUbicacionImageUrl?: string;
+    checkinUbicacionImageUrls?: string[];
+  }> => {
+    const b = await ctx.db.get(args.bookingId);
+    if (!b) throw new Error("Reserva no encontrada");
+    const cr = ((b as { reference?: string }).reference ||
+      (b._id as string)) as string;
+
+    const ownerInfo = await ctx.db
+      .query("propertyOwnerInfo")
+      .withIndex("by_property", (q) => q.eq("propertyId", b.propertyId))
+      .unique();
+    const mapsUrl = String(ownerInfo?.checkinUbicacionUrl ?? "").trim();
+    const wazeUrl = String(ownerInfo?.checkinWazeUrl ?? "").trim();
+    const indicaciones = String(
+      ownerInfo?.checkinIndicacionesLlegada ?? "",
+    ).trim();
+    const recomendaciones = String(
+      ownerInfo?.checkinRecomendaciones ?? "",
+    ).trim();
+    const legacyImage = String(
+      ownerInfo?.checkinUbicacionImageUrl ?? "",
+    ).trim();
+    const rawUrls = Array.isArray(ownerInfo?.checkinUbicacionImageUrls)
+      ? (ownerInfo.checkinUbicacionImageUrls as unknown[])
+      : [];
+    let imageUrls = rawUrls
+      .map((u) => String(u ?? "").trim())
+      .filter((u) => u.length > 0);
+    if (imageUrls.length === 0 && legacyImage) imageUrls = [legacyImage];
+    const imageUrl = imageUrls[0] ?? "";
+
+    return {
+      link: `${checkinPortalBase()}/${cr}`,
+      reference: cr,
+      ...(mapsUrl ? { checkinUbicacionUrl: mapsUrl } : {}),
+      ...(wazeUrl ? { checkinWazeUrl: wazeUrl } : {}),
+      ...(indicaciones ? { checkinIndicacionesLlegada: indicaciones } : {}),
+      ...(recomendaciones ? { checkinRecomendaciones: recomendaciones } : {}),
+      ...(imageUrl ? { checkinUbicacionImageUrl: imageUrl } : {}),
+      ...(imageUrls.length ? { checkinUbicacionImageUrls: imageUrls } : {}),
+    };
+  },
+});
+
+/**
+ * Envía manualmente una plantilla a UNA reserva concreta (desde el modal de
+ * Reservas). Resuelve el teléfono y las variables a partir de la reserva; no
+ * aplica dedupe ni filtro de fecha (el equipo decide cuándo mandarlo).
+ */
+export const sendTemplateToBooking = action({
+  args: {
+    bookingId: v.id("bookings"),
+    templateKey: v.string(),
+    dryRun: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const def = getTemplateDef(args.templateKey);
+    if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
+    const key = args.templateKey as CheckinTemplateKey;
+
+    const b: EnrichedBooking | null = await ctx.runQuery(
+      internal.checkinMessaging.getBookingForSend,
+      { bookingId: args.bookingId },
+    );
+    if (!b) throw new Error("Reserva no encontrada");
+
+    const resolved = resolveManualSend(key, def, b);
+    if (!resolved) {
+      return {
+        ok: false as const,
+        error:
+          key === "owner_week_reminder" || key === "owner_arrival_tomorrow"
+            ? "La finca no tiene teléfono de propietario configurado."
+            : "La reserva no tiene un celular válido.",
+      };
+    }
+
+    if (args.dryRun) {
+      return {
+        ok: true as const,
+        dryRun: true,
+        to: resolved.to,
+        preview: renderTemplateBody(def, resolved.bodyParams),
+      };
+    }
+
+    try {
+      const components = buildSendComponents(def, resolved.bodyParams);
+      const { wamid, status } = await sendTemplateToYcloud({
+        to: resolved.to,
+        templateName: def.name,
+        languageCode: def.language,
+        ...(components ? { components } : { bodyParams: resolved.bodyParams }),
+      });
+      await ctx.runMutation(internal.checkinMessaging.recordScheduledMessage, {
+        bookingId: b._id,
+        key,
+        recipient: resolved.to,
+        wamid,
+        status,
+      });
+      if (resolved.recipientType === "tourist") {
+        await ctx.runMutation(internal.checkinMessaging.logTemplateToInbox, {
+          phone: resolved.to,
+          name: resolved.recipientName,
+          content: renderTemplateBody(def, resolved.bodyParams),
+          wamid,
+        });
+      }
+      return { ok: true as const, to: resolved.to, wamid, status };
+    } catch (e) {
+      return {
+        ok: false as const,
+        to: resolved.to,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Motor: ejecutar un momento del timeline (lo llama el cron de NestJS)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Ventana de "horario decente" para mensajes automáticos (hora Colombia).
+ * Blindaje de última línea: aunque un cron/retry/deploy dispare esto a
+ * deshoras, NUNCA se envía un mensaje automático fuera de esta franja
+ * (incidente 2026-07-13: recordatorio de salida a las 4:00 AM por cron en UTC).
+ */
+const DECENT_HOURS_START = 8; // 8:00 AM
+const DECENT_HOURS_END = 20; // 8:00 PM
+
+function isWithinDecentHoursColombia(nowMs: number): boolean {
+  const hour = parseInt(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Bogota",
+      hour: "2-digit",
+      hour12: false,
+    }).format(new Date(nowMs)),
+    10,
+  );
+  return hour >= DECENT_HOURS_START && hour < DECENT_HOURS_END;
+}
+
+export const runScheduledMomentInternal = internalAction({
+  args: {
+    key: v.string(),
+    minDate: v.number(),
+    maxDate: v.number(),
+    tag: v.optional(v.string()),
+    dryRun: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const def = getTemplateDef(args.key);
+    if (!def) throw new Error(`Plantilla desconocida: ${args.key}`);
+    const key = args.key as CheckinTemplateKey;
+
+    // ─── KILL-SWITCH + BLINDAJE (antes de tocar cualquier reserva) ────────
+    // El dryRun se permite siempre (es solo lectura, útil para probar).
+    if (!args.dryRun) {
+      const automation = (await ctx.runQuery(
+        internal.automationSettings.getInternal,
+        {},
+      )) as { scheduledMessagingEnabled: boolean; scheduledMessagesDisabled: string[] };
+      if (!automation.scheduledMessagingEnabled) {
+        console.log(`[checkinMessaging] mensajería automática APAGADA (switch global) — momento ${args.key} omitido`);
+        return { candidates: 0, planned: 0, sent: 0, failed: 0, skipped: "global_switch_off" };
+      }
+      if (automation.scheduledMessagesDisabled.includes(args.key)) {
+        console.log(`[checkinMessaging] tipo ${args.key} deshabilitado desde el panel — omitido`);
+        return { candidates: 0, planned: 0, sent: 0, failed: 0, skipped: "type_disabled" };
+      }
+      if (!isWithinDecentHoursColombia(Date.now())) {
+        console.error(`[checkinMessaging] intento de envío FUERA de horario decente (8am-8pm CO) — momento ${args.key} pospuesto. Revisar quién lo disparó.`);
+        return { candidates: 0, planned: 0, sent: 0, failed: 0, skipped: "outside_decent_hours" };
+      }
+    }
+
+    const dateField =
+      key === "tourist_departure" ? "fechaSalida" : "fechaEntrada";
+    const bookings: EnrichedBooking[] = await ctx.runQuery(
+      internal.checkinMessaging.bookingsInWindow,
+      { dateField, minDate: args.minDate, maxDate: args.maxDate, tag: args.tag },
+    );
+
+    const plans = planSendsForMoment(key, def, bookings);
+
+    let sent = 0;
+    let failed = 0;
+    const details: Array<{
+      to: string;
+      recipientType: string;
+      ok: boolean;
+      wamid?: string;
+      error?: string;
+    }> = [];
+
+    for (const plan of plans) {
+      if (args.dryRun) {
+        details.push({ to: plan.to, recipientType: plan.recipientType, ok: true });
+        continue;
+      }
+      try {
+        const components = buildSendComponents(def, plan.bodyParams);
+        const { wamid, status } = await sendTemplateToYcloud({
+          to: plan.to,
+          templateName: def.name,
+          languageCode: def.language,
+          ...(components ? { components } : { bodyParams: plan.bodyParams }),
+        });
+        await ctx.runMutation(internal.checkinMessaging.recordScheduledMessage, {
+          bookingId: plan.bookingId,
+          key,
+          recipient: plan.to,
+          wamid,
+          status,
+        });
+        if (plan.logToInbox) {
+          await ctx.runMutation(internal.checkinMessaging.logTemplateToInbox, {
+            phone: plan.to,
+            name: plan.recipientName,
+            content: renderTemplateBody(def, plan.bodyParams),
+            wamid,
+          });
+        }
+        sent++;
+        details.push({ to: plan.to, recipientType: plan.recipientType, ok: true, wamid });
+      } catch (e) {
+        failed++;
+        details.push({
+          to: plan.to,
+          recipientType: plan.recipientType,
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    return {
+      key,
+      template: def.name,
+      candidates: bookings.length,
+      planned: plans.length,
+      sent,
+      failed,
+      dryRun: Boolean(args.dryRun),
+      details,
+    };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Envío en lote con selección + edición previa (spec §10)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lista reservas (con params por defecto) para poblar la UI de envío en lote. */
+export const listBookingsForBatch = query({
+  args: {
+    templateKey: v.string(),
+    minDate: v.number(),
+    maxDate: v.number(),
+    tag: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const def = getTemplateDef(args.templateKey);
+    if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
+    const key = args.templateKey as CheckinTemplateKey;
+    const dateField =
+      key === "tourist_departure" ? "fechaSalida" : "fechaEntrada";
+
+    const all = await ctx.db.query("bookings").collect();
+
+    const portal = checkinPortalBase();
+    const ownerPortal = ownerPortalBase();
+    const rows = [];
+    for (const b of all) {
+      const value = dateField === "fechaEntrada" ? b.fechaEntrada : b.fechaSalida;
+      if (value < args.minDate || value > args.maxDate) continue;
+      if (b.status !== "CONFIRMED" && b.status !== "PAID") continue;
+      if (args.tag && b.broadcastTag !== args.tag) continue;
+      const property = await ctx.db.get(b.propertyId);
+      const ownerContact = property
+        ? await resolveOwnerContactFields(
+            ctx,
+            property._id,
+            property as Record<string, unknown>,
+          )
+        : {};
+      const finca = (property as { title?: string } | null)?.title || "tu finca";
+      const cr = (b.reference || b._id) as string;
+      const defaults: Record<string, string> = {
+        nombreTurista: firstName(b.nombreCompleto),
+        nombrePropietario: ownerSalutationName(
+          ownerContact.propietarioTratamiento,
+          ownerContact.propietarioNombre,
+        ),
+        nombreFinca: finca,
+        referenciaReserva: cr,
+        fechaViaje: formatDiaViaje(b.fechaEntrada),
+        fechaLlegada: formatFechaLlegada(b.fechaEntrada),
+        horaIngreso: formatHoraEntrada(b.horaEntrada, b.fechaEntrada),
+        linkCheckin: `${portal}/${cr}`,
+        linkAnfitrion: `${ownerPortal}/${cr}`,
+        horaSalida: b.horaSalida || "la hora acordada",
+      };
+      rows.push({
+        bookingId: b._id,
+        cr,
+        nombreCompleto: b.nombreCompleto,
+        celular: normalizeOutboundPhone(b.celular),
+        propertyTitle: finca,
+        fechaEntrada: b.fechaEntrada,
+        fechaSalida: b.fechaSalida,
+        checkinCompleted: b.checkinCompleted === true,
+        broadcastTag: b.broadcastTag ?? null,
+        defaultParams: def.paramKeys.map((k2) => defaults[k2] ?? ""),
+      });
+    }
+    return { template: { key: def.key, name: def.name, paramKeys: def.paramKeys }, rows };
+  },
+});
+
+/**
+ * Envía una plantilla a destinatarios ya resueltos por la UI (con sus params
+ * editados). Itera 1-a-1 (no hay broadcast nativo en WhatsApp/Meta).
+ */
+export const sendBatchTemplate = action({
+  args: {
+    templateKey: v.string(),
+    recipients: v.array(
+      v.object({
+        bookingId: v.optional(v.id("bookings")),
+        to: v.string(),
+        recipientName: v.optional(v.string()),
+        bodyParams: v.array(v.string()),
+        logToInbox: v.optional(v.boolean()),
+      }),
+    ),
+    dryRun: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const def = getTemplateDef(args.templateKey);
+    if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
+
+    let sent = 0;
+    let failed = 0;
+    const details: Array<{ to: string; ok: boolean; wamid?: string; error?: string }> = [];
+
+    for (const r of args.recipients) {
+      const to = normalizeOutboundPhone(r.to);
+      if (!to) {
+        failed++;
+        details.push({ to: r.to, ok: false, error: "Teléfono inválido" });
+        continue;
+      }
+      if (args.dryRun) {
+        details.push({ to, ok: true });
+        continue;
+      }
+      try {
+        const components = buildSendComponents(def, r.bodyParams);
+        const { wamid, status } = await sendTemplateToYcloud({
+          to,
+          templateName: def.name,
+          languageCode: def.language,
+          ...(components ? { components } : { bodyParams: r.bodyParams }),
+        });
+        if (r.bookingId) {
+          await ctx.runMutation(internal.checkinMessaging.recordScheduledMessage, {
+            bookingId: r.bookingId,
+            key: def.key,
+            recipient: to,
+            wamid,
+            status,
+          });
+        }
+        if (r.logToInbox ?? true) {
+          await ctx.runMutation(internal.checkinMessaging.logTemplateToInbox, {
+            phone: to,
+            name: r.recipientName,
+            content: renderTemplateBody(def, r.bodyParams),
+            wamid,
+          });
+        }
+        sent++;
+        details.push({ to, ok: true, wamid });
+      } catch (e) {
+        failed++;
+        details.push({
+          to,
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+      // Pequeña pausa entre envíos para no saturar la API.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return { template: def.name, total: args.recipients.length, sent, failed, details };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Soporte: etiqueta de lote + check-in manual (spec §8.1 / §10)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const setBroadcastTag = mutation({
+  args: { bookingId: v.id("bookings"), tag: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.bookingId, {
+      broadcastTag: args.tag ?? undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const setCheckinCompleted = mutation({
+  args: { bookingId: v.id("bookings"), completed: v.boolean() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.bookingId, {
+      checkinCompleted: args.completed,
+      checkinCompletedAt: args.completed ? Date.now() : undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Envío individual de un template ad-hoc (uso interno / pruebas). */
+export const sendSingleTemplate = internalAction({
+  args: {
+    to: v.string(),
+    templateKey: v.string(),
+    bodyParams: v.array(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const def = getTemplateDef(args.templateKey);
+    if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
+    return sendTemplateToYcloud({
+      to: normalizeOutboundPhone(args.to),
+      templateName: def.name,
+      languageCode: def.language,
+      bodyParams: args.bodyParams,
+    });
+  },
+});
+
+/**
+ * Cron horario: lee schedules del panel Automatizaciones y solo corre los
+ * momentos cuya hora Colombia coincide con la hora actual.
+ */
+export const runDailyScheduledMoments = internalAction({
+  args: { dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const dryRun = args.dryRun === true;
+    const now = new Date();
+    const bogotaYmd = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Bogota",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now);
+    const [y, m, d] = bogotaYmd.split("-").map(Number);
+    const dayStartUtc = Date.UTC(y, m - 1, d, 5, 0, 0);
+    const dayEndUtc = dayStartUtc + 24 * 60 * 60 * 1000 - 1;
+    const msDay = 24 * 60 * 60 * 1000;
+
+    const hourCO = bogotaHourNow(now);
+    const weekdayCO = bogotaWeekdayNow(now);
+
+    const automation = (await ctx.runQuery(
+      internal.automationSettings.getInternal,
+      {},
+    )) as {
+      schedules?: Array<{
+        key: string;
+        hourCO: number;
+        anchor: "checkin" | "checkout" | "weekday";
+        offsetDays: number;
+        weekday?: number;
+      }>;
+    };
+    const schedules = mergeSchedules(automation.schedules);
+
+    type Window = { key: CheckinTemplateKey; minDate: number; maxDate: number };
+    const windows: Window[] = [];
+
+    for (const s of Object.values(schedules)) {
+      if (s.key === "booking_reminder_email") continue; // correo: otro pipeline
+      if (!ALL_TEMPLATE_KEYS.includes(s.key as CheckinTemplateKey)) continue;
+      if (s.hourCO !== hourCO) continue;
+
+      if (s.anchor === "weekday") {
+        if ((s.weekday ?? 1) !== weekdayCO) continue;
+        windows.push({
+          key: s.key as CheckinTemplateKey,
+          minDate: dayStartUtc,
+          maxDate: dayStartUtc + 7 * msDay - 1,
+        });
+        continue;
+      }
+
+      const offset = Math.max(0, s.offsetDays) * msDay;
+      windows.push({
+        key: s.key as CheckinTemplateKey,
+        minDate: dayStartUtc + offset,
+        maxDate: dayEndUtc + offset,
+      });
+    }
+
+    if (windows.length === 0) {
+      return [{ skipped: true, reason: "no_moments_for_this_hour", hourCO }];
+    }
+
+    const results: Array<Record<string, unknown>> = [];
+    for (const w of windows) {
+      try {
+        const result = await ctx.runAction(
+          internal.checkinMessaging.runScheduledMomentInternal,
+          {
+            key: w.key,
+            minDate: w.minDate,
+            maxDate: w.maxDate,
+            dryRun,
+          },
+        );
+        results.push({ key: w.key, ...result });
+      } catch (e) {
+        console.error(
+          `[checkinMessaging] error en ${w.key}:`,
+          e instanceof Error ? e.message : e,
+        );
+        results.push({
+          key: w.key,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    return results;
+  },
+});

@@ -8,11 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   getNotificationSettings,
-  setPaymentReceiptEmails,
+  setAdminEmails,
 } from "@/features/admin/api/notification-settings.api";
 
 type NotificationSettings = {
-  paymentReceiptEmails: string[];
+  adminEmails: string[];
   isDefault?: boolean;
   updatedAt?: number | null;
 };
@@ -32,13 +32,13 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     if (data) {
-      setEmails(data.paymentReceiptEmails ?? []);
+      setEmails(data.adminEmails ?? []);
       setIsDefault(Boolean(data.isDefault));
     }
   }, [data]);
 
   const save = useMutation({
-    mutationFn: async (list: string[]) => setPaymentReceiptEmails(list),
+    mutationFn: async (list: string[]) => setAdminEmails(list),
     onSuccess: () => {
       toast.success("Correos de notificación guardados.");
       setIsDefault(false);
@@ -75,8 +75,9 @@ export default function NotificationsPage() {
           Notificaciones
         </h1>
         <p className="text-sm text-muted-foreground mt-1 ml-11">
-          Configura a qué correos llega la alerta cuando un turista sube un
-          soporte de pago.
+          Correos de administrador de la plataforma. A esta lista llegan{" "}
+          <strong>todas</strong> las alertas: soportes de pago, pagos de links
+          de venta, solicitudes de Habeas Data y demás notificaciones internas.
         </p>
       </div>
 
@@ -84,7 +85,7 @@ export default function NotificationsPage() {
         <div className="flex items-center gap-2">
           <Mail className="w-4 h-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">
-            Correos para alertas de soporte de pago
+            Correos de administrador (todas las alertas)
           </h2>
         </div>
 

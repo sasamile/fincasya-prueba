@@ -24,13 +24,8 @@ import {
   groupAccountsByHolder,
 } from "@/features/checkin/utils/payment-holders";
 
-// ---------------------------------------------------------------------------
-// Interruptor del paso de pago.
-//   true  -> el cliente comparte el soporte por WhatsApp (no se sube en el portal).
-//   false -> vuelve la carga de comprobante dentro del check-in.
-// WhatsApp de asesores (mismo número del Soporte 24/7).
-// ---------------------------------------------------------------------------
-const SOPORTE_POR_WHATSAPP: boolean = true;
+// WhatsApp de asesores (mismo número del Soporte 24/7) cuando la subida
+// en el portal está deshabilitada (default / toggle en admin).
 const SOPORTE_WHATSAPP_E164 = "573157773937";
 
 // ---------------------------------------------------------------------------
@@ -358,10 +353,13 @@ function PendingReceiptPreview({
 function ReceiptUpload({
   reference,
   bankAccounts,
+  allowUpload,
   onPendingChange,
 }: {
   reference: string;
   bankAccounts: CheckinBankAccount[];
+  /** Si false, el cliente envía el soporte por WhatsApp (default). */
+  allowUpload: boolean;
   /** Reporta cuántos comprobantes hay cargados pero SIN enviar. */
   onPendingChange?: (count: number) => void;
 }) {
@@ -467,7 +465,7 @@ function ReceiptUpload({
   };
 
   // Interruptor: en vez de subir el soporte, el cliente lo comparte por WhatsApp.
-  if (SOPORTE_POR_WHATSAPP) {
+  if (!allowUpload) {
     const waText = encodeURIComponent(
       `Hola, quiero enviar el soporte de pago de mi reserva ${reference}.`,
     );
@@ -499,6 +497,29 @@ function ReceiptUpload({
           <MessageCircle className="h-5 w-5" />
           Enviar soporte por WhatsApp
         </a>
+
+        {submittedReceipts.length > 0 ? (
+          <div className="space-y-2 border-t border-gray-100 pt-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
+              Ya cargados
+            </p>
+            <ul className="space-y-1.5">
+              {submittedReceipts.map((r) => (
+                <li key={r.id}>
+                  <a
+                    href={r.receiptUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-emerald-700 underline-offset-2 hover:underline"
+                  >
+                    {r.fileName || r.bankName || "Comprobante"}
+                    {r.status === "pending" ? " · en revisión" : ""}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
@@ -754,6 +775,8 @@ type CheckinPaymentSectionProps = {
   reference?: string;
   boldLink?: string | null;
   boldSurcharge?: number | null;
+  /** Admin habilita subida de comprobantes en esta reserva. */
+  allowPaymentProofUpload?: boolean;
   /** Reporta comprobantes cargados sin enviar (para alertar al finalizar). */
   onPendingReceiptsChange?: (count: number) => void;
 };
@@ -768,6 +791,7 @@ export function CheckinPaymentSection({
   reference,
   boldLink,
   boldSurcharge,
+  allowPaymentProofUpload = false,
   onPendingReceiptsChange,
 }: CheckinPaymentSectionProps) {
   const holders = useMemo(
@@ -1015,6 +1039,7 @@ export function CheckinPaymentSection({
         <ReceiptUpload
           reference={reference}
           bankAccounts={bankAccounts}
+          allowUpload={allowPaymentProofUpload}
           onPendingChange={onPendingReceiptsChange}
         />
       ) : null}

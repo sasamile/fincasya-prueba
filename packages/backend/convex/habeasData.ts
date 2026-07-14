@@ -2,6 +2,8 @@ import { v } from 'convex/values';
 import { internalAction, internalQuery, mutation } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
+import { sendEmail } from './lib/email';
+import { wrap, rows } from './lib/emailTemplates';
 
 const REQUEST_TYPES = [
   'acceso',
@@ -106,70 +108,53 @@ export const getById = internalQuery({
   },
 });
 
-/** Notifica al equipo comercial vía Brevo (si está configurado). */
+/** Notifica al equipo (lista admin configurable) vía Brevo. */
 export const sendNotificationEmail = internalAction({
   args: { requestId: v.id('habeas_data_requests') },
   handler: async (ctx, args) => {
-    const apiKey = process.env.BREVO_API_KEY;
-    const toEmail =
-      process.env.HABEAS_DATA_EMAIL?.trim() ||
-      process.env.ADMIN_EMAIL?.trim() ||
-      'comercial@fincasya.com';
-    const senderEmail =
-      process.env.BREVO_SENDER_EMAIL?.trim() || 'comercial@fincasya.com';
-    const senderName = process.env.BREVO_SENDER_NAME?.trim() || 'FincasYa';
-
-    if (!apiKey) {
-      console.warn('[habeasData] BREVO_API_KEY no configurada — solicitud guardada sin email.');
-      return;
-    }
-
     const request: Doc<'habeas_data_requests'> | null = await ctx.runQuery(
       internal.habeasData.getById,
-      {
-        requestId: args.requestId,
-      },
+      { requestId: args.requestId },
     );
     if (!request) return;
+
+    // Lista admin configurable (con fallback a HABEAS_DATA_EMAIL para compat).
+    const admins: string[] = await ctx.runQuery(
+      internal.notificationSettings.resolveAdminEmails,
+      {},
+    );
+    const habeasOverride = process.env.HABEAS_DATA_EMAIL?.trim();
+    const recipients = habeasOverride ? [habeasOverride, ...admins] : admins;
+    const to = [...new Set(recipients)].map((email) => ({ email }));
 
     const typeLabel = REQUEST_TYPE_LABELS[request.requestType as RequestType];
     const submitted = new Date(request.submittedAt).toLocaleString('es-CO', {
       timeZone: 'America/Bogota',
     });
 
-    const htmlContent = `
-      <h2>Nueva solicitud Habeas Data</h2>
-      <p><strong>Tipo:</strong> ${typeLabel}</p>
-      <p><strong>Nombre:</strong> ${request.fullName}</p>
-      <p><strong>Documento:</strong> ${request.documentType} ${request.documentNumber}</p>
-      <p><strong>Email:</strong> ${request.email}</p>
-      ${request.phone ? `<p><strong>Teléfono:</strong> ${request.phone}</p>` : ''}
-      <p><strong>Recibida:</strong> ${submitted}</p>
-      <p><strong>Descripción:</strong></p>
-      <p>${request.description.replace(/\n/g, '<br/>')}</p>
-      <hr/>
-      <p style="color:#666;font-size:12px">ID: ${request._id}</p>
-    `;
-
-    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        sender: { name: senderName, email: senderEmail },
-        to: [{ email: toEmail }],
-        replyTo: { email: request.email, name: request.fullName },
-        subject: `[Habeas Data] ${typeLabel} — ${request.fullName}`,
-        htmlContent,
-      }),
+    const html = wrap({
+      title: '📋 Nueva solicitud de Habeas Data',
+      intro: 'Un usuario envió una solicitud desde el sitio público.',
+      bodyHtml:
+        rows([
+          ['Tipo', typeLabel],
+          ['Nombre', request.fullName],
+          ['Documento', `${request.documentType} ${request.documentNumber}`],
+          ['Email', request.email],
+          ['Teléfono', request.phone],
+          ['Recibida', submitted],
+        ]) +
+        `<p style="margin:12px 0 0;font-size:14px;color:#3f3f46"><strong>Descripción:</strong><br/>${request.description.replace(
+          /\n/g,
+          '<br/>',
+        )}</p>`,
     });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      console.error('[habeasData] Brevo error:', res.status, text);
-    }
+    await sendEmail({
+      to,
+      subject: `[Habeas Data] ${typeLabel} — ${request.fullName}`,
+      html,
+      replyTo: { email: request.email, name: request.fullName },
+    });
   },
 });

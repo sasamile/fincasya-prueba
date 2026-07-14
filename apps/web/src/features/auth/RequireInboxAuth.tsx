@@ -26,7 +26,8 @@ export function RequireInboxAuth({ children }: { children: React.ReactNode }) {
   const allowed =
     user && typeof user === 'object' && 'role' in user
       ? (user as { role?: string | null }).role === 'admin' ||
-        (user as { role?: string | null }).role === 'operador'
+        (user as { role?: string | null }).role === 'operador' ||
+        (user as { role?: string | null }).role === 'superadmin'
       : false;
 
   useEffect(() => {

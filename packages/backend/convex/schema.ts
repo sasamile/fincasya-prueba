@@ -889,6 +889,13 @@ export default defineSchema(
        */
       guestListUnlocked: v.optional(v.boolean()),
       /**
+       * Si true, el cliente puede subir comprobantes en el check-in / portal de pago.
+       * Si false/undefined, se le pide enviar el soporte por WhatsApp (default actual).
+       */
+      clientPaymentProofUploadEnabled: v.optional(v.boolean()),
+      /** Marca manual: mensaje/link /anfitrion enviado al propietario. */
+      ownerPortalSentAt: v.optional(v.number()),
+      /**
        * Marca manual: el equipo envió el check-in al cliente (ej. copió el
        * mensaje). Lleva la reserva a la etapa "morado / check-in enviado" en
        * el semáforo del calendario, sin esperar un envío automático.
@@ -1340,6 +1347,20 @@ export default defineSchema(
       scope: v.literal('global'),
       payload: v.any(),
       updatedAt: v.number(),
+    }).index('by_scope', ['scope']),
+
+    /**
+     * Kill-switch de mensajes automáticos programados (panel Automatizaciones).
+     * Default APAGADO: solo `scheduledMessagingEnabled === true` envía.
+     * `schedules`: horarios por tipo (hora CO + días relativos / día de semana).
+     */
+    automationSettings: defineTable({
+      scope: v.literal('global'),
+      scheduledMessagingEnabled: v.boolean(),
+      scheduledMessagesDisabled: v.array(v.string()),
+      schedules: v.optional(v.any()),
+      updatedAt: v.number(),
+      updatedByUserId: v.optional(v.string()),
     }).index('by_scope', ['scope']),
 
     whatsappTemporalMessage: defineTable({

@@ -690,7 +690,7 @@ export function AsesorPanel({
   tool: AsesorTool;
   conversation: ConversationRow | null;
   onClose: () => void;
-  onOpenChat?: (phone: string) => void;
+  onOpenChat?: (phone: string) => void | Promise<void>;
   className?: string;
 }) {
   const fincasForTools = useQuery(api.adminProperties.listAll, {}) as

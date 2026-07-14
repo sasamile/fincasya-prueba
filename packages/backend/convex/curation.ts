@@ -416,22 +416,22 @@ export const curateHistory = internalAction({
 
     // FAQs oficiales del equipo: entran al RAG como CONTEXTO. Los datos
     // (tarifas, proceso de reserva, horarios) son exactos; la redaccion la
-    // adapta la IA al hilo (regla en prompts.ts).
-    const faqsPending: Array<{ key: string; title: string; text: string }> =
-      await ctx.runQuery(internal.curation.listFaqsForImport, {});
-    if (faqsPending.length > 0) {
-      const items = faqsPending.map((f) => ({
-        clientMessage: f.title,
-        response: f.text,
-        situation: `FAQ oficial: ${f.title}`,
-        quality: 'faq',
-        source: 'faq',
-        humanAuthored: true,
-        sourceConversationId: f.key,
-      }));
-      await ctx.runMutation(internal.exemplars.insertBatch, { items });
-      exemplarsTotal += items.length;
-    }
+    // adapta la IA al hilo (regla en prompts.ts). UPSERT: si el copy cambio
+    // en el codigo (ej. migracion a usted), se actualiza y se re-embebe.
+    const faqItems = FAQ_INITIAL_SEED.map((f) => ({
+      clientMessage: f.title,
+      response: f.text,
+      situation: `FAQ oficial: ${f.title}`,
+      quality: 'faq',
+      source: 'faq',
+      humanAuthored: true,
+      sourceConversationId: f.key,
+    }));
+    const faqsChanged: number = await ctx.runMutation(
+      internal.exemplars.upsertByKey,
+      { items: faqItems },
+    );
+    exemplarsTotal += faqsChanged;
 
     // Mensajes situacionales del flujo del equipo (contrato, temporadas
     // especiales, intro/cierre de catalogo, transiciones). UPSERT: si el

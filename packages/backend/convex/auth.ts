@@ -24,14 +24,35 @@ export const getCurrentUser = query({
  * Nota: los datos de Better Auth (tabla `user`) viven en el storage aislado
  * del componente, no en `ctx.db` de esta app — por eso se llama a
  * `components.betterAuth.adapter.*` en vez de `ctx.db.query('user')`.
+ *
+ * Si el rol pasa a `superadmin`, se borran sus filas del historial de
+ * accesos (los logs viejos guardaban el rol anterior y seguirían visibles).
  */
 export const setUserRoleByEmail = internalMutation({
-  args: { email: v.string(), role: v.union(v.literal('admin'), v.literal('operador')) },
-  handler: async (ctx, { email, role }): Promise<{ ok: true; userId: string; role: string }> => {
-    const user: { _id: string } | null = await ctx.runQuery(components.betterAuth.adapter.findOne, {
-      model: 'user',
-      where: [{ field: 'email', operator: 'eq', value: email }],
-    });
+  args: {
+    email: v.string(),
+    role: v.union(
+      v.literal('admin'),
+      v.literal('operador'),
+      v.literal('superadmin'),
+    ),
+  },
+  handler: async (
+    ctx,
+    { email, role },
+  ): Promise<{
+    ok: true;
+    userId: string;
+    role: string;
+    purgedSessionLogs: number;
+  }> => {
+    const user: { _id: string } | null = await ctx.runQuery(
+      components.betterAuth.adapter.findOne,
+      {
+        model: 'user',
+        where: [{ field: 'email', operator: 'eq', value: email }],
+      },
+    );
     if (!user) throw new Error(`No existe un usuario con email ${email}`);
     await ctx.runMutation(components.betterAuth.adapter.updateOne, {
       input: {
@@ -40,6 +61,19 @@ export const setUserRoleByEmail = internalMutation({
         update: { role },
       },
     });
-    return { ok: true, userId: user._id, role };
+
+    let purgedSessionLogs = 0;
+    if (role === 'superadmin') {
+      const logs = await ctx.db
+        .query('adminSessionLogs')
+        .withIndex('by_user_loginAt', (q) => q.eq('userId', user._id))
+        .collect();
+      for (const log of logs) {
+        await ctx.db.delete(log._id);
+        purgedSessionLogs += 1;
+      }
+    }
+
+    return { ok: true, userId: user._id, role, purgedSessionLogs };
   },
 });

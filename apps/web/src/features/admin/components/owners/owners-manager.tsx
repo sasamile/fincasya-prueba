@@ -38,7 +38,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { sileo } from "sileo";
 import { cn } from "@/lib/utils";
 import {
@@ -411,21 +410,38 @@ export function OwnersManager() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] max-w-lg overflow-hidden rounded-2xl p-0 sm:max-w-xl">
-          <DialogHeader className="border-b border-border bg-primary/5 px-6 py-5">
-            <DialogTitle>
+        <DialogContent className="flex max-h-[90vh] w-full max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-2xl">
+          <DialogHeader className="shrink-0 space-y-1 border-b border-border px-6 py-5 pr-12 text-left">
+            <DialogTitle className="text-xl tracking-tight">
               {editing ? "Editar propietario" : "Nuevo propietario"}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-sm leading-relaxed">
               Los datos y cuentas se aplican a todas las fincas seleccionadas.
             </DialogDescription>
           </DialogHeader>
 
-          <ScrollArea className="max-h-[calc(90vh-180px)] px-6 py-5">
-            <div className="space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Nombre completo *</Label>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="space-y-8 px-6 py-6">
+              {/* Contacto */}
+              <section className="space-y-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-primary/10 text-primary flex h-8 w-8 items-center justify-center rounded-lg">
+                    <User className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold tracking-tight">
+                      Datos de contacto
+                    </h3>
+                    <p className="text-muted-foreground text-xs">
+                      Nombre y cómo lo saludamos por WhatsApp
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                    Nombre completo *
+                  </Label>
                   <Input
                     value={form.propietarioNombre}
                     onChange={(e) =>
@@ -435,203 +451,270 @@ export function OwnersManager() {
                       }))
                     }
                     placeholder="Ej. Juan Pérez"
-                    className="rounded-xl"
+                    className="h-11 rounded-xl"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Tratamiento</Label>
-                  <Select
-                    value={form.propietarioTratamiento}
-                    onValueChange={(v) =>
-                      setForm((f) => ({ ...f, propietarioTratamiento: v }))
-                    }
-                  >
-                    <SelectTrigger className="rounded-xl">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Sr">Sr.</SelectItem>
-                      <SelectItem value="Sra">Sra.</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Teléfono</Label>
-                  <Input
-                    value={form.propietarioTelefono}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        propietarioTelefono: e.target.value,
-                      }))
-                    }
-                    className="rounded-xl"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Cédula</Label>
-                  <Input
-                    value={form.propietarioCedula}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        propietarioCedula: e.target.value,
-                      }))
-                    }
-                    className="rounded-xl"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Correo</Label>
-                  <Input
-                    type="email"
-                    value={form.propietarioCorreo}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        propietarioCorreo: e.target.value,
-                      }))
-                    }
-                    className="rounded-xl"
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[10px] font-bold uppercase tracking-widest">
-                    Cuentas bancarias
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                    Tratamiento
                   </Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        { value: "Sr", label: "Señor" },
+                        { value: "Sra", label: "Señora" },
+                      ] as const
+                    ).map((opt) => {
+                      const active = form.propietarioTratamiento === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() =>
+                            setForm((f) => ({
+                              ...f,
+                              propietarioTratamiento: opt.value,
+                            }))
+                          }
+                          className={cn(
+                            "rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors",
+                            active
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:bg-muted/50",
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="min-w-0 space-y-2">
+                    <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                      Teléfono
+                    </Label>
+                    <Input
+                      value={form.propietarioTelefono}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          propietarioTelefono: e.target.value,
+                        }))
+                      }
+                      placeholder="300 123 4567"
+                      className="h-11 rounded-xl"
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-2">
+                    <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                      Cédula
+                    </Label>
+                    <Input
+                      value={form.propietarioCedula}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          propietarioCedula: e.target.value,
+                        }))
+                      }
+                      placeholder="1.234.567.890"
+                      className="h-11 rounded-xl"
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-2 sm:col-span-2">
+                    <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                      Correo
+                    </Label>
+                    <Input
+                      type="email"
+                      value={form.propietarioCorreo}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          propietarioCorreo: e.target.value,
+                        }))
+                      }
+                      placeholder="propietario@email.com"
+                      className="h-11 rounded-xl"
+                    />
+                  </div>
+                </div>
+              </section>
+
+              {/* Cuentas */}
+              <section className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="bg-primary/10 text-primary flex h-8 w-8 items-center justify-center rounded-lg">
+                      <CreditCard className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold tracking-tight">
+                        Cuentas bancarias
+                      </h3>
+                      <p className="text-muted-foreground text-xs">
+                        Para pagos y liquidaciones
+                      </p>
+                    </div>
+                  </div>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    className="h-8 rounded-lg text-xs"
+                    className="h-8 shrink-0 rounded-lg text-xs"
                     onClick={addBankAccount}
                   >
                     <Plus className="mr-1 h-3.5 w-3.5" />
-                    Agregar cuenta
+                    Agregar
                   </Button>
                 </div>
-                {form.bankAccounts.map((account, index) => (
-                  <div
-                    key={account.id}
-                    className="space-y-3 rounded-xl border border-border bg-muted/20 p-4"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-muted-foreground">
-                        Cuenta {index + 1}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeBankAccount(index)}
-                        className="text-muted-foreground hover:text-destructive"
-                        aria-label="Eliminar cuenta"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-1.5 sm:col-span-2">
-                        <Label className="text-xs">Banco</Label>
-                        <Select
-                          value={resolveBankSelectValue(account.bankName)}
-                          onValueChange={(v) => {
-                            const bankName =
-                              v === BANK_OTHER_VALUE ? "" : v;
-                            updateBankAccount(index, { bankName });
-                          }}
+
+                <div className="space-y-3">
+                  {form.bankAccounts.map((account, index) => (
+                    <div
+                      key={account.id}
+                      className="space-y-3 rounded-2xl border border-border bg-muted/15 p-4"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground text-xs font-semibold">
+                          Cuenta {index + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeBankAccount(index)}
+                          className="text-muted-foreground hover:text-destructive rounded-lg p-1.5 transition-colors hover:bg-destructive/10"
+                          aria-label="Eliminar cuenta"
                         >
-                          <SelectTrigger className="rounded-xl">
-                            <SelectValue placeholder="Seleccionar banco" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {COLOMBIAN_BANKS.map((bank) => (
-                              <SelectItem key={bank} value={bank}>
-                                {bank}
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="min-w-0 space-y-1.5 sm:col-span-2">
+                          <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                            Banco
+                          </Label>
+                          <Select
+                            value={resolveBankSelectValue(account.bankName)}
+                            onValueChange={(v) => {
+                              const bankName =
+                                v === BANK_OTHER_VALUE ? "" : v;
+                              updateBankAccount(index, { bankName });
+                            }}
+                          >
+                            <SelectTrigger className="h-11 w-full rounded-xl">
+                              <SelectValue placeholder="Seleccionar banco" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {COLOMBIAN_BANKS.map((bank) => (
+                                <SelectItem key={bank} value={bank}>
+                                  {bank}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value={BANK_OTHER_VALUE}>
+                                Otro
                               </SelectItem>
-                            ))}
-                            <SelectItem value={BANK_OTHER_VALUE}>Otro</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {resolveBankSelectValue(account.bankName) ===
+                            </SelectContent>
+                          </Select>
+                          {resolveBankSelectValue(account.bankName) ===
                           BANK_OTHER_VALUE ? (
+                            <Input
+                              value={account.bankName}
+                              onChange={(e) =>
+                                updateBankAccount(index, {
+                                  bankName: e.target.value,
+                                })
+                              }
+                              placeholder="Nombre del banco"
+                              className="mt-2 h-11 rounded-xl"
+                            />
+                          ) : null}
+                        </div>
+                        <div className="min-w-0 space-y-1.5">
+                          <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                            Número / celular
+                          </Label>
                           <Input
-                            value={account.bankName}
+                            value={account.accountNumber}
                             onChange={(e) =>
                               updateBankAccount(index, {
-                                bankName: e.target.value,
+                                accountNumber: e.target.value,
                               })
                             }
-                            placeholder="Nombre del banco"
-                            className="mt-2 rounded-xl"
+                            className="h-11 rounded-xl font-mono text-sm"
                           />
-                        ) : null}
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Número / celular</Label>
-                        <Input
-                          value={account.accountNumber}
-                          onChange={(e) =>
-                            updateBankAccount(index, {
-                              accountNumber: e.target.value,
-                            })
-                          }
-                          className="rounded-xl font-mono text-sm"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Tipo</Label>
-                        <Select
-                          value={account.accountType ?? ""}
-                          onValueChange={(v) =>
-                            updateBankAccount(index, { accountType: v })
-                          }
-                        >
-                          <SelectTrigger className="rounded-xl">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {getAccountTypesForBank(account.bankName).map(
-                              (type) => (
-                                <SelectItem key={type} value={type}>
-                                  {type}
-                                </SelectItem>
-                              ),
-                            )}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5 sm:col-span-2">
-                        <Label className="text-xs">Titular</Label>
-                        <Input
-                          value={account.accountHolderName ?? ""}
-                          onChange={(e) =>
-                            updateBankAccount(index, {
-                              accountHolderName: e.target.value,
-                            })
-                          }
-                          className="rounded-xl"
-                        />
+                        </div>
+                        <div className="min-w-0 space-y-1.5">
+                          <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                            Tipo
+                          </Label>
+                          <Select
+                            value={account.accountType ?? ""}
+                            onValueChange={(v) =>
+                              updateBankAccount(index, { accountType: v })
+                            }
+                          >
+                            <SelectTrigger className="h-11 w-full rounded-xl">
+                              <SelectValue placeholder="Tipo de cuenta" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {getAccountTypesForBank(account.bankName).map(
+                                (type) => (
+                                  <SelectItem key={type} value={type}>
+                                    {type}
+                                  </SelectItem>
+                                ),
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="min-w-0 space-y-1.5 sm:col-span-2">
+                          <Label className="text-muted-foreground text-[11px] font-semibold tracking-wide">
+                            Titular
+                          </Label>
+                          <Input
+                            value={account.accountHolderName ?? ""}
+                            onChange={(e) =>
+                              updateBankAccount(index, {
+                                accountHolderName: e.target.value,
+                              })
+                            }
+                            className="h-11 rounded-xl"
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </section>
 
-              <div className="space-y-3">
-                <Label className="text-[10px] font-bold uppercase tracking-widest">
-                  Fincas asignadas *
-                </Label>
+              {/* Fincas */}
+              <section className="space-y-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-primary/10 text-primary flex h-8 w-8 items-center justify-center rounded-lg">
+                    <Building2 className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold tracking-tight">
+                      Fincas asignadas *
+                    </h3>
+                    <p className="text-muted-foreground text-xs">
+                      {form.propertyIds.length} seleccionada
+                      {form.propertyIds.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </div>
                 <Input
                   value={propertyFilter}
                   onChange={(e) => setPropertyFilter(e.target.value)}
                   placeholder="Filtrar fincas…"
-                  className="rounded-xl"
+                  className="h-11 rounded-xl"
                 />
-                <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
+                <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-2xl border border-border p-1.5">
                   {filteredPropertyOptions.length === 0 ? (
-                    <p className="text-muted-foreground py-4 text-center text-xs">
+                    <p className="text-muted-foreground py-6 text-center text-xs">
                       Sin fincas
                     </p>
                   ) : (
@@ -641,7 +724,7 @@ export function OwnersManager() {
                         <label
                           key={p.id}
                           className={cn(
-                            "flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm transition hover:bg-muted/60",
+                            "flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors hover:bg-muted/60",
                             checked && "bg-primary/5",
                           )}
                         >
@@ -649,20 +732,19 @@ export function OwnersManager() {
                             checked={checked}
                             onCheckedChange={() => toggleProperty(p.id)}
                           />
-                          <span className="truncate font-medium">{p.label}</span>
+                          <span className="min-w-0 truncate font-medium">
+                            {p.label}
+                          </span>
                         </label>
                       );
                     })
                   )}
                 </div>
-                <p className="text-muted-foreground text-xs">
-                  {form.propertyIds.length} finca(s) seleccionada(s)
-                </p>
-              </div>
+              </section>
             </div>
-          </ScrollArea>
+          </div>
 
-          <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
+          <DialogFooter className="shrink-0 gap-2 border-t border-border px-6 py-4 sm:justify-end">
             <Button
               variant="outline"
               className="rounded-xl"

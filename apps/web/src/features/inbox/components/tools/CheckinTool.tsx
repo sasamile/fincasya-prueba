@@ -1,15 +1,16 @@
 'use client';
 
 /**
- * Herramienta "Check-ins" del rail: lista reservas sin check-in y, cuando hay
- * chat abierto, muestra el resumen de la reserva vinculada y acciones para
- * enviar el mensaje de check-in.
+ * Herramienta "Check-ins" del rail: mensajes al huésped o al propietario
+ * (portal /anfitrion), con listas de quién falta.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
+import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import { toast } from 'sonner';
 import {
+  Building2,
   CalendarRange,
   Check,
   CheckCircle2,
@@ -30,6 +31,10 @@ import {
   fetchCheckinShareMessage,
   openWhatsAppWithMessage,
 } from '@/features/admin/utils/payment-whatsapp-message';
+import {
+  buildOwnerWhatsAppMessage,
+  toWhatsAppPhone,
+} from '@/features/admin/utils/owner-whatsapp-message';
 
 type Booking = {
   _id: string;
@@ -41,10 +46,24 @@ type Booking = {
   fechaSalida: number;
   precioTotal?: number;
   numeroPersonas?: number;
+  numeroMascotas?: number;
   status?: string;
   paymentStatus?: string;
   checkinCompleted?: boolean;
   checkinSentManualAt?: number;
+  ownerPortalSentAt?: number;
+  checkinNeedsEmpleada?: boolean;
+  checkinNeedsTeam?: boolean;
+  checkinServiciosNota?: string | null;
+  checkinObservaciones?: string | null;
+  checkinMascotas?: number;
+  checkinGuests?: unknown[];
+  ownerPortalShare?: { showGuestList?: boolean };
+  ownerPayout?: {
+    valorAcordado?: number;
+    abono?: number;
+    abonos?: Array<{ amount?: number }>;
+  };
   subtotal?: number;
   depositoAseo?: number;
   depositoGarantia?: number;
@@ -52,8 +71,16 @@ type Booking = {
   costoPersonalServicio?: number;
   discountAmount?: number;
   economicAdjustments?: unknown;
-  property?: { title?: string } | null;
+  property?: {
+    title?: string;
+    requiresGuestList?: boolean | null;
+    propietarioNombre?: string | null;
+    propietarioTelefono?: string | null;
+    propietarioTratamiento?: string | null;
+  } | null;
 };
+
+type Audience = 'guest' | 'owner';
 
 function digits(s: string) {
   return (s || '').replace(/\D/g, '');
@@ -91,50 +118,89 @@ function fmtShort(ms: number) {
   });
 }
 
+function ownerPhoneOf(b: Booking) {
+  return b.property?.propietarioTelefono?.trim() || '';
+}
+
+function abonoPropietarioOf(b: Booking) {
+  const op = b.ownerPayout ?? {};
+  const fromList = (op.abonos ?? []).reduce(
+    (sum, a) => sum + (Number(a.amount) || 0),
+    0,
+  );
+  return fromList > 0 ? fromList : Number((op as { abono?: number }).abono || 0);
+}
+
 export function CheckinTool({
   conversation,
   onOpenChat,
 }: {
   conversation: ConversationRow | null;
-  onOpenChat?: (phone: string) => void;
+  onOpenChat?: (phone: string) => void | Promise<void>;
 }) {
+  const [audience, setAudience] = useState<Audience>('guest');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<'send' | 'copy' | null>(null);
   const [copied, setCopied] = useState(false);
 
   const sendMessage = useMutation(api.inbox.sendAdvisorMessage);
+  const markOwnerSent = useMutation(api.bookings.markOwnerPortalSent);
+  const markCheckinSent = useMutation(api.bookings.markCheckinSent);
 
   const data = useQuery(api.bookings.list, { limit: 500 }) as
     | { bookings: Booking[] }
     | undefined;
 
-  const pending = useMemo(() => {
+  const upcoming = useMemo(() => {
     const now = Date.now();
     return (data?.bookings ?? [])
-      .filter(
-        (b) =>
-          b.status !== 'CANCELLED' &&
-          !b.checkinCompleted &&
-          b.fechaSalida >= now,
-      )
-      .sort((a, b) => a.fechaEntrada - b.fechaEntrada)
-      .slice(0, 40);
+      .filter((b) => b.status !== 'CANCELLED' && b.fechaSalida >= now)
+      .sort((a, b) => a.fechaEntrada - b.fechaEntrada);
   }, [data]);
+
+  const pendingGuests = useMemo(
+    () => upcoming.filter((b) => !b.checkinCompleted).slice(0, 40),
+    [upcoming],
+  );
+
+  /** Propietarios a notificar: próxima llegada y aún sin marcar envío del link. */
+  const pendingOwners = useMemo(
+    () =>
+      upcoming
+        .filter((b) => ownerPhoneOf(b) && !b.ownerPortalSentAt)
+        .slice(0, 40),
+    [upcoming],
+  );
+
+  const list = audience === 'guest' ? pendingGuests : pendingOwners;
 
   const chatMatches = useMemo(() => {
     if (!conversation?.phone) return [];
-    return pending.filter(
-      (b) => b.celular && phonesMatch(conversation.phone, b.celular),
+    if (audience === 'guest') {
+      return pendingGuests.filter(
+        (b) => b.celular && phonesMatch(conversation.phone, b.celular),
+      );
+    }
+    return pendingOwners.filter((b) =>
+      phonesMatch(conversation.phone, ownerPhoneOf(b)),
     );
-  }, [pending, conversation?.phone]);
+  }, [audience, pendingGuests, pendingOwners, conversation?.phone]);
 
   const selectedBooking = useMemo(() => {
     if (selectedId) {
-      return pending.find((b) => b._id === selectedId) ?? null;
+      return (
+        list.find((b) => b._id === selectedId) ??
+        upcoming.find((b) => b._id === selectedId) ??
+        null
+      );
     }
     if (chatMatches.length >= 1) return chatMatches[0];
     return null;
-  }, [selectedId, pending, chatMatches]);
+  }, [selectedId, list, upcoming, chatMatches]);
+
+  useEffect(() => {
+    setSelectedId(null);
+  }, [audience]);
 
   useEffect(() => {
     if (!conversation) {
@@ -149,9 +215,9 @@ export function CheckinTool({
     ) {
       setSelectedId(chatMatches[0]._id);
     }
-  }, [conversation?.conversationId, chatMatches, selectedId]);
+  }, [conversation?.conversationId, chatMatches, selectedId, audience]);
 
-  const resolveMessage = useCallback(async (booking: Booking) => {
+  const resolveGuestMessage = useCallback(async (booking: Booking) => {
     const ref = (booking.reference || booking._id).trim();
     const checkInDate = booking.fechaEntrada
       ? new Intl.DateTimeFormat('es-CO', {
@@ -175,20 +241,61 @@ export function CheckinTool({
     return rich || buildSimpleCheckinInviteMessage(booking);
   }, []);
 
-  const chatMatchesSelected =
-    Boolean(conversation) &&
-    Boolean(selectedBooking?.celular) &&
-    phonesMatch(conversation!.phone, selectedBooking!.celular!);
+  const resolveOwnerMessage = useCallback((booking: Booking) => {
+    const ref = (booking.reference || booking._id).trim();
+    return buildOwnerWhatsAppMessage({
+      reference: ref,
+      propertyTitle: booking.property?.title || 'tu finca',
+      propietarioNombre: booking.property?.propietarioNombre,
+      propietarioTratamiento: booking.property?.propietarioTratamiento,
+      fechaEntrada: booking.fechaEntrada,
+      fechaSalida: booking.fechaSalida,
+      horaEntrada: booking.horaEntrada,
+      numeroPersonas: booking.numeroPersonas ?? 0,
+      valorAcordado: Number(booking.ownerPayout?.valorAcordado || 0),
+      abonoPropietario: abonoPropietarioOf(booking),
+      checkinCompleted: booking.checkinCompleted,
+      checkinNeedsEmpleada: booking.checkinNeedsEmpleada,
+      checkinNeedsTeam: booking.checkinNeedsTeam,
+      checkinServiciosNota: booking.checkinServiciosNota,
+      checkinObservaciones: booking.checkinObservaciones,
+      checkinMascotas:
+        booking.checkinMascotas ?? booking.numeroMascotas ?? 0,
+      requiresGuestList: booking.property?.requiresGuestList !== false,
+      showGuestListToOwner: booking.ownerPortalShare?.showGuestList !== false,
+      appBaseUrl:
+        typeof window !== 'undefined' ? window.location.origin : undefined,
+    });
+  }, []);
+
+  const chatMatchesSelected = useMemo(() => {
+    if (!conversation || !selectedBooking) return false;
+    if (audience === 'guest') {
+      return Boolean(
+        selectedBooking.celular &&
+          phonesMatch(conversation.phone, selectedBooking.celular),
+      );
+    }
+    const ownerPhone = ownerPhoneOf(selectedBooking);
+    return Boolean(ownerPhone && phonesMatch(conversation.phone, ownerPhone));
+  }, [audience, conversation, selectedBooking]);
 
   async function handleCopy() {
     if (!selectedBooking) return;
     setBusy('copy');
     try {
-      const text = await resolveMessage(selectedBooking);
+      const text =
+        audience === 'guest'
+          ? await resolveGuestMessage(selectedBooking)
+          : resolveOwnerMessage(selectedBooking);
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      toast.success('Mensaje de check-in copiado');
+      toast.success(
+        audience === 'guest'
+          ? 'Mensaje de check-in copiado'
+          : 'Mensaje al propietario copiado',
+      );
     } catch {
       toast.error('No se pudo copiar el mensaje.');
     } finally {
@@ -199,17 +306,39 @@ export function CheckinTool({
   async function handleSendInChat() {
     if (!conversation || !selectedBooking) return;
     if (!chatMatchesSelected) {
-      toast.error('El chat abierto no coincide con el celular de esta reserva.');
+      toast.error(
+        audience === 'guest'
+          ? 'El chat abierto no coincide con el celular de esta reserva.'
+          : 'El chat abierto no coincide con el teléfono del propietario.',
+      );
       return;
     }
     setBusy('send');
     try {
-      const text = await resolveMessage(selectedBooking);
+      const text =
+        audience === 'guest'
+          ? await resolveGuestMessage(selectedBooking)
+          : resolveOwnerMessage(selectedBooking);
       await sendMessage({
         conversationId: conversation.conversationId,
         content: text,
       });
-      toast.success('Mensaje de check-in enviado en el chat');
+      if (audience === 'owner') {
+        await markOwnerSent({
+          id: selectedBooking._id as Id<'bookings'>,
+          sent: true,
+        });
+      } else if (!selectedBooking.checkinSentManualAt) {
+        await markCheckinSent({
+          id: selectedBooking._id as Id<'bookings'>,
+          sent: true,
+        }).catch(() => undefined);
+      }
+      toast.success(
+        audience === 'guest'
+          ? 'Mensaje de check-in enviado en el chat'
+          : 'Mensaje al propietario enviado',
+      );
     } catch {
       toast.error('No se pudo enviar el mensaje.');
     } finally {
@@ -220,44 +349,143 @@ export function CheckinTool({
   function handleOpenLink() {
     if (!selectedBooking) return;
     const ref = (selectedBooking.reference || selectedBooking._id).trim();
-    window.open(buildCheckinPortalUrl(ref), '_blank', 'noopener,noreferrer');
+    const url =
+      audience === 'guest'
+        ? buildCheckinPortalUrl(ref)
+        : `${typeof window !== 'undefined' ? window.location.origin : 'https://fincasya.com'}/anfitrion/${encodeURIComponent(ref)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 
   async function handleWhatsApp() {
     if (!selectedBooking) return;
-    const text = await resolveMessage(selectedBooking);
-    openWhatsAppWithMessage(text, selectedBooking.celular ?? conversation?.phone);
+    const text =
+      audience === 'guest'
+        ? await resolveGuestMessage(selectedBooking)
+        : resolveOwnerMessage(selectedBooking);
+    const phone =
+      audience === 'guest'
+        ? selectedBooking.celular ?? conversation?.phone
+        : toWhatsAppPhone(ownerPhoneOf(selectedBooking)) ??
+          conversation?.phone;
+    openWhatsAppWithMessage(text, phone);
+    if (audience === 'owner') {
+      void markOwnerSent({
+        id: selectedBooking._id as Id<'bookings'>,
+        sent: true,
+      }).catch(() => undefined);
+    }
   }
 
   function selectBooking(b: Booking) {
     setSelectedId(b._id);
-    if (b.celular) onOpenChat?.(b.celular);
+    if (audience === 'guest' && b.celular) onOpenChat?.(b.celular);
+    if (audience === 'owner') {
+      const phone = ownerPhoneOf(b);
+      if (phone) onOpenChat?.(phone);
+    }
   }
+
+  const missingCount =
+    audience === 'guest'
+      ? pendingGuests.filter((b) => !b.checkinSentManualAt).length
+      : pendingOwners.length;
 
   return (
     <>
-      {/* Resumen de la reserva seleccionada / del chat */}
+      <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-muted/30 p-1">
+        <button
+          type="button"
+          onClick={() => setAudience('guest')}
+          className={cn(
+            'flex h-8 items-center justify-center gap-1.5 rounded-lg text-[11px] font-bold transition',
+            audience === 'guest'
+              ? 'bg-emerald-600 text-white'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Users className="h-3.5 w-3.5" />
+          Clientes
+        </button>
+        <button
+          type="button"
+          onClick={() => setAudience('owner')}
+          className={cn(
+            'flex h-8 items-center justify-center gap-1.5 rounded-lg text-[11px] font-bold transition',
+            audience === 'owner'
+              ? 'bg-violet-600 text-white'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Building2 className="h-3.5 w-3.5" />
+          Propietarios
+        </button>
+      </div>
+
+      <p className="rounded-lg border border-border bg-muted/20 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+        {audience === 'guest' ? (
+          <>
+            <span className="font-bold text-emerald-700 dark:text-emerald-400">
+              Cliente / turista
+            </span>
+            {' — '}
+            mensaje de check-in (plantilla{' '}
+            <code className="font-mono text-[10px]">inicio_checkin_turista</code>
+            ). Horarios automáticos en Automatizaciones.
+          </>
+        ) : (
+          <>
+            <span className="font-bold text-violet-700 dark:text-violet-400">
+              Propietario
+            </span>
+            {' — '}
+            aviso de llegada (plantilla{' '}
+            <code className="font-mono text-[10px]">aviso_llegada_propietario</code>
+            ). Horarios automáticos en Automatizaciones.
+          </>
+        )}
+      </p>
+
       {conversation ? (
-        <section className="rounded-2xl border border-border bg-card p-3 shadow-sm">
-          <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
-            <CalendarRange className="h-3.5 w-3.5" /> Reserva de este chat
+        <section className="rounded-2xl border border-border bg-card p-3">
+          <h3 className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+            <CalendarRange className="h-3.5 w-3.5" />
+            {audience === 'guest'
+              ? 'Reserva de este chat'
+              : 'Propietario de este chat'}
+            <span
+              className={cn(
+                'ml-auto rounded px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal',
+                audience === 'guest'
+                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                  : 'bg-violet-500/15 text-violet-700 dark:text-violet-400',
+              )}
+            >
+              {audience === 'guest' ? '→ Cliente' : '→ Propietario'}
+            </span>
           </h3>
 
           {!selectedBooking ? (
             <p className="rounded-xl border border-dashed border-border bg-muted/30 px-3 py-4 text-center text-xs text-muted-foreground">
-              Este contacto no tiene un check-in pendiente. Elige una reserva de
-              la lista para ver el resumen y enviar el mensaje.
+              {audience === 'guest'
+                ? 'Este contacto no tiene un check-in pendiente. Elige una reserva de la lista.'
+                : 'Este chat no coincide con un propietario pendiente. Elige uno de la lista.'}
             </p>
           ) : (
             <div className="space-y-3">
-              <div className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+              <div className="rounded-xl border border-border bg-muted/30 p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-bold">
-                      {selectedBooking.nombreCompleto || 'Sin nombre'}
+                      {audience === 'guest'
+                        ? selectedBooking.nombreCompleto || 'Sin nombre'
+                        : selectedBooking.property?.propietarioNombre ||
+                          'Propietario'}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {selectedBooking.property?.title ?? 'Sin finca'}
+                      {audience === 'owner' && selectedBooking.nombreCompleto
+                        ? ` · ${selectedBooking.nombreCompleto}`
+                        : ''}
                     </p>
                   </div>
                   <span
@@ -293,23 +521,37 @@ export function CheckinTool({
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Total</dt>
+                    <dt className="text-muted-foreground">
+                      {audience === 'guest' ? 'Total' : 'Acordado'}
+                    </dt>
                     <dd className="font-semibold">
-                      {money(selectedBooking.precioTotal)}
+                      {audience === 'guest'
+                        ? money(selectedBooking.precioTotal)
+                        : money(
+                            Number(
+                              selectedBooking.ownerPayout?.valorAcordado || 0,
+                            ) || undefined,
+                          )}
                     </dd>
                   </div>
                 </dl>
 
-                {selectedBooking.checkinSentManualAt ? (
+                {audience === 'guest' && selectedBooking.checkinSentManualAt ? (
                   <p className="mt-2 text-[11px] font-medium text-emerald-600">
                     Check-in marcado como enviado
+                  </p>
+                ) : null}
+                {audience === 'owner' && selectedBooking.ownerPortalSentAt ? (
+                  <p className="mt-2 text-[11px] font-medium text-emerald-600">
+                    Link al propietario marcado como enviado
                   </p>
                 ) : null}
 
                 {!chatMatchesSelected ? (
                   <p className="mt-2 text-[11px] text-amber-600">
-                    El número del chat no coincide con el de esta reserva. Abre
-                    el chat del huésped o selecciona la reserva correcta.
+                    {audience === 'guest'
+                      ? 'El número del chat no coincide con el de esta reserva.'
+                      : 'El número del chat no coincide con el del propietario.'}
                   </p>
                 ) : null}
               </div>
@@ -319,14 +561,21 @@ export function CheckinTool({
                   type="button"
                   disabled={!chatMatchesSelected || busy === 'send'}
                   onClick={() => void handleSendInChat()}
-                  className="col-span-2 flex h-10 items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+                  className={cn(
+                    'col-span-2 flex h-10 items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white transition disabled:opacity-50',
+                    audience === 'guest'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'bg-violet-600 hover:bg-violet-700',
+                  )}
                 >
                   {busy === 'send' ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Send className="h-4 w-4" />
                   )}
-                  Enviar en este chat
+                  {audience === 'guest'
+                    ? 'Enviar check-in (cliente)'
+                    : 'Enviar aviso (propietario)'}
                 </button>
                 <button
                   type="button"
@@ -355,67 +604,83 @@ export function CheckinTool({
                   className="col-span-2 flex h-9 items-center justify-center gap-1.5 rounded-xl border border-border text-xs font-semibold transition hover:bg-muted"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                  Abrir portal de check-in
+                  {audience === 'guest'
+                    ? 'Abrir portal de check-in'
+                    : 'Abrir portal del propietario'}
                 </button>
               </div>
-
-              {chatMatches.length > 1 ? (
-                <p className="text-[11px] text-muted-foreground">
-                  Este contacto tiene {chatMatches.length} reservas pendientes.
-                  Elige otra en la lista de abajo.
-                </p>
-              ) : null}
             </div>
           )}
         </section>
       ) : (
         <section className="rounded-2xl border border-dashed border-border bg-muted/20 px-3 py-4 text-center text-xs text-muted-foreground">
-          Abre un chat a la derecha o toca una reserva para ver el resumen y
-          enviar el mensaje de check-in.
+          Abre un chat o toca una fila para ver el resumen y enviar el mensaje.
         </section>
       )}
 
-      {/* Lista de pendientes */}
-      <section className="rounded-2xl border border-border bg-card p-3 shadow-sm">
+      <section className="rounded-2xl border border-border bg-card p-3">
         <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
-          <DoorOpen className="h-3.5 w-3.5" /> Check-ins pendientes ·{' '}
-          {pending.length}
+          {audience === 'guest' ? (
+            <DoorOpen className="h-3.5 w-3.5 text-emerald-600" />
+          ) : (
+            <Building2 className="h-3.5 w-3.5 text-violet-600" />
+          )}
+          {audience === 'guest'
+            ? `Check-ins pendientes · ${pendingGuests.length}`
+            : `Propietarios por avisar · ${pendingOwners.length}`}
+          {missingCount > 0 && audience === 'guest' ? (
+            <span className="ml-auto font-semibold normal-case tracking-normal text-orange-500">
+              {missingCount} sin mensaje
+            </span>
+          ) : null}
         </h3>
         {data === undefined ? (
           <div className="grid place-items-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-primary" />
           </div>
-        ) : pending.length === 0 ? (
+        ) : list.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-8 text-center">
             <CheckCircle2 className="h-6 w-6 text-emerald-500" />
             <p className="text-xs text-muted-foreground">
-              Todas las reservas próximas tienen su check-in al día. 🎉
+              {audience === 'guest'
+                ? 'Todas las reservas próximas tienen su check-in al día.'
+                : 'No hay propietarios pendientes de avisar.'}
             </p>
           </div>
         ) : (
           <div className="space-y-1.5">
-            {pending.map((b) => {
+            {list.map((b) => {
               const d = dayLabel(b.fechaEntrada);
               const isSelected = selectedBooking?._id === b._id;
               const matchesChat =
                 conversation?.phone &&
-                b.celular &&
-                phonesMatch(conversation.phone, b.celular);
+                (audience === 'guest'
+                  ? b.celular && phonesMatch(conversation.phone, b.celular)
+                  : phonesMatch(conversation.phone, ownerPhoneOf(b)));
+              const title =
+                audience === 'guest'
+                  ? b.nombreCompleto || 'Sin nombre'
+                  : b.property?.propietarioNombre || 'Propietario';
+              const subtitle =
+                audience === 'guest'
+                  ? `${b.property?.title ?? ''} · ${fmtShort(b.fechaEntrada)}${
+                      b.checkinSentManualAt ? ' · check-in enviado' : ''
+                    }`
+                  : `${b.property?.title ?? ''} · ${fmtShort(b.fechaEntrada)} · ${
+                      b.nombreCompleto || 'huésped'
+                    }`;
               return (
                 <button
                   key={b._id}
                   type="button"
                   onClick={() => selectBooking(b)}
-                  title={
-                    b.celular
-                      ? 'Ver resumen y abrir chat del huésped'
-                      : 'La reserva no tiene celular'
-                  }
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-xl border p-2.5 text-left transition',
                     isSelected
-                      ? 'border-primary bg-primary/10'
-                      : 'border-border hover:border-primary/40 hover:bg-primary/5',
+                      ? audience === 'guest'
+                        ? 'border-emerald-500 bg-emerald-500/10'
+                        : 'border-violet-500 bg-violet-500/10'
+                      : 'border-border hover:bg-muted/40',
                   )}
                 >
                   <span
@@ -430,7 +695,7 @@ export function CheckinTool({
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold">
-                      {b.nombreCompleto || 'Sin nombre'}
+                      {title}
                       {matchesChat ? (
                         <span className="ml-1 text-[10px] font-bold text-primary">
                           · este chat
@@ -438,8 +703,7 @@ export function CheckinTool({
                       ) : null}
                     </p>
                     <p className="truncate text-[11px] text-muted-foreground">
-                      {b.property?.title ?? ''} · {fmtShort(b.fechaEntrada)}
-                      {b.checkinSentManualAt ? ' · check-in enviado' : ''}
+                      {subtitle}
                     </p>
                   </div>
                   <MessageCircle className="h-4 w-4 shrink-0 text-muted-foreground" />

@@ -80,9 +80,10 @@ export function firstNameForGreeting(rawName?: string | null): string | null {
 }
 
 /**
- * Trato formal para saludo: "señor Juan Pérez" / "señora María Gómez".
+ * Trato formal para saludo: "Sr. Juan Pérez" / "Sra. María Gómez" (abreviado,
+ * regla de Santiago 14-jul: nunca "señor"/"señora" completos).
  * Si el genero no se puede inferir del nombre (o el nombre es basura tipo
- * "i🐶"), devuelve null: NUNCA adivinamos "señor" por defecto — el trato
+ * "i🐶"), devuelve null: NUNCA adivinamos el titulo por defecto — el trato
  * sin titulo lo resuelve el caller (saludo generico, tuteo sin nombre).
  */
 export function formalSalutationName(
@@ -94,7 +95,7 @@ export function formalSalutationName(
   const first = fullName.split(' ')[0] ?? '';
   const effective = gender ?? inferGenderFromFirstName(first);
   if (!effective) return null;
-  const title = effective === 'female' ? 'señora' : 'señor';
+  const title = effective === 'female' ? 'Sra.' : 'Sr.';
   return `${title} ${fullName}`;
 }
 
@@ -151,15 +152,14 @@ function timeOfDayCourtesyPhrase(
   slot: TimeSlot,
   _gender: 'male' | 'female' | null,
 ): string {
-  // Tuteo SIEMPRE (regla de la casa: prompts.ts prohibe el "usted" y la guia de
-  // tono lo marca como el rompimiento #1 del sello tuteo+titulo).
+  // Tuteo + titulo (Norma "Apertura unica" v2, 14-jul): prohibido el usted.
   if (slot === 'morning') {
-    return 'gracias por comunicarte con nosotros. ¿En qué te podemos ayudar?';
+    return 'gusto saludarte ☺️ ¿En qué te podemos ayudar? ✅';
   }
   if (slot === 'afternoon') {
-    return 'es un gusto atenderte. ¿En qué te podemos colaborar?';
+    return 'gusto saludarte ☺️ ¿En qué te podemos colaborar? ✅';
   }
-  return 'gracias por escribirnos. Estamos atentos para ayudarte.';
+  return 'gusto saludarte ☺️ Estamos atentos para ayudarte ✅';
 }
 
 /**
@@ -178,29 +178,36 @@ export function buildGreetingOpener(
   const effectiveGender = gender ?? (first ? inferGenderFromFirstName(first) : null);
   const courtesy = timeOfDayCourtesyPhrase(slot, effectiveGender);
 
-  // Sin genero claro NO adivinamos "señor": saludo generico sin nombre.
+  // Sin genero claro NO adivinamos el titulo: saludo generico sin nombre.
   if (fullName && effectiveGender) {
-    const title = effectiveGender === 'female' ? 'señora' : 'señor';
+    const title = effectiveGender === 'female' ? 'Sra.' : 'Sr.';
     return `¡Hola! ${title} ${fullName}. ${timeGreeting}, ${courtesy}`;
   }
   return `¡Hola! ${timeGreeting}, ${courtesy}`;
 }
 
-/** Mensaje de bienvenida oficial (verbatim del equipo, formato 13-jul). */
+/**
+ * Mensaje de bienvenida oficial (verbatim del equipo). Apertura = ritual
+ * completo de la Norma "Apertura única" v2: saludo + franja horaria +
+ * Sr./Sra. + nombre + "gusto saludarte" (+ "nuevamente" si es recurrente)
+ * + emojis ☺️✅. Se envía UNA sola vez por conversación.
+ */
 export function buildWelcomeMessage(
   contactName?: string | null,
   gender?: 'male' | 'female' | null,
   now: Date = new Date(),
+  returning = false,
 ): string {
   const timeGreeting = timeOfDayGreeting(now);
   const fullName = fullNameForGreeting(contactName);
   const first = fullName?.split(' ')[0] ?? '';
   const effectiveGender = gender ?? (first ? inferGenderFromFirstName(first) : null);
-  // Sin genero claro NO adivinamos "señor": bienvenida generica sin nombre.
+  const saludarte = returning ? 'gusto saludarte nuevamente' : 'gusto saludarte';
+  // Sin genero claro NO adivinamos el titulo: bienvenida generica sin nombre.
   const opener =
     fullName && effectiveGender
-      ? `¡Hola! ${effectiveGender === 'female' ? 'señora' : 'señor'} ${fullName}. ${timeGreeting}, 🙋`
-      : `¡Hola! ${timeGreeting}, 🙋`;
+      ? `¡Hola! ${effectiveGender === 'female' ? 'Sra.' : 'Sr.'} ${fullName}. ${timeGreeting}, ${saludarte} ☺️✅`
+      : `¡Hola! ${timeGreeting}, ${saludarte} ☺️✅`;
   return `${opener}
 Gracias por comunicarte con *FINCASYA.COM*®️ 💻 En breve te brindaremos atención personalizada, para agilizar tu proceso indícanos por favor la siguiente información:
 
@@ -216,11 +223,63 @@ ${HORARIO_SIMPLE}`;
 }
 
 /**
- * Horario CORTO para la bienvenida (asi lo pone el equipo: una sola linea,
- * sin desglose de sabado/domingo).
+ * FUENTE ÚNICA de horarios (Norma "Apertura única" v2, punto 6): cualquier
+ * texto con horarios interpola estas constantes — PROHIBIDO hardcodear horas
+ * en otro lugar (la plantilla vieja decía 7:30 AM–7:00 PM y contradecía el
+ * horario detallado). Si cambian los horarios, se corrigen SOLO aquí.
  */
-export const HORARIO_SIMPLE = `🕛 Horarios de atención:
-✔️ 07:30 AM A 07:00 PM`;
+export const BUSINESS_HOURS_SCHEDULE = `🕒 Horario de atención:
+📅 Lunes a viernes: 7:30 a.m. a 7:30 p.m.
+📅 Sábados: 7:00 a.m. a 6:00 p.m.
+📅 Domingos: 9:00 a.m. a 6:00 p.m.`;
+
+export const BUSINESS_HOURS_SCHEDULE_SHORT = `🕛 Horarios de atención:
+✔️ 07:30 AM A 07:30 PM`;
+
+/**
+ * Horario CORTO para la bienvenida (una sola linea). Alias de la fuente única.
+ */
+export const HORARIO_SIMPLE = BUSINESS_HOURS_SCHEDULE_SHORT;
+
+/**
+ * Aviso oficial de ESTADÍA MÍNIMA (puente festivo / temporada especial).
+ * Se envía TAL CUAL desde el candado de enviar_catalogo — el LLM no lo
+ * redacta (lo comprimía y perdía el tono aprobado por Santiago, 14-jul).
+ */
+export function buildMinimoNochesMessage(args: {
+  /** Nombre de la regla que no se cumple (ej. "Puente festivo", "Navidad"). */
+  temporada: string;
+  minNoches: number;
+  /** YYYY-MM-DD que dio el cliente. */
+  fechaEntrada: string;
+  personas?: number;
+}): string {
+  const entrada = new Date(`${args.fechaEntrada}T12:00:00-05:00`);
+  const fmtMes = new Intl.DateTimeFormat('es-CO', {
+    timeZone: BOGOTA_TZ,
+    month: 'long',
+  });
+  const fmtDia = new Intl.DateTimeFormat('es-CO', {
+    timeZone: BOGOTA_TZ,
+    day: 'numeric',
+    month: 'long',
+  });
+  const salida = new Date(entrada.getTime() + args.minNoches * 86_400_000);
+  const contexto =
+    args.temporada === 'Puente festivo'
+      ? `el puente festivo de ${fmtMes.format(entrada)}`
+      : `la temporada de ${args.temporada}`;
+  const grupo = args.personas
+    ? `para tu grupo de ${args.personas} personas`
+    : 'para tu grupo';
+  return `Por supuesto, será un gusto ayudarte 😊
+
+Para ${contexto}, las reservas tienen una estadía mínima de ${args.minNoches} noches, para que puedas disfrutar con mayor tranquilidad y aprovechar mejor tu experiencia.
+
+¿Te parece bien ajustar la fecha de salida para el ${fmtDia.format(salida)}? Así podré compartirte las mejores fincas disponibles ${grupo} ✨🏡
+
+Quedo muy atento a tu respuesta para continuar ayudándote.`;
+}
 
 /**
  * Politica oficial de MASCOTAS (verbatim del equipo, con sus emojis exactos).
@@ -259,10 +318,8 @@ A continuación, te comparto las opciones disponibles para tus fechas 📅
  * Solo se usa cuando el cliente pregunta explicitamente por los horarios;
  * en la bienvenida va el corto.
  */
-export const HORARIOS_OFICIALES = `🕒 Horario de atención:
-📅 Lunes a viernes: 7:30 a.m. a 7:30 p.m.
-📅 Sábados: 7:00 a.m. a 6:00 p.m.
-📅 Domingos: 9:00 a.m. a 6:00 p.m.`;
+/** Alias de la fuente única (ver BUSINESS_HOURS_SCHEDULE arriba). */
+export const HORARIOS_OFICIALES = BUSINESS_HOURS_SCHEDULE;
 
 /**
  * Bloque oficial del PROCESO DE RESERVA (verbatim, copy real de produccion).
@@ -287,7 +344,7 @@ Puedes reservar con cualquiera de estos medios:
 
 💰 *Condiciones de reserva*
 La mayoría de nuestras propiedades se reservan con el 50% del valor del alquiler.
-El saldo restante lo debes cancelar cuando recibes la finca a satisfacción.
+El saldo restante lo cancelas cuando recibes la finca a satisfacción.
 
 📄 *Confirmación y ubicación*
 Una vez validado tu pago, te haremos entrega del documento oficial de confirmación y la ubicación exacta de la propiedad.
@@ -334,9 +391,11 @@ export const DATOS_CONTRATO = `📋 Para elaborar tu contrato de arrendamiento y
 export function buildPropertySelectionHandoff(
   contactName?: string | null,
 ): string {
-  const first = firstNameForGreeting(contactName);
-  const opener = first
-    ? `¡Excelente elección, ${first}!`
+  // Confirmación de reserva = momento clave: va el nombre con Sr./Sra.
+  // (protocolo 14-jul); si el género no es claro, sin nombre.
+  const formal = formalSalutationName(contactName);
+  const opener = formal
+    ? `¡Excelente elección, ${formal}!`
     : `¡Excelente elección!`;
   return `${opener} Nos alegra saber que esta propiedad es de tu interés. En breve, uno de nuestros expertos se comunicará contigo para brindarte toda la información, resolver tus dudas y ayudarte a gestionar el mejor precio posible para tu reserva. ¡Gracias por confiar en nosotros!`;
 }
@@ -422,7 +481,7 @@ export function replyAlreadyOpensWithTimeGreeting(reply: string): boolean {
   const head = reply.slice(0, 160).toLowerCase();
   return (
     /buenos\s*d[ií]as|buenas\s*tardes|buenas\s*noches/.test(head) ||
-    /^¡?\s*hola[,!]?\s+(señor|señora)/.test(head)
+    /^¡?\s*hola[,!]?\s+(señor|señora|sr\.?|sra\.?)/.test(head)
   );
 }
 
@@ -433,7 +492,7 @@ export function replyAlreadyOpensWithTimeGreeting(reply: string): boolean {
  */
 export function stripRedundantHolaPrefix(reply: string): string {
   return reply
-    .replace(/^¡?\s*hola[!,.\s]+(don|doña|señor|señora)\s+[^!.\n]+[!.,]?\s*/i, '')
+    .replace(/^¡?\s*hola[!,.\s]+(don|doña|señor|señora|sr\.?|sra\.?)\s+[^!.\n]+[!.,]?\s*/i, '')
     .replace(/^¡?\s*hola[!,.]?\s*/i, '')
     .trim();
 }

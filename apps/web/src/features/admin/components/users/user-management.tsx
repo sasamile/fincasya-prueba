@@ -323,7 +323,7 @@ export function UserManagement({
         user.role === "vendedor" ||
         !user.role ||
         (user.role as string) === ""
-      );
+      ) && (user.role as string) !== "superadmin";
     }
   });
 

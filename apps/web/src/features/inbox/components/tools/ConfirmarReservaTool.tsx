@@ -76,7 +76,7 @@ export function ConfirmarReservaTool({
   onOpenChat,
 }: {
   conversation: ConversationRow | null;
-  onOpenChat?: (phone: string) => void;
+  onOpenChat?: (phone: string) => void | Promise<void>;
 }) {
   const [code, setCode] = useState('');
   const [selectedId, setSelectedId] = useState<Id<'contracts'> | null>(null);

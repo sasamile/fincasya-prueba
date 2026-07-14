@@ -24,6 +24,7 @@ import {
 } from './lib/openai';
 import { buildSystemPrompt } from './lib/prompts';
 import {
+  buildMinimoNochesMessage,
   buildPropertySelectionHandoff,
   buildWelcomeMessage,
   burstHasOnlyGreeting,
@@ -32,7 +33,9 @@ import {
   getUserBurstSinceLastBot,
   MASCOTAS_POLITICA,
   prependGreetingIfNeeded,
+  stripRedundantHolaPrefix,
 } from './lib/copys';
+import { isAppAutoReply } from './lib/appAutoReply';
 import { detectPriceLoopEscalation, isPriceDeflection, isPriceQuestion } from './lib/agentEscalation';
 import { detectPuenteFestivo, humanHolidayEs } from './lib/colombiaPublicHolidays';
 import { propertyMatchesZone, resolveZoneKeywords } from './lib/zoneProximity';
@@ -59,6 +62,8 @@ type AgentContext = {
   history: Array<{ sender: 'user' | 'assistant'; content: string }>;
   lastUserMessageId: Id<'messages'> | null;
   catalogSent: boolean;
+  /** El contacto ya tuvo conversaciones anteriores ("gusto saludarte nuevamente"). */
+  returning: boolean;
 };
 
 type FincaResult = {
@@ -112,8 +117,24 @@ export const getAgentContext = internalQuery({
     for (const m of ordered) {
       if (m.sender === 'user' && !m.deletedAt) lastUserMessageId = m._id;
       if (m.sender === 'system' || m.deletedAt || !m.content.trim()) continue;
+      // Respuestas automáticas de la app de WhatsApp (mensaje de ausencia,
+      // echo de coexistencia): NO van al hilo del agente — son ruido y
+      // dejaban al bot sin responder (el guard exige que el último mensaje
+      // sea del cliente y el auto-mensaje quedaba de último). El chequeo por
+      // contenido cubre los capturados antes de marcar la fuente.
+      const metaSource = (m.metadata as { source?: string } | null)?.source;
+      if (metaSource === 'ycloud_smb_echo_auto') continue;
+      if (metaSource === 'whatsapp_temporal') continue;
+      if (m.sender === 'assistant' && isAppAutoReply(m.content)) continue;
       history.push({ sender: m.sender, content: m.content });
     }
+    // Cliente recurrente: el contacto tiene OTRAS conversaciones (cerradas o
+    // eliminadas del panel) ademas de esta.
+    const allConvs = await ctx.db
+      .query('conversations')
+      .withIndex('by_contact', (q) => q.eq('contactId', conversation.contactId))
+      .collect();
+    const returning = allConvs.some((c) => c._id !== conversationId);
     return {
       status: conversation.status,
       contactPhone: contact?.phone ?? '',
@@ -121,6 +142,7 @@ export const getAgentContext = internalQuery({
       history,
       lastUserMessageId,
       catalogSent: (conversation.lastSentCatalogPropertyIds?.length ?? 0) > 0,
+      returning,
     };
   },
 });
@@ -652,6 +674,11 @@ const TOOL_DEFS: ToolDef[] = [
         properties: {
           fechaEntrada: { type: 'string', description: 'YYYY-MM-DD' },
           fechaSalida: { type: 'string', description: 'YYYY-MM-DD' },
+          personas: {
+            type: 'number',
+            description:
+              'Numero de personas si el cliente ya lo dio (personaliza el aviso de minimo de noches)',
+          },
         },
         required: ['fechaEntrada', 'fechaSalida'],
       },
@@ -733,8 +760,8 @@ function parseDateMs(iso: string): number {
 function buildPriceHandoffReply(contactName: string): string {
   const name = formalSalutationName(contactName);
   return name
-    ? `Listo, ${name}, un Experto de nuestro equipo te confirma el valor exacto y los detalles de la finca 🤝✨`
-    : `Listo, un Experto de nuestro equipo te confirma el valor exacto y los detalles de la finca 🤝✨`;
+    ? `¡Claro que sí, ${name}! Un Experto de nuestro equipo te confirma el valor exacto y los detalles de la finca 🤝✨`
+    : `¡Claro que sí! Un Experto de nuestro equipo te confirma el valor exacto y los detalles de la finca 🤝✨`;
 }
 
 export const runAgentTurn = internalAction({
@@ -805,7 +832,12 @@ export const runAgentTurn = internalAction({
 
     // Primer turno + rafaga solo saludos → welcome oficial determinista.
     if (!botHasSpoken && userBurst.length > 0 && burstHasOnlyGreeting(userBurst)) {
-      const welcome = buildWelcomeMessage(context.contactName);
+      const welcome = buildWelcomeMessage(
+        context.contactName,
+        undefined,
+        new Date(),
+        context.returning,
+      );
       let welcomeWamid: string | undefined;
       if (context.contactPhone) {
         try {
@@ -871,6 +903,7 @@ export const runAgentTurn = internalAction({
 
     let escalated = false;
     let mascotasSentThisTurn = false;
+    let avisoMinimoSentThisTurn = false;
     let skipFinalReply = false;
     let finalText: string | null = null;
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
@@ -910,7 +943,12 @@ export const runAgentTurn = internalAction({
               typeof args.fechaEntrada === 'string' ? args.fechaEntrada : '';
             const fechaSalida =
               typeof args.fechaSalida === 'string' ? args.fechaSalida : '';
-            let bloqueoTemporada: string | null = null;
+            let bloqueo: {
+              detalle: string;
+              temporada: string;
+              minNoches: number;
+              esMinimo: boolean;
+            } | null = null;
             if (fechaEntrada && fechaSalida) {
               const temp = await ctx.runQuery(
                 internal.agent.toolConsultarTemporada,
@@ -918,28 +956,83 @@ export const runAgentTurn = internalAction({
               );
               const incumplidas = temp.reglas.filter((r) => !r.cumple);
               if (incumplidas.length > 0) {
-                bloqueoTemporada = incumplidas
-                  .map(
-                    (r) =>
-                      `${r.temporada}: minimo ${r.minimoNoches} noches${
-                        r.maximoNoches ? `, maximo ${r.maximoNoches}` : ''
-                      } (el cliente pide ${temp.noches})`,
-                  )
-                  .join('; ');
+                const dura = incumplidas.reduce((a, b) =>
+                  b.minimoNoches > a.minimoNoches ? b : a,
+                );
+                bloqueo = {
+                  detalle: incumplidas
+                    .map(
+                      (r) =>
+                        `${r.temporada}: minimo ${r.minimoNoches} noches${
+                          r.maximoNoches ? `, maximo ${r.maximoNoches}` : ''
+                        } (el cliente pide ${temp.noches})`,
+                    )
+                    .join('; '),
+                  temporada: dura.temporada,
+                  minNoches: dura.minimoNoches,
+                  esMinimo: temp.noches < dura.minimoNoches,
+                };
               }
             }
-            if (bloqueoTemporada) {
-              result = {
-                enviadas: [],
-                error: `fechas NO validas para reservar: ${bloqueoTemporada}`,
-                nota: 'NO se enviaron fichas. Explica con empatia el minimo de noches de esas fechas (puente festivo / temporada especial) y pide ajustar la fecha de salida o entrada ANTES de enviar opciones. NO vuelvas a llamar enviar_catalogo hasta tener fechas que cumplan.',
-              };
+            if (bloqueo) {
+              if (avisoMinimoSentThisTurn) {
+                result = {
+                  enviadas: [],
+                  error: `fechas NO validas para reservar: ${bloqueo.detalle}`,
+                  nota: 'El aviso oficial de estadía mínima YA se envió en este turno. NO escribas más texto ni repitas el aviso; espera a que el cliente confirme fechas que cumplan.',
+                };
+                messages.push({
+                  role: 'tool',
+                  tool_call_id: call.id,
+                  content: JSON.stringify(result),
+                });
+                continue;
+              }
+              if (bloqueo.esMinimo && context.contactPhone) {
+                avisoMinimoSentThisTurn = true;
+                // Aviso OFICIAL de estadía mínima: se envía tal cual (el LLM
+                // lo comprimía y perdía el tono aprobado).
+                const aviso = buildMinimoNochesMessage({
+                  temporada: bloqueo.temporada,
+                  minNoches: bloqueo.minNoches,
+                  fechaEntrada,
+                  personas:
+                    typeof args.personas === 'number' ? args.personas : undefined,
+                });
+                let avisoWamid: string | undefined;
+                try {
+                  const sentAviso = await sendWhatsappText({
+                    to: context.contactPhone,
+                    text: aviso,
+                  });
+                  avisoWamid = sentAviso.wamid;
+                } catch (err) {
+                  console.error('[agent] fallo el envio del aviso de minimo', err);
+                }
+                await ctx.runMutation(internal.agent.saveAssistantMessage, {
+                  conversationId,
+                  content: aviso,
+                  wamid: avisoWamid,
+                });
+                skipFinalReply = true;
+                result = {
+                  enviadas: [],
+                  error: `fechas NO validas para reservar: ${bloqueo.detalle}`,
+                  nota: 'El aviso oficial de estadía mínima YA se envió TAL CUAL como mensaje aparte. NO escribas más texto este turno, NO repitas el aviso y NO vuelvas a llamar enviar_catalogo hasta que el cliente confirme fechas que cumplan.',
+                };
+              } else {
+                result = {
+                  enviadas: [],
+                  error: `fechas NO validas para reservar: ${bloqueo.detalle}`,
+                  nota: 'NO se enviaron fichas. Explica con empatia la restriccion de noches de esas fechas y pide ajustar ANTES de enviar opciones. NO vuelvas a llamar enviar_catalogo hasta tener fechas que cumplan.',
+                };
+              }
               messages.push({
                 role: 'tool',
                 tool_call_id: call.id,
                 content: JSON.stringify(result),
               });
-              console.log('[agent] catalogo bloqueado por temporada', bloqueoTemporada);
+              console.log('[agent] catalogo bloqueado por temporada', bloqueo.detalle);
               continue;
             }
             const pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
@@ -1027,10 +1120,59 @@ export const runAgentTurn = internalAction({
               }
             }
           } else if (call.function.name === 'consultar_temporada') {
-            result = await ctx.runQuery(internal.agent.toolConsultarTemporada, {
-              fechaEntrada: String(args.fechaEntrada ?? ''),
+            const fechaEntradaTemp = String(args.fechaEntrada ?? '');
+            const temp = await ctx.runQuery(internal.agent.toolConsultarTemporada, {
+              fechaEntrada: fechaEntradaTemp,
               fechaSalida: String(args.fechaSalida ?? ''),
             });
+            // Si las fechas NO cumplen un mínimo de noches, el aviso oficial
+            // sale TAL CUAL desde aquí (el LLM lo comprimía y perdía el tono
+            // aprobado). Mismo candado que enviar_catalogo, sin duplicar.
+            const incumplidasTemp = temp.reglas.filter((r) => !r.cumple);
+            const duraTemp =
+              incumplidasTemp.length > 0
+                ? incumplidasTemp.reduce((a, b) =>
+                    b.minimoNoches > a.minimoNoches ? b : a,
+                  )
+                : null;
+            if (
+              duraTemp &&
+              temp.noches < duraTemp.minimoNoches &&
+              context.contactPhone &&
+              !avisoMinimoSentThisTurn
+            ) {
+              avisoMinimoSentThisTurn = true;
+              const aviso = buildMinimoNochesMessage({
+                temporada: duraTemp.temporada,
+                minNoches: duraTemp.minimoNoches,
+                fechaEntrada: fechaEntradaTemp,
+                personas:
+                  typeof args.personas === 'number' ? args.personas : undefined,
+              });
+              let avisoWamid: string | undefined;
+              try {
+                const sentAviso = await sendWhatsappText({
+                  to: context.contactPhone,
+                  text: aviso,
+                });
+                avisoWamid = sentAviso.wamid;
+              } catch (err) {
+                console.error('[agent] fallo el envio del aviso de minimo', err);
+              }
+              await ctx.runMutation(internal.agent.saveAssistantMessage, {
+                conversationId,
+                content: aviso,
+                wamid: avisoWamid,
+              });
+              skipFinalReply = true;
+              result = {
+                ...temp,
+                avisoEnviado: true,
+                nota: 'Las fechas NO cumplen el mínimo de noches. El aviso oficial YA se envió TAL CUAL como mensaje aparte: NO escribas más texto este turno, NO repitas el aviso y NO llames enviar_catalogo con estas fechas.',
+              };
+            } else {
+              result = temp;
+            }
           } else if (call.function.name === 'enviar_politica_mascotas') {
             // Anti-duplicado: una sola vez por conversacion (y por turno,
             // por si el modelo la llama dos veces en la misma ronda).
@@ -1068,7 +1210,7 @@ export const runAgentTurn = internalAction({
               });
               result = {
                 enviado: true,
-                nota: 'El mensaje oficial de mascotas YA se envio TAL CUAL como mensaje aparte. NO repitas la politica ni sus cifras ni sus recomendaciones. Continua con el flujo: si ya tienes fechas + personas y no has enviado catalogo, llama enviar_catalogo (mascotas:true) AHORA MISMO; si falta un dato (fechas o personas), pidelo en una linea corta. PROHIBIDO decir "pet friendly".',
+                nota: 'El mensaje oficial de mascotas YA se envio TAL CUAL como mensaje aparte. NO repitas la politica ni sus cifras ni sus recomendaciones. LIMITE OFICIAL: maximo 2 mascotas de raza pequeña — si el cliente menciono 3 o mas mascotas (o razas grandes), NO prometas cupo ni envies catalogo: di que un experto revisa su caso y llama escalar_a_humano AHORA (motivo: "N mascotas — validar excepcion"). Con 1-2 mascotas pequeñas continua el flujo: si ya tienes fechas + personas y no has enviado catalogo, llama enviar_catalogo (mascotas:true) AHORA MISMO; si falta un dato, pidelo en una linea corta. PROHIBIDO decir "pet friendly".',
               };
             }
           } else if (call.function.name === 'iniciar_reserva') {
@@ -1174,6 +1316,11 @@ export const runAgentTurn = internalAction({
     // equipo: "NO repitas saludos si ya saludaste").
     if (!botHasSpoken) {
       reply = prependGreetingIfNeeded(reply, context.contactName, userBurst);
+    } else {
+      // Candado anti "Hola" doble: si ya saludamos y el LLM abre con
+      // "¡Hola...!" otra vez, se recorta el prefijo (el resto queda intacto).
+      const stripped = stripRedundantHolaPrefix(reply);
+      if (stripped) reply = stripped;
     }
 
     let wamid: string | undefined;

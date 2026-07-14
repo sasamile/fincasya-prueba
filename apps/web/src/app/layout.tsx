@@ -16,6 +16,12 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+      (process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : 'https://fincasya.com'),
+  ),
   title: 'FincasYa - Encuentra tu descanso ideal',
   description:
     'Reserva fincas verificadas en Anapoima, Melgar, Girardot, Villavicencio y más. Los expertos en alquiler.',

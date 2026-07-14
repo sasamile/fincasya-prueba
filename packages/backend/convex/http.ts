@@ -65,6 +65,8 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
       audio?: { link?: string };
       video?: { link?: string; caption?: string };
       document?: { link?: string; caption?: string; filename?: string };
+      /** Cita (Responder): wamid del mensaje al que responde. */
+      context?: { message_id?: string; messageId?: string; id?: string };
     };
   };
 
@@ -131,6 +133,8 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
         msgType,
         mediaUrl,
         wamid,
+        replyToWamid:
+          wm.context?.message_id ?? wm.context?.messageId ?? wm.context?.id,
       });
     }
     return json200();

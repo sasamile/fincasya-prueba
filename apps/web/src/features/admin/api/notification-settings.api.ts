@@ -7,8 +7,9 @@ export async function getNotificationSettings() {
   return convex.query(api.notificationSettings.get, {});
 }
 
-export async function setPaymentReceiptEmails(emails: string[]) {
-  return convex.mutation(api.notificationSettings.setPaymentReceiptEmails, {
+/** Guarda la lista única de correos de administrador (todas las alertas). */
+export async function setAdminEmails(emails: string[]) {
+  return convex.mutation(api.notificationSettings.setAdminEmails, {
     emails,
   });
 }

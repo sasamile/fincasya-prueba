@@ -34,17 +34,18 @@ function candidateBinaries() {
 }
 
 async function convertWithILovePdf(docx) {
-  const publicKey = process.env.ILOVEPDF_PUBLIC_KEY;
-  const secretKey = process.env.ILOVEPDF_SECRET_KEY;
+  const publicKey = process.env.ILOVEPDF_PUBLIC_KEY?.trim();
+  const secretKey = process.env.ILOVEPDF_SECRET_KEY?.trim();
   if (!publicKey || !secretKey) return null;
 
   const tmpDir = mkdtempSync(join(tmpdir(), "fy-ilove-"));
   const tmpFile = join(tmpDir, `contract_${Date.now()}.docx`);
   try {
-    const ILovePDFApi = (await import("@ilovepdf/ilovepdf-nodejs")).default;
-    const ILovePDFFile = (
-      await import("@ilovepdf/ilovepdf-nodejs/ILovePDFFile")
-    ).default;
+    // El paquete es CJS; createRequire evita el error ESM de subpath sin `.js`.
+    const { createRequire } = await import("node:module");
+    const require = createRequire(import.meta.url);
+    const ILovePDFApi = require("@ilovepdf/ilovepdf-nodejs");
+    const ILovePDFFile = require("@ilovepdf/ilovepdf-nodejs/ILovePDFFile.js");
 
     const instance = new ILovePDFApi(publicKey, secretKey);
     const task = instance.newTask("officepdf");

@@ -3,11 +3,13 @@
 /**
  * Centro de plantillas de WhatsApp (botón "+" del inbox): trae las plantillas
  * de la cuenta YCloud, permite crear nuevas (van a revisión de Meta) y enviar
- * una plantilla aprobada al chat seleccionado.
+ * una plantilla aprobada al chat seleccionado — o a un número sin chat previo
+ * (crea la conversación al enviar).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useAction } from 'convex/react';
+import { useAction, useMutation } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
+import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import { toast } from 'sonner';
 import {
   FileStack,
@@ -53,14 +55,21 @@ function renderBody(body: string, params: string[]): string {
 
 export function TemplatesModal({
   conversation,
+  phoneTarget,
   onClose,
+  onStarted,
 }: {
   conversation: ConversationRow | null;
+  /** Número sin chat: al enviar se crea la conversación y luego la plantilla. */
+  phoneTarget?: { phone: string; name?: string } | null;
   onClose: () => void;
+  /** Tras iniciar chat por plantilla (número nuevo). */
+  onStarted?: (conversationId: Id<'conversations'>) => void;
 }) {
   const listTemplates = useAction(api.whatsappTemplates.listTemplates);
   const createTemplate = useAction(api.whatsappTemplates.createTemplate);
   const sendTemplate = useAction(api.whatsappTemplates.sendTemplate);
+  const ensureConversation = useMutation(api.whatsappTemplates.ensureConversationByPhone);
 
   const [tab, setTab] = useState<'enviar' | 'crear'>('enviar');
   const [templates, setTemplates] = useState<Template[] | null>(null);
@@ -70,12 +79,13 @@ export function TemplatesModal({
   const [params, setParams] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
 
-  // Formulario de creación
   const [newName, setNewName] = useState('');
   const [newCategory, setNewCategory] = useState<'MARKETING' | 'UTILITY'>('UTILITY');
   const [newBody, setNewBody] = useState('');
   const [newFooter, setNewFooter] = useState('');
   const [creating, setCreating] = useState(false);
+
+  const canSend = Boolean(conversation || phoneTarget?.phone);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -112,17 +122,36 @@ export function TemplatesModal({
     Array.from({ length: selected.variablesCount }, (_, i) => params[i]?.trim()).every(Boolean);
 
   async function handleSend() {
-    if (!conversation || !selected) return;
+    if (!selected) return;
     setSending(true);
     try {
+      let conversationId = conversation?.conversationId as
+        | Id<'conversations'>
+        | undefined;
+
+      if (!conversationId) {
+        if (!phoneTarget?.phone) {
+          toast.error('Abre un chat o indica un número para enviar');
+          return;
+        }
+        const ensured = await ensureConversation({
+          phone: phoneTarget.phone,
+          name: phoneTarget.name,
+        });
+        conversationId = ensured.conversationId;
+      }
+
       await sendTemplate({
-        conversationId: conversation.conversationId,
+        conversationId,
         name: selected.name,
         language: selected.language,
         bodyParams: params.slice(0, selected.variablesCount),
         renderedText: rendered,
       });
       toast.success(`Plantilla "${selected.name}" enviada`);
+      if (!conversation && conversationId) {
+        onStarted?.(conversationId);
+      }
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo enviar la plantilla');
@@ -162,6 +191,10 @@ export function TemplatesModal({
   const input =
     'h-10 w-full rounded-xl border border-border bg-background px-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30';
 
+  const targetLabel = conversation
+    ? conversation.name
+    : phoneTarget?.name || phoneTarget?.phone || null;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
@@ -171,7 +204,6 @@ export function TemplatesModal({
         className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Cabecera */}
         <header className="flex items-center gap-3 border-b border-border px-4 py-3">
           <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
             <FileStack className="h-4 w-4" />
@@ -179,9 +211,11 @@ export function TemplatesModal({
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-bold">Plantillas de WhatsApp</h2>
             <p className="truncate text-xs text-muted-foreground">
-              {conversation
-                ? `Enviar a ${conversation.name}`
-                : 'Abre un chat para poder enviar'}
+              {phoneTarget && !conversation
+                ? `Iniciar chat con ${targetLabel} · plantilla`
+                : targetLabel
+                  ? `Enviar a ${targetLabel}`
+                  : 'Abre un chat para poder enviar'}
             </p>
           </div>
           <button
@@ -202,7 +236,13 @@ export function TemplatesModal({
           </button>
         </header>
 
-        {/* Tabs */}
+        {phoneTarget && !conversation ? (
+          <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-[12px] text-amber-800 dark:text-amber-200">
+            Este número aún no tiene chat. Al enviar la plantilla se crea la
+            conversación en el inbox.
+          </div>
+        ) : null}
+
         <div className="flex gap-1 border-b border-border px-3 py-2">
           {(
             [
@@ -226,7 +266,6 @@ export function TemplatesModal({
           ))}
         </div>
 
-        {/* Contenido */}
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {tab === 'enviar' ? (
             <div className="space-y-2">
@@ -246,7 +285,8 @@ export function TemplatesModal({
               ) : (
                 (templates ?? []).map((t) => {
                   const badge = statusBadge(t.status);
-                  const isSelected = selected?.name === t.name && selected.language === t.language;
+                  const isSelected =
+                    selected?.name === t.name && selected.language === t.language;
                   return (
                     <div
                       key={`${t.name}:${t.language}`}
@@ -316,7 +356,7 @@ export function TemplatesModal({
                           <button
                             type="button"
                             disabled={
-                              !conversation ||
+                              !canSend ||
                               sending ||
                               !paramsComplete ||
                               t.status.toUpperCase() !== 'APPROVED'
@@ -329,8 +369,10 @@ export function TemplatesModal({
                             ) : (
                               <Send className="h-4 w-4" />
                             )}
-                            {conversation
-                              ? `Enviar a ${conversation.name}`
+                            {canSend
+                              ? phoneTarget && !conversation
+                                ? `Iniciar chat · enviar a ${targetLabel}`
+                                : `Enviar a ${targetLabel}`
                               : 'Abre un chat para enviar'}
                           </button>
                         </div>
@@ -385,7 +427,7 @@ export function TemplatesModal({
                   value={newBody}
                   onChange={(e) => setNewBody(e.target.value)}
                   rows={5}
-                  placeholder={'Hola {{1}}, tu reserva {{2}} está confirmada 🏡'}
+                  placeholder={'Hola {{1}}, tu reserva {{2}} está confirmada'}
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
                 <p className="mt-1 text-[11px] text-muted-foreground">

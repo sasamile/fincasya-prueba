@@ -3151,6 +3151,19 @@ export default function ReservationsPage() {
                           selectedBooking.paymentPortalConfig?.boldSurcharge
                         }
                         receipts={selectedBooking.paymentPortalReceipts ?? []}
+                        clientPaymentProofUploadEnabled={
+                          !!selectedBooking.clientPaymentProofUploadEnabled
+                        }
+                        onClientPaymentProofUploadChange={(enabled) => {
+                          setSelectedBooking((prev: any) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  clientPaymentProofUploadEnabled: enabled,
+                                }
+                              : prev,
+                          );
+                        }}
                       />
                       </DetailSection>
 

@@ -34,6 +34,7 @@ import {
   BadgeCheck,
   Home,
   Share2,
+  Zap,
 } from "lucide-react";
 import { useTheme } from '@/components/theme-provider';
 import { useState, useEffect, useRef } from "react";
@@ -173,6 +174,11 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         label: "Mensaje temporal WhatsApp",
         href: "/admin/whatsapp-temporal-message",
         icon: MessageSquare,
+      },
+      {
+        label: "Automatizaciones",
+        href: "/admin/automatizaciones",
+        icon: Zap,
       },
     ],
   },
@@ -480,7 +486,8 @@ export default function AdminLayout({
         const isAdminRole =
           sessionUser.role === "admin" ||
           sessionUser.role === "assistant" ||
-          sessionUser.role === "vendedor";
+          sessionUser.role === "vendedor" ||
+          sessionUser.role === "superadmin";
 
         if (!isAdminRole) {
           // Sincroniza el rol real para no dejar uno viejo en el store.
@@ -539,7 +546,8 @@ export default function AdminLayout({
   const showInboxHumanAlerts =
     user?.role === "admin" ||
     user?.role === "assistant" ||
-    user?.role === "vendedor";
+    user?.role === "vendedor" ||
+    user?.role === "superadmin";
   if (isFullScreenRoute) {
     return (
       <SidebarProvider

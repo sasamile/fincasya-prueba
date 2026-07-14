@@ -184,6 +184,8 @@ export function SaleLinksManager() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editLink, setEditLink] = useState<SaleLink | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [approveLink, setApproveLink] = useState<SaleLink | null>(null);
+  const [resetLink, setResetLink] = useState<SaleLink | null>(null);
   const [generatingContract, setGeneratingContract] = useState<string | null>(null);
   const [resettingPayment, setResettingPayment] = useState<string | null>(null);
   const [ownerOfferDrafts, setOwnerOfferDrafts] = useState<Record<string, string>>({});
@@ -251,19 +253,13 @@ export function SaleLinksManager() {
   };
 
   const handleResetPayment = async (link: SaleLink) => {
-    if (
-      !window.confirm(
-        "¿Reiniciar comprobante y datos del cliente? El link volverá al paso 1.",
-      )
-    ) {
-      return;
-    }
     setResettingPayment(link._id);
     try {
       const res = await resetSaleLinkPayment(link.token);
       if (res.ok) {
         toast.success("Link reiniciado — el cliente puede volver a empezar");
         qc.invalidateQueries({ queryKey: ["sale-links"] });
+        setResetLink(null);
       } else {
         toast.error("No se pudo reiniciar el link");
       }
@@ -275,13 +271,6 @@ export function SaleLinksManager() {
   };
 
   const handleValidatePayment = async (link: SaleLink) => {
-    if (
-      !window.confirm(
-        `¿Confirmar que el pago de ${link.clientData?.nombre ?? "el cliente"} llegó a nuestras cuentas? Se generará contrato y CR, y quedará registrado quién validó.`,
-      )
-    ) {
-      return;
-    }
     setValidatingPayment(link._id);
     try {
       const res = await validateSaleLinkPaymentAdmin(link.token);
@@ -292,6 +281,7 @@ export function SaleLinksManager() {
             : "Pago validado — generando el contrato…",
         );
         qc.invalidateQueries({ queryKey: ["sale-links"] });
+        setApproveLink(null);
         // Genera y adjunta el contrato para que el cliente lo vea en su portal.
         if (!res.alreadyValidated && !link.contractUrl) {
           await handleGenerateContract(link);
@@ -645,7 +635,7 @@ export function SaleLinksManager() {
                       ) : null}
                       {needsPaymentValidation(link) ? (
                         <DropdownMenuItem
-                          onClick={() => void handleValidatePayment(link)}
+                          onClick={() => setApproveLink(link)}
                           disabled={validatingPayment === link._id}
                         >
                           {validatingPayment === link._id ? (
@@ -661,7 +651,7 @@ export function SaleLinksManager() {
                       ) : null}
                       {link.clientStep >= 3 && !link.paymentValidated && (
                         <DropdownMenuItem
-                          onClick={() => handleResetPayment(link)}
+                          onClick={() => setResetLink(link)}
                           disabled={resettingPayment === link._id}
                         >
                           {resettingPayment === link._id ? (
@@ -915,7 +905,7 @@ export function SaleLinksManager() {
                         size="sm"
                         className="h-7 rounded-lg px-2.5 text-xs"
                         disabled={validatingPayment === link._id}
-                        onClick={() => void handleValidatePayment(link)}
+                        onClick={() => setApproveLink(link)}
                       >
                         {validatingPayment === link._id ? (
                           <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -985,6 +975,102 @@ export function SaleLinksManager() {
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 "Eliminar"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Approve payment confirm */}
+      <AlertDialog
+        open={!!approveLink}
+        onOpenChange={(o) => !o && !validatingPayment && setApproveLink(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Aprobar este pago?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p>
+                  Confirmas que el pago de{" "}
+                  <span className="font-semibold text-foreground">
+                    {approveLink?.clientData?.nombre ?? "el cliente"}
+                  </span>{" "}
+                  llegó a nuestras cuentas.
+                </p>
+                {approveLink?.propertyTitle ? (
+                  <p className="rounded-lg border bg-muted/40 px-3 py-2 text-foreground">
+                    <span className="text-muted-foreground">Finca: </span>
+                    {approveLink.propertyTitle}
+                  </p>
+                ) : null}
+                <p>
+                  Se generará el contrato y la CR, y quedará registrado quién
+                  validó.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!validatingPayment}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!!validatingPayment}
+              onClick={(e) => {
+                e.preventDefault();
+                if (approveLink) void handleValidatePayment(approveLink);
+              }}
+              className="bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              {validatingPayment ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Validando…
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Aprobar pago
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Reset payment confirm */}
+      <AlertDialog
+        open={!!resetLink}
+        onOpenChange={(o) => !o && !resettingPayment && setResetLink(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Reiniciar comprobante?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se borrarán el comprobante y los datos del cliente. El link
+              volverá al paso 1 para que puedan empezar de nuevo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!resettingPayment}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!!resettingPayment}
+              onClick={(e) => {
+                e.preventDefault();
+                if (resetLink) void handleResetPayment(resetLink);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {resettingPayment ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Reiniciando…
+                </>
+              ) : (
+                "Reiniciar"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>

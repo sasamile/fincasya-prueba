@@ -35,6 +35,7 @@ import {
   type BankAccount,
   getBankAccountImages,
 } from "@/features/admin/store/contract-settings.store";
+import { cn } from "@/lib/utils";
 
 export type BankAccountPrefill = {
   ownerName?: string;
@@ -50,6 +51,8 @@ export interface BankAccountDialogProps {
   /** Bloquea titular/cédula al agregar cuenta a un titular existente. */
   lockHolderFields?: boolean;
   onSave: (data: Omit<BankAccount, "id">) => void;
+  /** Tema oscuro inbox, etc. */
+  contentClassName?: string;
 }
 
 export function BankAccountDialog({
@@ -59,6 +62,7 @@ export function BankAccountDialog({
   prefill,
   lockHolderFields = false,
   onSave,
+  contentClassName,
 }: BankAccountDialogProps) {
   const [form, setForm] = useState({
     bankName: "",
@@ -155,7 +159,12 @@ export function BankAccountDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-md rounded-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className={cn(
+          "max-h-[90vh] max-w-md overflow-y-auto rounded-2xl",
+          contentClassName,
+        )}
+      >
         <DialogHeader>
           <DialogTitle className="text-base font-bold">
             {initial

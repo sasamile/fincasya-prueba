@@ -29,8 +29,10 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import axios from "axios";
 import {
   type BankAccount,
   getBankAccountImages,
@@ -152,6 +154,9 @@ export interface ReservationPaymentMethodsSectionProps {
   initialExtraBankAccounts?: BankAccount[];
   initialBoldLink?: string;
   initialBoldSurcharge?: number;
+  /** Si true, el cliente puede subir comprobantes en el check-in. */
+  clientPaymentProofUploadEnabled?: boolean;
+  onClientPaymentProofUploadChange?: (enabled: boolean) => void;
   className?: string;
 }
 
@@ -467,7 +472,10 @@ function HolderSection({
               {title}
             </p>
             {badge ? (
-              <Badge variant="outline" className="text-[9px] font-semibold">
+              <Badge
+                variant="secondary"
+                className="border border-border/60 text-[9px] font-semibold"
+              >
                 {badge}
               </Badge>
             ) : null}
@@ -481,7 +489,7 @@ function HolderSection({
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 shrink-0 rounded-lg px-2 text-[10px] font-bold"
+            className="h-7 shrink-0 rounded-lg border-border/60 px-2 text-[10px] font-bold"
             onClick={onAddAccount}
           >
             <Plus className="mr-1 h-3 w-3" />
@@ -526,6 +534,8 @@ export function ReservationPaymentMethodsSection({
   initialExtraBankAccounts,
   initialBoldLink,
   initialBoldSurcharge,
+  clientPaymentProofUploadEnabled = false,
+  onClientPaymentProofUploadChange,
   className,
 }: ReservationPaymentMethodsSectionProps) {
   const {
@@ -535,6 +545,36 @@ export function ReservationPaymentMethodsSection({
     updateBankAccount,
     removeBankAccount,
   } = useContractSettingsStore();
+
+  const [uploadEnabled, setUploadEnabled] = useState(
+    clientPaymentProofUploadEnabled,
+  );
+  const [savingUploadToggle, setSavingUploadToggle] = useState(false);
+
+  useEffect(() => {
+    setUploadEnabled(clientPaymentProofUploadEnabled);
+  }, [clientPaymentProofUploadEnabled, bookingId]);
+
+  const handleToggleUpload = async (enabled: boolean) => {
+    setUploadEnabled(enabled);
+    setSavingUploadToggle(true);
+    try {
+      await axios.post(`/api/bookings/${bookingId}/payment-proof-upload`, {
+        enabled,
+      });
+      onClientPaymentProofUploadChange?.(enabled);
+      toast.success(
+        enabled
+          ? "El cliente ya puede subir soportes en el check-in"
+          : "Subida deshabilitada: el cliente enviará por WhatsApp",
+      );
+    } catch {
+      setUploadEnabled(!enabled);
+      toast.error("No se pudo guardar la preferencia de soportes");
+    } finally {
+      setSavingUploadToggle(false);
+    }
+  };
 
   const savePortalConfig = useConvexMutation(
     api.paymentPortal.savePaymentPortalConfig,
@@ -1317,7 +1357,7 @@ export function ReservationPaymentMethodsSection({
 
           <HolderSection
             title="Empresa"
-            description="Cuentas de FincasYa (Angela) y Hernán Aguilera"
+            description="Cuentas de FincasYa (Angela y Hernán — mismo catálogo empresa)"
             badge="Empresa"
             holders={empresaHolders}
             sectionPrefix="empresa"
@@ -1327,34 +1367,10 @@ export function ReservationPaymentMethodsSection({
             onToggleHolder={toggleHolder}
             onEditAccount={openEditAccount}
             onRemoveAccount={handleRemoveAccount}
+            onAddAccount={() => openNewAccount("fincasya")}
             onAddAccountForHolder={openEmpresaAccount}
-            emptyHint="Sin cuentas de empresa. Agrega una desde el acordeón de Angela o Hernán."
-            headerExtra={
-              empresaHolders.length === 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 rounded-lg px-2 text-[10px] font-bold"
-                    onClick={() => openNewAccount("fincasya")}
-                  >
-                    <Plus className="mr-1 h-3 w-3" />
-                    Cuenta Angela
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 rounded-lg px-2 text-[10px] font-bold"
-                    onClick={() => openNewAccount("hernan")}
-                  >
-                    <Plus className="mr-1 h-3 w-3" />
-                    Cuenta Hernán
-                  </Button>
-                </div>
-              ) : undefined
-            }
+            addLabel="Cuenta empresa"
+            emptyHint="Sin cuentas de empresa. Agrega una con el botón."
           />
 
           <p className="text-[10px] text-muted-foreground">
@@ -1467,47 +1483,73 @@ export function ReservationPaymentMethodsSection({
         </div>
       </div>
 
-      {portalReceipts.length > 0 ? (
-        <div className="space-y-2 pt-2 border-t border-border/60">
-          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-            Soportes del cliente ({pendingReceipts.length} pendiente
-            {pendingReceipts.length === 1 ? "" : "s"})
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {portalReceipts.map((r) => (
-              <a
-                key={r.id}
-                href={r.receiptUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-xl border border-border overflow-hidden bg-background hover:border-foreground/40 transition-colors"
-              >
-                <img
-                  src={r.receiptUrl}
-                  alt={r.fileName || "Comprobante"}
-                  className="w-full aspect-4/3 object-cover"
-                />
-                <div className="px-2 py-1.5 space-y-0.5">
-                  <p className="text-[10px] font-bold truncate">
-                    {r.bankName || "Pago"}
-                    {r.amount ? ` · ${fmtCOP(r.amount)}` : ""}
-                  </p>
-                  <Badge
-                    variant="secondary"
-                    className={cn(
-                      "text-[9px] capitalize",
-                      r.status === "pending" && "bg-muted text-muted-foreground",
-                      r.status === "approved" && "bg-muted text-foreground",
-                    )}
+      <div className="space-y-2 pt-2 border-t border-border/60">
+          <label className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">
+                Permitir subir soportes de pago
+              </p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {uploadEnabled
+                  ? "El cliente puede cargar comprobantes en el check-in / portal."
+                  : "Apagado: se le pide enviar el soporte por WhatsApp (default)."}
+              </p>
+            </div>
+            <Switch
+              checked={uploadEnabled}
+              onCheckedChange={(v) => void handleToggleUpload(v)}
+              disabled={savingUploadToggle}
+              className="shrink-0"
+            />
+          </label>
+
+          {portalReceipts.length > 0 ? (
+            <>
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                Soportes del cliente ({pendingReceipts.length} pendiente
+                {pendingReceipts.length === 1 ? "" : "s"})
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {portalReceipts.map((r) => (
+                  <a
+                    key={r.id}
+                    href={r.receiptUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-xl border border-border overflow-hidden bg-background hover:border-foreground/40 transition-colors"
                   >
-                    {r.status === "pending" ? "En revisión" : r.status}
-                  </Badge>
-                </div>
-              </a>
-            ))}
-          </div>
+                    <img
+                      src={r.receiptUrl}
+                      alt={r.fileName || "Comprobante"}
+                      className="w-full aspect-4/3 object-cover"
+                    />
+                    <div className="px-2 py-1.5 space-y-0.5">
+                      <p className="text-[10px] font-bold truncate">
+                        {r.bankName || "Pago"}
+                        {r.amount ? ` · ${fmtCOP(r.amount)}` : ""}
+                      </p>
+                      <Badge
+                        variant="secondary"
+                        className={cn(
+                          "text-[9px] capitalize",
+                          r.status === "pending" &&
+                            "bg-muted text-muted-foreground",
+                          r.status === "approved" && "bg-muted text-foreground",
+                        )}
+                      >
+                        {r.status === "pending" ? "En revisión" : r.status}
+                      </Badge>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              Aún no hay soportes cargados por el cliente.
+            </p>
+          )}
         </div>
-      ) : null}
 
       <BankAccountDialog
         open={bankDialogOpen}

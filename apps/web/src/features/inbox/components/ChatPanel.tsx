@@ -989,7 +989,15 @@ export function ChatPanel({
               }}
             />
           ) : (
-            <div className="wa-composer-pill">
+            <div
+              className="wa-composer-pill"
+              onClick={(e) => {
+                // Clic en el vacío de la píldora (no en + / emoji / mic) → escribir.
+                const t = e.target as HTMLElement;
+                if (t.closest('button, a, input[type="file"]')) return;
+                draftRef.current?.focus();
+              }}
+            >
               <div className="relative">
                 <button
                   type="button"
@@ -1051,7 +1059,7 @@ export function ChatPanel({
                 </button>
                 {showEmoji && <EmojiPicker onPick={insertEmoji} onClose={() => setShowEmoji(false)} />}
               </div>
-              <div className="relative min-w-0 flex-1">
+              <div className="relative flex min-h-full min-w-0 flex-1 items-stretch">
                 {quickMatches.length > 0 && (
                   <div className="absolute bottom-full left-0 mb-2 w-full max-w-md overflow-hidden rounded-xl border border-border bg-card py-1 shadow-2xl">
                     <p className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
