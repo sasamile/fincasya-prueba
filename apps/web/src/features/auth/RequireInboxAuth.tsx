@@ -30,7 +30,7 @@ export function RequireInboxAuth({ children }: { children: React.ReactNode }) {
       : false;
 
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) router.replace('/login');
+    if (!authLoading && !isAuthenticated) router.replace('/admin/login');
   }, [authLoading, isAuthenticated, router]);
 
   // Cubre: auth aún resolviendo, no autenticado (el useEffect ya está
@@ -50,7 +50,7 @@ export function RequireInboxAuth({ children }: { children: React.ReactNode }) {
           <p className="text-foreground">No tienes permiso para ver este panel.</p>
           <button
             type="button"
-            onClick={() => router.replace('/login')}
+            onClick={() => router.replace('/admin')}
             className="mt-3 text-sm text-primary underline"
           >
             Volver a iniciar sesión

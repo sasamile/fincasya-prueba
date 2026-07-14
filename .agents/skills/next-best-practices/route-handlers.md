@@ -123,7 +123,7 @@ return Response.json(data, {
 })
 
 // Redirect
-return Response.redirect(new URL('/login', request.url))
+return Response.redirect(new URL('/admin/login', request.url))
 
 // Stream
 return new Response(stream, {

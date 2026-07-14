@@ -23,6 +23,11 @@ import {
   History,
   ChevronLeft,
   ChevronRight,
+  User,
+  CalendarDays,
+  UserCheck,
+  ClipboardCheck,
+  type LucideIcon,
 } from "lucide-react";
 import {
   useCalculateStayPrice,
@@ -499,6 +504,14 @@ export function ContractsReservationSection({
     Cargos: "Mascotas, servicio, manilla, otros cobros y evento.",
     Cliente: "Datos de quien firma el contrato.",
     Revisar: "Vista previa del contrato antes de generar.",
+  };
+  const CONTRACT_STEP_ICONS: Record<(typeof CONTRACT_STEPS)[number], LucideIcon> = {
+    Finca: Home,
+    Propietario: User,
+    Estadía: CalendarDays,
+    Cargos: CreditCard,
+    Cliente: UserCheck,
+    Revisar: ClipboardCheck,
   };
   const selectedFirmante = useMemo(
     () =>
@@ -2370,13 +2383,20 @@ export function ContractsReservationSection({
                 >
                   <span
                     className={cn(
-                      "grid h-5 w-5 flex-none place-items-center rounded-full text-[10px] font-bold",
+                      "grid h-5 w-5 flex-none place-items-center rounded-full",
                       i <= step
                         ? "bg-primary text-white"
                         : "bg-muted text-muted-foreground",
                     )}
                   >
-                    {i < step ? "✓" : i + 1}
+                    {i < step ? (
+                      <CheckCircle2 className="h-3 w-3" />
+                    ) : (
+                      (() => {
+                        const StepIcon = CONTRACT_STEP_ICONS[label];
+                        return <StepIcon className="h-3 w-3" />;
+                      })()
+                    )}
                   </span>
                   <span
                     className={cn(

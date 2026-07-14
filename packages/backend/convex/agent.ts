@@ -38,9 +38,11 @@ import { detectPuenteFestivo, humanHolidayEs } from './lib/colombiaPublicHoliday
 import { propertyMatchesZone, resolveZoneKeywords } from './lib/zoneProximity';
 import { sendWhatsappText } from './lib/ycloud';
 import {
+  BETWEEN_CATALOG_SENDS_MS,
   formatCop,
   MAX_CATALOG_CANDIDATES,
-  sendCatalogCards,
+  MAX_CATALOG_CARDS,
+  sendCatalogCard,
 } from './lib/catalogSend';
 
 const HISTORY_LIMIT = 24;
@@ -361,6 +363,8 @@ export const toolCatalogPick = internalQuery({
 export const recordCatalogSend = internalMutation({
   args: {
     conversationId: v.id('conversations'),
+    /** Si viene del panel (Experto), la burbuja muestra "Experto" en el inbox. */
+    sentByUserId: v.optional(v.string()),
     sent: v.array(
       v.object({
         propertyId: v.id('properties'),
@@ -370,8 +374,9 @@ export const recordCatalogSend = internalMutation({
       }),
     ),
   },
-  handler: async (ctx, { conversationId, sent }): Promise<void> => {
+  handler: async (ctx, { conversationId, sentByUserId, sent }): Promise<void> => {
     const now = Date.now();
+    const source = sentByUserId ? 'advisor_catalog' : 'agent_catalog';
     for (const card of sent) {
       await ctx.db.insert('messages', {
         conversationId,
@@ -380,7 +385,8 @@ export const recordCatalogSend = internalMutation({
         type: 'product',
         wamid: card.wamid,
         whatsappStatus: card.wamid ? 'sent' : undefined,
-        metadata: { productRetailerId: card.retailerId, source: 'agent_catalog' },
+        sentByUserId,
+        metadata: { productRetailerId: card.retailerId, source },
         createdAt: now,
       });
     }
@@ -970,33 +976,41 @@ export const runAgentTurn = internalAction({
                 wamid: introWamid,
               });
 
-              const rows = await sendCatalogCards({
-                to: context.contactPhone,
-                catalogId: pick.catalogMetaId,
-                cards: pick.items.map((i) => ({
-                  productRetailerId: i.retailerId,
-                  bodyText: i.bodyText,
-                })),
-              });
+              // Una ficha a la vez: el panel las muestra en vivo mientras salen
+              // (antes se guardaban todas al final del lote).
               const sent = [];
+              let okCount = 0;
+              let sentAny = false;
               for (const item of pick.items) {
-                const row = rows.find(
-                  (r) => r.productRetailerId === item.retailerId,
-                );
-                if (row?.ok) {
-                  sent.push({
+                if (okCount >= MAX_CATALOG_CARDS) break;
+                if (sentAny) {
+                  await new Promise((r) => setTimeout(r, BETWEEN_CATALOG_SENDS_MS));
+                }
+                sentAny = true;
+                const row = await sendCatalogCard({
+                  to: context.contactPhone,
+                  catalogId: pick.catalogMetaId,
+                  card: {
+                    productRetailerId: item.retailerId,
+                    bodyText: item.bodyText,
+                  },
+                });
+                if (row.ok) {
+                  okCount++;
+                  const card = {
                     propertyId: item.propertyId as Id<'properties'>,
                     title: item.title,
                     retailerId: item.retailerId,
                     wamid: row.wamid,
+                  };
+                  sent.push(card);
+                  await ctx.runMutation(internal.agent.recordCatalogSend, {
+                    conversationId,
+                    sent: [card],
                   });
                 }
               }
               if (sent.length > 0) {
-                await ctx.runMutation(internal.agent.recordCatalogSend, {
-                  conversationId,
-                  sent,
-                });
                 result = {
                   enviadas: sent.map((s) => s.title),
                   nota: 'Ya se envio el intro y las fichas. El intro YA dijo lo de gestionar el mejor precio — NO lo repitas. Escribe SOLO el CIERRE corto (1-2 lineas), sin "gracias" al inicio: aclara que el valor que muestra cada finca es por noche y varia segun la temporada (sin nombrar media/alta/baja) e invita a decir cual le gusta o si quiere ver mas opciones. Ejemplo del tono: "El valor que muestra cada finca es por noche y varia segun la temporada. Si alguna te llama la atencion, dinos cual y seguimos 🤝"',
@@ -1155,7 +1169,12 @@ export const runAgentTurn = internalAction({
       return;
     }
 
-    reply = prependGreetingIfNeeded(reply, context.contactName, userBurst);
+    // El saludo completo con franja horaria solo va la PRIMERA vez que el bot
+    // habla: re-saludar a mitad de conversacion suena robotico (regla del
+    // equipo: "NO repitas saludos si ya saludaste").
+    if (!botHasSpoken) {
+      reply = prependGreetingIfNeeded(reply, context.contactName, userBurst);
+    }
 
     let wamid: string | undefined;
     if (context.contactPhone) {

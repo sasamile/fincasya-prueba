@@ -1061,6 +1061,7 @@ export const deliverCatalogStep = internalAction({
       nextOk++;
       await ctx.runMutation(internal.agent.recordCatalogSend, {
         conversationId,
+        sentByUserId: ADVISOR_SENDER_ID,
         sent: [
           {
             propertyId: card.propertyId,

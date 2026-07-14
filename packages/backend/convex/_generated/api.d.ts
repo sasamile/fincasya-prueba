@@ -89,6 +89,7 @@ import type * as quienes_somos from "../quienes_somos.js";
 import type * as saleLinks from "../saleLinks.js";
 import type * as siteAnalytics from "../siteAnalytics.js";
 import type * as users from "../users.js";
+import type * as whatsappTemplates from "../whatsappTemplates.js";
 import type * as whatsappTemporalMessage from "../whatsappTemporalMessage.js";
 
 import type {
@@ -179,6 +180,7 @@ declare const fullApi: ApiFromModules<{
   saleLinks: typeof saleLinks;
   siteAnalytics: typeof siteAnalytics;
   users: typeof users;
+  whatsappTemplates: typeof whatsappTemplates;
   whatsappTemporalMessage: typeof whatsappTemporalMessage;
 }>;
 

@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { LoadingArea } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { ChatHomeScreen } from '@/features/inbox/components/ChatHomeScreen';
+import { TemplatesModal } from '@/features/inbox/components/TemplatesModal';
 import { ConversationContextMenu } from '@/features/inbox/components/ConversationContextMenu';
 import type { CtxTarget } from '@/features/inbox/components/ConversationContextMenu';
 import { SidebarFilters } from '@/features/inbox/components/SidebarFilters';
@@ -36,6 +37,7 @@ export default function App() {
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<CtxTarget | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const labels = useQuery(api.labels.listLabels);
 
   const archived = useMemo(
@@ -74,12 +76,13 @@ export default function App() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Escape') return;
+      if (showTemplates) return; // el modal de plantillas maneja su propio Esc
       if (showArchived) { setShowArchived(false); return; }
       setSelectedId(null);
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showArchived]);
+  }, [showArchived, showTemplates]);
 
   function openConversation(conv: ConversationRow) {
     setSelectedId(conv.conversationId);
@@ -164,7 +167,13 @@ export default function App() {
                     title={globalBotHint}
                   />
                 </div>
-                <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-full text-muted-foreground"
+                  title="Plantillas de WhatsApp"
+                  onClick={() => setShowTemplates(true)}
+                >
                   <Plus className="h-5 w-5" />
                 </Button>
                 <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground">
@@ -269,6 +278,14 @@ export default function App() {
         />
       ) : (
         <ChatHomeScreen />
+      )}
+
+      {/* Centro de plantillas de WhatsApp (botón "+") */}
+      {showTemplates && (
+        <TemplatesModal
+          conversation={selected}
+          onClose={() => setShowTemplates(false)}
+        />
       )}
 
       {/* Menú de clic derecho sobre una conversación */}

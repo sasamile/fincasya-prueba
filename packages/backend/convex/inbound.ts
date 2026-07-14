@@ -99,6 +99,115 @@ export const setMessageReaction = internalMutation({
   },
 });
 
+/**
+ * Mensaje enviado por el EQUIPO desde la app de WhatsApp Business
+ * (coexistencia YCloud: evento whatsapp.smb.message.echoes). Se guarda como
+ * mensaje de Experto para que el panel lo muestre, y el bot SE DETIENE en ese
+ * chat — apenas un humano escribe (web o app), el bot para.
+ */
+export const ingestAdvisorAppMessage = internalMutation({
+  args: {
+    eventId: v.string(),
+    /** Teléfono del CLIENTE (campo `to` del echo). */
+    phone: v.string(),
+    content: v.string(),
+    msgType: v.union(
+      v.literal('text'),
+      v.literal('image'),
+      v.literal('audio'),
+      v.literal('video'),
+      v.literal('document'),
+    ),
+    mediaUrl: v.optional(v.string()),
+    wamid: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const seen = await ctx.db
+      .query('ycloudEvents')
+      .withIndex('by_event', (q) => q.eq('eventId', args.eventId))
+      .first();
+    if (seen) return { duplicate: true };
+    await ctx.db.insert('ycloudEvents', {
+      eventId: args.eventId,
+      createdAt: Date.now(),
+    });
+
+    // Si el wamid ya existe, el mensaje salió por el panel/API (o ya se
+    // procesó): no duplicar la burbuja.
+    if (args.wamid) {
+      const existing = await ctx.db
+        .query('messages')
+        .withIndex('by_wamid', (q) => q.eq('wamid', args.wamid))
+        .first();
+      if (existing) return { duplicate: true };
+    }
+
+    const now = Date.now();
+    let contact = await ctx.db
+      .query('contacts')
+      .withIndex('by_phone', (q) => q.eq('phone', args.phone))
+      .first();
+    if (!contact) {
+      const contactId = await ctx.db.insert('contacts', {
+        phone: args.phone,
+        name: args.phone,
+        createdAt: now,
+      });
+      contact = await ctx.db.get(contactId);
+    }
+    if (!contact) return { duplicate: false };
+
+    const conversations = await ctx.db
+      .query('conversations')
+      .withIndex('by_contact', (q) => q.eq('contactId', contact._id))
+      .collect();
+    const sorted = conversations.sort(
+      (a, b) => (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt),
+    );
+    let conversation = sorted.find((c) => !c.deletedAt && c.status !== 'resolved');
+    if (!conversation) {
+      // El equipo abrió la conversación desde el teléfono: nace en humano.
+      const conversationId = await ctx.db.insert('conversations', {
+        contactId: contact._id,
+        channel: 'whatsapp',
+        status: 'human',
+        operationalState: 'pending_data',
+        aiManualOverride: false,
+        createdAt: now,
+        lastMessageAt: now,
+      });
+      const created = await ctx.db.get(conversationId);
+      if (!created) return { duplicate: false };
+      conversation = created;
+    }
+
+    await ctx.db.insert('messages', {
+      conversationId: conversation._id,
+      sender: 'assistant',
+      content: args.content,
+      type: args.msgType,
+      mediaUrl: args.mediaUrl,
+      wamid: args.wamid,
+      sentByUserId: 'whatsapp-app',
+      whatsappStatus: 'sent',
+      metadata: { source: 'ycloud_smb_echo' },
+      createdAt: now,
+    });
+
+    // Un humano del equipo escribió desde el teléfono: el bot se detiene.
+    if (conversation.status === 'ai' || conversation.aiManualOverride === true) {
+      await ctx.db.patch(conversation._id, {
+        status: 'human',
+        aiManualOverride: false,
+        lastMessageAt: now,
+      });
+    } else {
+      await ctx.db.patch(conversation._id, { lastMessageAt: now });
+    }
+    return { duplicate: false };
+  },
+});
+
 export const ingestInboundMessage = internalMutation({
   args: {
     eventId: v.string(),

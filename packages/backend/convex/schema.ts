@@ -1360,9 +1360,16 @@ export default defineSchema(
       logoutAt: v.optional(v.number()),
       ipAddress: v.optional(v.string()),
       userAgent: v.optional(v.string()),
+      /**
+       * Token de la sesión de Better Auth. Une el registro a UNA sesión concreta:
+       * cada login (token nuevo) es una fila independiente y el registro es
+       * idempotente (varios callers con el mismo token → una sola fila).
+       */
+      sessionToken: v.optional(v.string()),
     })
       .index('by_loginAt', ['loginAt'])
-      .index('by_user_loginAt', ['userId', 'loginAt']),
+      .index('by_user_loginAt', ['userId', 'loginAt'])
+      .index('by_sessionToken', ['sessionToken']),
 
     internalPages: defineTable({
       pageId: v.string(),

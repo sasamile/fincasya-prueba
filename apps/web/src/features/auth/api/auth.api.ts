@@ -50,15 +50,34 @@ export async function login(credentials: LoginCredentials): Promise<AuthResponse
 }
 
 export async function logout(): Promise<void> {
-  const session = await getSession();
-  if (session?.id) {
+  const auth = await getAuthContext();
+  if (auth?.userId) {
     try {
-      await recordSessionLogout(session.id);
+      await recordSessionLogout(auth.userId, auth.sessionToken);
     } catch {
       // No bloquear cierre de sesión si falla el log
     }
   }
   await authClient.signOut();
+}
+
+/**
+ * Devuelve el userId + token de la sesión actual de Better Auth. El token
+ * identifica UNA sesión concreta (cambia en cada login) y se usa para que el
+ * historial de accesos sea idempotente y cada login quede como fila aparte.
+ */
+async function getAuthContext(): Promise<
+  { userId: string; sessionToken?: string } | null
+> {
+  try {
+    const { data } = await authClient.getSession();
+    const userId = data?.user?.id ? String(data.user.id) : null;
+    if (!userId) return null;
+    const session = data?.session as { token?: string; id?: string } | undefined;
+    return { userId, sessionToken: session?.token ?? session?.id };
+  } catch {
+    return null;
+  }
 }
 
 export async function getSession(): Promise<AuthUser | null> {
@@ -126,6 +145,7 @@ export async function getSessionLogs(params?: {
 export async function recordSessionLogin(user: AuthUser): Promise<void> {
   const { api } = await import('@fincasya/backend/convex/_generated/api');
   const { convex } = await import('@/lib/convex-client');
+  const auth = await getAuthContext();
   await convex.mutation(api.adminSessionLogs.recordLogin, {
     userId: user.id,
     userEmail: user.email,
@@ -133,22 +153,28 @@ export async function recordSessionLogin(user: AuthUser): Promise<void> {
     role: user.role,
     userAgent:
       typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+    sessionToken: auth?.sessionToken,
   });
 }
 
-/** Cierra la sesión abierta más reciente del usuario en el historial. */
-export async function recordSessionLogout(userId: string): Promise<void> {
+/** Cierra la sesión del usuario en el historial (por token de sesión). */
+export async function recordSessionLogout(
+  userId: string,
+  sessionToken?: string,
+): Promise<void> {
   const { api } = await import('@fincasya/backend/convex/_generated/api');
   const { convex } = await import('@/lib/convex-client');
-  await convex.mutation(api.adminSessionLogs.recordLogout, { userId });
+  await convex.mutation(api.adminSessionLogs.recordLogout, {
+    userId,
+    sessionToken,
+  });
 }
 
 /**
- * Evita duplicar registros "En línea" al recargar el panel: solo crea un log
- * si el usuario no tiene ya una sesión abierta en Convex.
+ * Registra la sesión actual en el historial. El backend es idempotente por
+ * token de sesión, así que aunque varios componentes (login + layout) lo llamen
+ * a la vez, solo se crea UNA fila por sesión de Better Auth.
  */
 export async function ensureSessionLogged(user: AuthUser): Promise<void> {
-  const logs = await getSessionLogs({ userId: user.id, limit: 5 });
-  if (logs.some((row) => row.isActive)) return;
   await recordSessionLogin(user);
 }

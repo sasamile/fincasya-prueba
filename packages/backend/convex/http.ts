@@ -56,6 +56,15 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
       id?: string;
       wamid?: string;
       status?: string;
+      /** Campos presentes en whatsapp.smb.message.echoes (coexistencia). */
+      from?: string;
+      to?: string;
+      type?: string;
+      text?: { body?: string };
+      image?: { link?: string; caption?: string };
+      audio?: { link?: string };
+      video?: { link?: string; caption?: string };
+      document?: { link?: string; caption?: string; filename?: string };
     };
   };
 
@@ -78,6 +87,51 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
                 : null;
     if (wamid && status) {
       await ctx.runMutation(internal.inbound.updateMessageStatusByWamid, { wamid, status });
+    }
+    return json200();
+  }
+
+  // ── 1b) Echo de coexistencia: mensaje que el EQUIPO envió desde la app de
+  // WhatsApp Business (no por el panel/API). Se captura al hilo como mensaje
+  // de Experto y el bot se detiene en ese chat. ──
+  if (parsed.type === 'whatsapp.smb.message.echoes' && parsed.whatsappMessage) {
+    const wm = parsed.whatsappMessage;
+    const phone = (wm.to ?? '').replace(/\D+/g, '');
+    const wamid = wm.wamid ?? wm.id;
+    const eventId = parsed.id ?? wamid ?? `smbecho_${Date.now()}`;
+
+    let content = '';
+    let msgType: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text';
+    let mediaUrl: string | undefined;
+    if (wm.type === 'text' && wm.text?.body) {
+      content = wm.text.body.trim();
+    } else if (wm.type === 'image' && wm.image?.link) {
+      msgType = 'image';
+      mediaUrl = wm.image.link;
+      content = wm.image.caption?.trim() || '[imagen]';
+    } else if (wm.type === 'audio' && wm.audio?.link) {
+      msgType = 'audio';
+      mediaUrl = wm.audio.link;
+      content = '[nota de voz]';
+    } else if (wm.type === 'video' && wm.video?.link) {
+      msgType = 'video';
+      mediaUrl = wm.video.link;
+      content = wm.video.caption?.trim() || '[video]';
+    } else if (wm.type === 'document' && wm.document?.link) {
+      msgType = 'document';
+      mediaUrl = wm.document.link;
+      content = wm.document.filename?.trim() || '[documento]';
+    }
+
+    if (phone && content) {
+      await ctx.runMutation(internal.inbound.ingestAdvisorAppMessage, {
+        eventId,
+        phone,
+        content,
+        msgType,
+        mediaUrl,
+        wamid,
+      });
     }
     return json200();
   }

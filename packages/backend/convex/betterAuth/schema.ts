@@ -20,9 +20,18 @@ export const tables = {
     createdAt: v.number(),
     updatedAt: v.number(),
     userId: v.optional(v.union(v.null(), v.string())),
-    /** Rol interno del usuario. Solo se usa para el panel de operadores (/inbox). */
-    role: v.optional(v.union(v.literal('admin'), v.literal('operador'), v.null())),
+    /**
+     * Rol interno del usuario. String flexible: la app maneja varios roles
+     * (admin, vendedor, asesor_limitado, contabilidad, propietario, client,
+     * user, operador, assistant) y pueden crecer. No usar unión de literales
+     * aquí para no romper la creación de usuarios cuando se agregue un rol.
+     */
+    role: v.optional(v.union(v.null(), v.string())),
     banned: v.optional(v.boolean()),
+    /** Campos de perfil del panel admin (se escriben vía users:updateByEmail). */
+    phone: v.optional(v.union(v.null(), v.string())),
+    position: v.optional(v.union(v.null(), v.string())),
+    documentId: v.optional(v.union(v.null(), v.string())),
   })
     .index('email_name', ['email', 'name'])
     .index('name', ['name'])

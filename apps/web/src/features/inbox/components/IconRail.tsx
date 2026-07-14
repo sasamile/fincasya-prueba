@@ -92,7 +92,7 @@ export function IconRail({
 
   async function handleLogout() {
     await authClient.signOut();
-    router.replace('/login');
+    router.replace('/admin/login');
   }
 
   return (

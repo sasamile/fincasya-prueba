@@ -63,6 +63,21 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
           defaultValue: 'operador',
           input: false,
         },
+        phone: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
+        position: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
+        documentId: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
       },
     },
     session: {

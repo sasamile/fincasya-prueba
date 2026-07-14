@@ -33,11 +33,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 data: {
                   banned?: boolean;
                   createdAt: number;
+                  documentId?: null | string;
                   email: string;
                   emailVerified: boolean;
                   image?: null | string;
                   name: string;
-                  role?: "admin" | "operador" | null;
+                  phone?: null | string;
+                  position?: null | string;
+                  role?: null | string;
                   updatedAt: number;
                   userId?: null | string;
                 };
@@ -116,6 +119,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "userId"
                     | "role"
                     | "banned"
+                    | "phone"
+                    | "position"
+                    | "documentId"
                     | "_id";
                   mode?: "sensitive" | "insensitive";
                   operator?:
@@ -311,6 +317,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "userId"
                     | "role"
                     | "banned"
+                    | "phone"
+                    | "position"
+                    | "documentId"
                     | "_id";
                   mode?: "sensitive" | "insensitive";
                   operator?:
@@ -560,11 +569,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 update: {
                   banned?: boolean;
                   createdAt?: number;
+                  documentId?: null | string;
                   email?: string;
                   emailVerified?: boolean;
                   image?: null | string;
                   name?: string;
-                  role?: "admin" | "operador" | null;
+                  phone?: null | string;
+                  position?: null | string;
+                  role?: null | string;
                   updatedAt?: number;
                   userId?: null | string;
                 };
@@ -580,6 +592,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "userId"
                     | "role"
                     | "banned"
+                    | "phone"
+                    | "position"
+                    | "documentId"
                     | "_id";
                   mode?: "sensitive" | "insensitive";
                   operator?:
@@ -802,11 +817,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 update: {
                   banned?: boolean;
                   createdAt?: number;
+                  documentId?: null | string;
                   email?: string;
                   emailVerified?: boolean;
                   image?: null | string;
                   name?: string;
-                  role?: "admin" | "operador" | null;
+                  phone?: null | string;
+                  position?: null | string;
+                  role?: null | string;
                   updatedAt?: number;
                   userId?: null | string;
                 };
@@ -822,6 +840,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "userId"
                     | "role"
                     | "banned"
+                    | "phone"
+                    | "position"
+                    | "documentId"
                     | "_id";
                   mode?: "sensitive" | "insensitive";
                   operator?:

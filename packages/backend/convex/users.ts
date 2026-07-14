@@ -67,18 +67,8 @@ export const update = mutation({
   args: {
     id: v.string(),
     name: v.optional(v.string()),
-    role: v.optional(
-      v.union(
-        v.literal('admin'),
-        v.literal('vendedor'),
-        v.literal('asesor_limitado'),
-        v.literal('contabilidad'),
-        v.literal('propietario'),
-        v.literal('client'),
-        v.literal('user'),
-        v.null(),
-      ),
-    ),
+    // Rol flexible: la app maneja 9 roles y pueden crecer (ver betterAuth/schema).
+    role: v.optional(v.union(v.null(), v.string())),
     banned: v.optional(v.boolean()),
     phone: v.optional(v.union(v.null(), v.string())),
     position: v.optional(v.union(v.null(), v.string())),
@@ -108,17 +98,8 @@ export const updateByEmail = mutation({
   args: {
     email: v.string(),
     name: v.optional(v.string()),
-    role: v.optional(
-      v.union(
-        v.literal('admin'),
-        v.literal('vendedor'),
-        v.literal('asesor_limitado'),
-        v.literal('contabilidad'),
-        v.literal('propietario'),
-        v.literal('client'),
-        v.literal('user'),
-      ),
-    ),
+    // Rol flexible: la app maneja 9 roles y pueden crecer (ver betterAuth/schema).
+    role: v.optional(v.union(v.null(), v.string())),
     banned: v.optional(v.boolean()),
     phone: v.optional(v.string()),
     position: v.optional(v.union(v.null(), v.string())),
