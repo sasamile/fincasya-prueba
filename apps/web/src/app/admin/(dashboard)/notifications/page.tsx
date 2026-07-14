@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Mail, Plus, Trash2, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   getNotificationSettings,
   setPaymentReceiptEmails,
@@ -78,7 +80,7 @@ export default function NotificationsPage() {
         </p>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
+      <div className="rounded-2xl border border-border/60 bg-card p-6 shadow-sm space-y-4">
         <div className="flex items-center gap-2">
           <Mail className="w-4 h-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">
@@ -107,7 +109,7 @@ export default function NotificationsPage() {
                 emails.map((email) => (
                   <div
                     key={email}
-                    className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2"
+                    className="flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-background px-3 py-2"
                   >
                     <span className="text-sm truncate">{email}</span>
                     <button
@@ -124,7 +126,7 @@ export default function NotificationsPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 type="email"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -135,23 +137,24 @@ export default function NotificationsPage() {
                   }
                 }}
                 placeholder="agregar@correo.com"
-                className="flex-1 h-10 rounded-xl border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/30"
+                className="h-10 rounded-xl border-border/60"
               />
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={addEmail}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 h-10 text-xs font-semibold hover:bg-muted transition"
+                className="h-10 rounded-xl border-border/60 px-3 text-xs font-semibold"
               >
                 <Plus className="w-3.5 h-3.5" /> Agregar
-              </button>
+              </Button>
             </div>
 
             <div className="pt-2 flex justify-end">
-              <button
+              <Button
                 type="button"
                 onClick={() => save.mutate(emails)}
                 disabled={save.isPending}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-foreground text-background px-4 h-10 text-xs font-semibold hover:opacity-90 transition disabled:opacity-60"
+                className="h-10 rounded-xl px-4 text-xs font-semibold"
               >
                 {save.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -159,7 +162,7 @@ export default function NotificationsPage() {
                   <Save className="w-4 h-4" />
                 )}
                 Guardar cambios
-              </button>
+              </Button>
             </div>
           </>
         )}

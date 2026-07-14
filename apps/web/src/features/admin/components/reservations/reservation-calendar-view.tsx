@@ -86,13 +86,13 @@ function bookingColor(b: CalendarBooking): {
   if (s === "CANCELLED")
     return {
       bar: "bg-red-500/20 hover:bg-red-500/30 border-l-2 border-red-500",
-      text: "text-red-800 dark:text-red-200",
+      text: "text-red-950",
       dot: "bg-red-500",
     };
   if (s === "PAID" || s === "COMPLETED")
     return {
       bar: "bg-emerald-500/20 hover:bg-emerald-500/30 border-l-2 border-emerald-500",
-      text: "text-emerald-800 dark:text-emerald-200",
+      text: "text-emerald-950",
       dot: "bg-emerald-500",
     };
   // Turquesa SÓLIDO: el turista TERMINÓ el check-in (lo diferencia del
@@ -105,13 +105,13 @@ function bookingColor(b: CalendarBooking): {
     };
   if (s === "PARTIAL")
     return {
-      bar: "bg-amber-500/20 hover:bg-amber-500/30 border-l-2 border-amber-500",
-      text: "text-amber-900 dark:text-amber-200",
+      bar: "bg-amber-400/35 hover:bg-amber-400/45 border-l-2 border-amber-600",
+      text: "text-amber-950",
       dot: "bg-amber-500",
     };
   return {
     bar: "bg-blue-500/20 hover:bg-blue-500/30 border-l-2 border-blue-500",
-    text: "text-blue-800 dark:text-blue-200",
+    text: "text-blue-950",
     dot: "bg-blue-500",
   };
 }

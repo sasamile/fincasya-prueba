@@ -171,6 +171,43 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/*
+ * Tailwind `border` sin color explícito hereda currentColor (texto casi negro).
+ * Aplica en todo el sitio (incluye portales Radix fuera de `.admin`).
+ */
+:where(.border):not(
+    [class*="border-primary"],
+    [class*="border-emerald"],
+    [class*="border-amber"],
+    [class*="border-blue"],
+    [class*="border-red"],
+    [class*="border-green"],
+    [class*="border-cyan"],
+    [class*="border-purple"],
+    [class*="border-pink"],
+    [class*="border-orange"],
+    [class*="border-destructive"],
+    [class*="border-dashed"],
+    [class*="border-dotted"],
+    [class*="border-border"],
+    [class*="border-input"],
+    [class*="border-ring"],
+    [class*="border-muted"],
+    [class*="border-zinc"],
+    [class*="border-sidebar"],
+    [class*="border-transparent"],
+    [class*="border-none"],
+    [class*="border-0"],
+    [class*="border-t"],
+    [class*="border-b"],
+    [class*="border-l"],
+    [class*="border-r"],
+    [class*="border-x"],
+    [class*="border-y"]
+  ) {
+  border-color: var(--border);
+}
+
 /* Scrollbar fino */
 *::-webkit-scrollbar {
   width: 6px;

@@ -36,7 +36,7 @@ import {
   Share2,
 } from "lucide-react";
 import { useTheme } from '@/components/theme-provider';
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { sileo } from "sileo";
 import {
   Sidebar,
@@ -444,6 +444,9 @@ export default function AdminLayout({
     user?.role,
   );
   const [isChecking, setIsChecking] = useState(true);
+  // Revalida la sesión contra el servidor una sola vez al montar, aunque haya
+  // un usuario persistido en localStorage (que podría traer un rol viejo).
+  const serverValidatedRef = useRef(false);
   const isConversationsRoute =
     pathname.startsWith("/admin/inbox") ||
     pathname.startsWith("/admin/conversations");
@@ -457,68 +460,59 @@ export default function AdminLayout({
     }
   }, [isFullScreenRoute, pathname]);
 
-  // Load session on mount if not already in store
+  // Valida la sesión contra el servidor al montar. SIEMPRE consulta getSession
+  // (aunque haya un usuario persistido en localStorage) para tomar el rol fresco
+  // — así los cambios de rol/permisos hechos por el admin toman efecto sin exigir
+  // re-login. El usuario en caché se muestra mientras tanto para no parpadear.
   useEffect(() => {
+    if (serverValidatedRef.current) return;
+    serverValidatedRef.current = true;
+
     async function checkAuth() {
       try {
         const sessionUser = await getSession();
-        if (sessionUser) {
-          if (
-            sessionUser.role === "admin" ||
-            sessionUser.role === "assistant" ||
-            sessionUser.role === "vendedor"
-          ) {
-            setUser(sessionUser);
-            void ensureSessionLogged(sessionUser);
-            setIsChecking(false);
-          } else {
-            // No autorizado para admin, pero posiblemente logueado como cliente
-            sileo.error({
-              title: "Acceso denegado",
-              description: "No tienes permisos para acceder al panel administrativo.",
-              fill: "#fee2e2",
-            });
-            
-            // Si es cliente lo mandamos a su zona, si no, al login
-            if (sessionUser.role === "owner" || sessionUser.role === "propietario") {
-              router.push("/owner");
-            } else {
-              router.push("/");
-            }
-            setIsChecking(false);
-          }
-        } else {
-          // No session, redirect to login
+        if (!sessionUser) {
+          clearUser();
           router.push("/admin/login");
+          return;
         }
+
+        const isAdminRole =
+          sessionUser.role === "admin" ||
+          sessionUser.role === "assistant" ||
+          sessionUser.role === "vendedor";
+
+        if (!isAdminRole) {
+          // Sincroniza el rol real para no dejar uno viejo en el store.
+          setUser(sessionUser);
+          sileo.error({
+            title: "Acceso denegado",
+            description: "No tienes permisos para acceder al panel administrativo.",
+            fill: "#fee2e2",
+          });
+          if (sessionUser.role === "owner" || sessionUser.role === "propietario") {
+            router.push("/owner");
+          } else {
+            router.push("/");
+          }
+          setIsChecking(false);
+          return;
+        }
+
+        // Rol válido: sincroniza el store con el rol/datos frescos del servidor.
+        setUser(sessionUser);
+        void ensureSessionLogged(sessionUser);
+        setIsChecking(false);
       } catch (err) {
         console.error("Auth check error:", err);
         router.push("/admin/login");
       }
     }
 
-    if (!user) {
-      checkAuth();
-    } else {
-      // User is already in store, still check role for current path
-      const isAdminRole = 
-        user.role === "admin" || 
-        user.role === "assistant" || 
-        user.role === "vendedor";
-
-      if (!isAdminRole) {
-        router.replace(
-          (user.role === "owner" || user.role === "propietario")
-            ? "/owner"
-            : "/"
-        );
-        return;
-      }
-
-      void ensureSessionLogged(user);
-      setIsChecking(false);
-    }
-  }, [user, setUser, clearUser, router, pathname]);
+    // Si hay usuario en caché, muéstralo ya (sin spinner) mientras revalidamos.
+    if (user) setIsChecking(false);
+    void checkAuth();
+  }, [user, setUser, clearUser, router]);
 
   useEffect(() => {
     if (!user || isLoadingPermissions || isFullAdminRole(user.role)) return;
