@@ -12,6 +12,16 @@ import { Archive, Bot, ChevronRight, MoreVertical, Plus, Search } from 'lucide-r
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LoadingArea } from '@/components/ui/spinner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { getAutomationSettings } from '@/features/admin/api/automation-settings.api';
 import { ChatHomeScreen } from '@/features/inbox/components/ChatHomeScreen';
@@ -75,6 +85,8 @@ export default function App() {
   const [pendingTemplatePhone, setPendingTemplatePhone] = useState<string | null>(
     null,
   );
+  const [confirmDisableBotOpen, setConfirmDisableBotOpen] = useState(false);
+  const [togglingGlobalBot, setTogglingGlobalBot] = useState(false);
   const labels = useQuery(api.labels.listLabels);
 
   // Operador logueado (para "míos") y lista de vendedores (para asignar).
@@ -243,8 +255,40 @@ export default function App() {
   }
 
   const globalBotHint = agentSettings?.globalAiEnabled
-    ? 'Chats nuevos con bot. No se activa en chats con catálogo o proceso.'
-    : 'Chats nuevos en humano. Actívalos desde cada conversación.';
+    ? 'Bot ON: chats nuevos con bot. Al apagar, desactiva el bot en TODAS las conversaciones.'
+    : 'Bot OFF: todos los chats en humano; los nuevos también entran en humano.';
+
+  async function applyGlobalBotToggle(on: boolean) {
+    setTogglingGlobalBot(true);
+    try {
+      const res = await setGlobalAi({ enabled: on });
+      if (on) {
+        toast.success('Bot global activado: los chats nuevos usarán el bot');
+      } else {
+        const n = res?.deactivatedCount ?? 0;
+        toast.success(
+          n > 0
+            ? `Bot apagado · ${n} conversación${n === 1 ? '' : 'es'} pasaron a humano`
+            : 'Bot apagado · no había conversaciones con bot activo',
+        );
+      }
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo cambiar el bot global',
+      );
+    } finally {
+      setTogglingGlobalBot(false);
+      setConfirmDisableBotOpen(false);
+    }
+  }
+
+  function handleGlobalBotToggle(on: boolean) {
+    if (!on) {
+      setConfirmDisableBotOpen(true);
+      return;
+    }
+    void applyGlobalBotToggle(true);
+  }
 
   return (
     <div className="flex h-full bg-background">
@@ -304,7 +348,7 @@ export default function App() {
                   />
                   <BotToggle
                     enabled={agentSettings?.globalAiEnabled ?? false}
-                    onChange={(on) => void setGlobalAi({ enabled: on })}
+                    onChange={(on) => void handleGlobalBotToggle(on)}
                     title={globalBotHint}
                   />
                 </div>
@@ -607,6 +651,46 @@ export default function App() {
           }}
         />
       )}
+
+      <AlertDialog
+        open={confirmDisableBotOpen}
+        onOpenChange={(open) => {
+          if (!togglingGlobalBot) setConfirmDisableBotOpen(open);
+        }}
+      >
+        <AlertDialogContent className="border-border bg-card rounded-2xl p-6 shadow-2xl sm:max-w-md">
+          <AlertDialogHeader>
+            <div className="bg-muted mb-1 flex size-11 items-center justify-center rounded-xl">
+              <Bot className="text-muted-foreground h-5 w-5" />
+            </div>
+            <AlertDialogTitle className="text-lg font-semibold tracking-tight">
+              ¿Apagar el bot global?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground text-sm leading-relaxed">
+              También se desactivará el bot en todas las conversaciones que lo
+              tengan activo. Los chats nuevos entrarán en modo humano.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2 gap-2">
+            <AlertDialogCancel
+              disabled={togglingGlobalBot}
+              className="rounded-xl"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={togglingGlobalBot}
+              className="rounded-xl"
+              onClick={(e) => {
+                e.preventDefault();
+                void applyGlobalBotToggle(false);
+              }}
+            >
+              {togglingGlobalBot ? 'Apagando…' : 'Apagar bot'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

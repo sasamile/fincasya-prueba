@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { format, differenceInCalendarDays, addDays } from "date-fns";
+import { format, differenceInCalendarDays, addDays, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 import { CalendarIcon, Home, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -958,7 +958,8 @@ export function CreateSaleLinkModal({
                       sideOffset={4}
                       className={cn(
                         "z-200 w-(--radix-select-trigger-width) overflow-hidden rounded-xl p-2",
-                        isInbox && "inbox border-border bg-card text-foreground",
+                        isInbox &&
+                          "inbox min-h-0! max-h-[min(16rem,var(--radix-select-content-available-height))] border-border bg-card text-foreground",
                       )}
                     >
                       <div className="sticky top-0 z-10 mb-2 border-b border-border bg-popover p-2">
@@ -1050,37 +1051,42 @@ export function CreateSaleLinkModal({
             />
 
             {/* Fechas */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3">
               <FormField
                 control={form.control}
                 name="checkIn"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Check-in *</FormLabel>
-                    <Popover>
+                    <FormLabel className="text-xs">Check-in *</FormLabel>
+                    <Popover modal>
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
                             type="button"
                             variant="outline"
                             className={cn(
-                              "w-full justify-start text-left font-normal",
+                              "h-9 w-full justify-start rounded-md border border-border bg-background px-3 text-left text-sm font-normal shadow-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 data-[state=open]:border-ring data-[state=open]:bg-background",
                               !field.value && "text-muted-foreground",
                             )}
                           >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {field.value
-                              ? format(field.value, "d MMM yyyy", { locale: es })
-                              : "Seleccionar"}
+                            <CalendarIcon className="mr-2 size-4 shrink-0 opacity-50" />
+                            <span className="truncate">
+                              {field.value
+                                ? format(field.value, "d MMM yyyy", { locale: es })
+                                : "Seleccionar"}
+                            </span>
                           </Button>
                         </FormControl>
                       </PopoverTrigger>
                       <PopoverContent
                         className={cn(
-                          "w-auto p-0",
-                          isInbox && "inbox border-border bg-card text-foreground",
+                          "z-200 h-fit w-auto overflow-hidden rounded-xl border border-border p-0 shadow-xl",
+                          isInbox
+                            ? "inbox min-h-0! h-fit! bg-popover text-popover-foreground"
+                            : "bg-popover text-popover-foreground",
                         )}
                         align="start"
+                        sideOffset={6}
                       >
                         <Calendar
                           mode="single"
@@ -1091,9 +1097,10 @@ export function CreateSaleLinkModal({
                               form.setValue("checkOut", addDays(d, 1));
                             }
                           }}
-                          disabled={(date) => date < new Date()}
+                          disabled={(date) => date < startOfDay(new Date())}
                           locale={es}
                           initialFocus
+                          className="rounded-xl bg-transparent"
                         />
                       </PopoverContent>
                     </Popover>
@@ -1107,41 +1114,49 @@ export function CreateSaleLinkModal({
                 name="checkOut"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Check-out *</FormLabel>
-                    <Popover>
+                    <FormLabel className="text-xs">Check-out *</FormLabel>
+                    <Popover modal>
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
                             type="button"
                             variant="outline"
                             className={cn(
-                              "w-full justify-start text-left font-normal",
+                              "h-9 w-full justify-start rounded-md border border-border bg-background px-3 text-left text-sm font-normal shadow-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 data-[state=open]:border-ring data-[state=open]:bg-background",
                               !field.value && "text-muted-foreground",
                             )}
                           >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {field.value
-                              ? format(field.value, "d MMM yyyy", { locale: es })
-                              : "Seleccionar"}
+                            <CalendarIcon className="mr-2 size-4 shrink-0 opacity-50" />
+                            <span className="truncate">
+                              {field.value
+                                ? format(field.value, "d MMM yyyy", { locale: es })
+                                : "Seleccionar"}
+                            </span>
                           </Button>
                         </FormControl>
                       </PopoverTrigger>
                       <PopoverContent
                         className={cn(
-                          "w-auto p-0",
-                          isInbox && "inbox border-border bg-card text-foreground",
+                          "z-200 h-fit w-auto overflow-hidden rounded-xl border border-border p-0 shadow-xl",
+                          isInbox
+                            ? "inbox min-h-0! h-fit! bg-popover text-popover-foreground"
+                            : "bg-popover text-popover-foreground",
                         )}
                         align="start"
+                        sideOffset={6}
                       >
                         <Calendar
                           mode="single"
                           selected={field.value}
                           onSelect={field.onChange}
                           disabled={(date) =>
-                            checkIn ? date <= checkIn : date < new Date()
+                            checkIn
+                              ? date <= startOfDay(checkIn)
+                              : date < startOfDay(new Date())
                           }
                           locale={es}
                           initialFocus
+                          className="rounded-xl bg-transparent"
                         />
                       </PopoverContent>
                     </Popover>

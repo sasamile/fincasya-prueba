@@ -1,6 +1,7 @@
 /**
  * Configuración global del agente IA (singleton).
  * globalAiEnabled: las conversaciones NUEVAS y elegibles entran en modo bot.
+ * Al APAGARLO también pasa a humano todos los chats que estén en modo bot.
  */
 import { internalQuery, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
@@ -35,7 +36,23 @@ export const setGlobalAiEnabled = mutation({
         updatedAt: now,
       });
     }
-    return { globalAiEnabled: enabled };
+
+    let deactivatedCount = 0;
+    if (!enabled) {
+      const aiConversations = await ctx.db
+        .query('conversations')
+        .withIndex('by_status', (q) => q.eq('status', 'ai'))
+        .collect();
+      for (const conversation of aiConversations) {
+        await ctx.db.patch(conversation._id, {
+          status: 'human',
+          aiManualOverride: false,
+        });
+        deactivatedCount += 1;
+      }
+    }
+
+    return { globalAiEnabled: enabled, deactivatedCount };
   },
 });
 

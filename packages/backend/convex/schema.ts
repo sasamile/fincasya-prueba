@@ -1489,7 +1489,8 @@ export default defineSchema(
 
     /**
      * Config global del agente (singleton: key = 'default').
-     * globalAiEnabled: conversaciones nuevas y elegibles entran en modo bot.
+     * globalAiEnabled: chats nuevos elegibles entran con bot.
+     * Al apagarlo también se pasan a humano todos los chats en modo bot.
      */
     agentSettings: defineTable({
       key: v.string(),
