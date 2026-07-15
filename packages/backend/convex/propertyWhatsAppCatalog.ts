@@ -60,16 +60,47 @@ export const listByCatalog = query({
 export const getPropertyByRetailerId = query({
   args: { productRetailerId: v.string() },
   handler: async (ctx, { productRetailerId }) => {
-    const row = await ctx.db
-      .query('propertyWhatsAppCatalog')
-      .withIndex('by_retailer', (q) =>
-        q.eq('productRetailerId', productRetailerId.trim()),
-      )
-      .first();
-    if (!row) return null;
-    const property = await ctx.db.get(row.propertyId);
+    const rid = productRetailerId.trim();
+    if (!rid) return null;
+
+    let propertyId = (
+      await ctx.db
+        .query('propertyWhatsAppCatalog')
+        .withIndex('by_retailer', (q) => q.eq('productRetailerId', rid))
+        .first()
+    )?.propertyId;
+
+    // A veces Meta usa el Convex _id de la propiedad como retailerId.
+    if (!propertyId) {
+      const asProp = await ctx.db.get(rid as any);
+      if (asProp && 'title' in asProp) propertyId = rid as any;
+    }
+    if (!propertyId) return null;
+
+    const property = await ctx.db.get(propertyId);
     if (!property) return null;
-    return { propertyId: row.propertyId, title: property.title, row };
+
+    const img = await ctx.db
+      .query('propertyImages')
+      .withIndex('by_property', (q) => q.eq('propertyId', propertyId!))
+      .first();
+    const prices = [
+      property.priceBase,
+      property.priceBaja,
+      property.priceMedia,
+      property.priceAlta,
+    ].filter((x): x is number => typeof x === 'number' && x > 0);
+
+    return {
+      propertyId,
+      title: property.title,
+      image: img?.url ?? null,
+      priceFrom: prices.length > 0 ? Math.min(...prices) : 0,
+      priceOriginal: property.priceOriginal ?? null,
+      capacity: property.capacity,
+      url: property.slug ? `https://fincasya.com/fincas/${property.slug}` : null,
+      productRetailerId: rid,
+    };
   },
 });
 

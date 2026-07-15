@@ -172,7 +172,8 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
     }
 
     let content = '';
-    let msgType: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text';
+    let msgType: 'text' | 'image' | 'audio' | 'video' | 'document' | 'product' =
+      'text';
     let mediaUrl: string | undefined;
     if (evt.type === 'text' && evt.text?.body) {
       content = evt.text.body.trim();
@@ -196,25 +197,26 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
       (evt.type === 'order' && evt.order?.product_items?.length) ||
       (Array.isArray(evt.product_items) && evt.product_items.length)
     ) {
-      // Pick del catálogo: el cliente tocó "enviar" sobre una finca. YCloud manda
-      // un evento `order` con el product_retailer_id → lo resolvemos al nombre de
-      // la finca para que el agente sepa cuál escogió (antes se caía y el bot no
-      // se enteraba de nada).
+      // Pick del catálogo: el cliente tocó "enviar" sobre una finca.
       const items = evt.order?.product_items ?? evt.product_items ?? [];
       const retailerId = String(items[0]?.product_retailer_id ?? '').trim();
-      const finca = retailerId
-        ? (await ctx.runQuery(internal.inbound.resolveCatalogPick, { retailerId }))?.title ?? ''
-        : '';
-      msgType = 'text';
+      const resolved = retailerId
+        ? await ctx.runQuery(internal.inbound.resolveCatalogPick, { retailerId })
+        : null;
+      const finca = resolved?.title ?? '';
+      msgType = 'product';
       content = finca
-        ? `🏡 El cliente seleccionó esta finca del catálogo: ${finca} (product_retailer_id: ${retailerId})`
-        : retailerId
-          ? `🏡 El cliente seleccionó una finca del catálogo (product_retailer_id: ${retailerId})`
-          : evt.order?.text?.trim() || 'El cliente seleccionó una finca del catálogo.';
+        ? `Seleccioné: ${finca}`
+        : evt.order?.text?.trim() || 'Seleccioné una finca del catálogo.';
+      // metadata vía ingest (abajo)
+      (evt as { __catalogRetailerId?: string }).__catalogRetailerId = retailerId;
     }
 
     // Respuesta citada: wamid del mensaje al que responde el cliente.
     const replyToWamid = evt.context?.id ?? evt.context?.messageId ?? evt.context?.message_id;
+    const catalogRetailerId = String(
+      (evt as { __catalogRetailerId?: string }).__catalogRetailerId ?? '',
+    ).trim();
 
     if (phone && content) {
       await ctx.runMutation(internal.inbound.ingestInboundMessage, {
@@ -226,9 +228,9 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
         mediaUrl,
         wamid,
         replyToWamid,
+        productRetailerId: catalogRetailerId || undefined,
       });
-    }
-  }
+    }  }
 
   return json200();
 });

@@ -66,6 +66,66 @@ function previewSlice(text: string, max: number): string {
   return Array.from(text).slice(0, max).join('');
 }
 
+/** Extrae product_retailer_id de metadata o del cuerpo plano del pick de catálogo. */
+function extractProductRetailerId(m: {
+  content: string;
+  metadata?: unknown;
+  type?: string;
+}): string | undefined {
+  const meta = (m.metadata ?? null) as {
+    productRetailerId?: string;
+    product_retailer_id?: string;
+  } | null;
+  const fromMeta = String(
+    meta?.productRetailerId ?? meta?.product_retailer_id ?? '',
+  ).trim();
+  if (fromMeta) return fromMeta;
+  const match = m.content.match(/product_retailer_id:\s*([^\s)\n]+)/i);
+  return match?.[1]?.trim() || undefined;
+}
+
+type ProductCard = {
+  title: string;
+  image: string | null;
+  priceFrom: number;
+  priceOriginal: number | null;
+  capacity: number;
+  url: string | null;
+  productRetailerId: string;
+};
+
+async function buildProductCard(
+  ctx: QueryCtx,
+  retailerId: string,
+  retailerToProp: Map<string, Id<'properties'>>,
+): Promise<ProductCard | null> {
+  let pid = retailerToProp.get(retailerId);
+  if (!pid) {
+    const asId = retailerId as Id<'properties'>;
+    const direct = await ctx.db.get(asId);
+    if (direct) pid = asId;
+  }
+  if (!pid) return null;
+  const p = await ctx.db.get(pid);
+  if (!p) return null;
+  const img = await ctx.db
+    .query('propertyImages')
+    .withIndex('by_property', (q) => q.eq('propertyId', pid!))
+    .first();
+  const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
+    (x): x is number => typeof x === 'number' && x > 0,
+  );
+  return {
+    title: p.title,
+    image: img?.url ?? null,
+    priceFrom: prices.length > 0 ? Math.min(...prices) : 0,
+    priceOriginal: p.priceOriginal ?? null,
+    capacity: p.capacity,
+    url: p.slug ? `https://fincasya.com/fincas/${p.slug}` : null,
+    productRetailerId: retailerId,
+  };
+}
+
 export const listConversations = query({
   // Requerido por usePaginatedQuery (si es optional, el typecheck de Next falla).
   args: {
@@ -99,6 +159,11 @@ export const listConversations = query({
     // Catálogo de listas/etiquetas (una vez) para resolver los ids por conversación.
     const allLabels = await ctx.db.query('labels').collect();
     const labelById = new Map(allLabels.map((l) => [String(l._id), l]));
+    // Mapa retailer → property para picks de catálogo en preview.
+    const catalogMaps = await ctx.db.query('propertyWhatsAppCatalog').collect();
+    const retailerToProp = new Map(
+      catalogMaps.map((mp) => [mp.productRetailerId, mp.propertyId] as const),
+    );
 
     const out = [];
     for (const c of result.page) {
@@ -131,13 +196,43 @@ export const listConversations = query({
         .map((id) => labelById.get(String(id)))
         .filter((l): l is NonNullable<typeof l> => !!l)
         .map((l) => ({ id: l._id, name: l.name, color: l.color, emoji: l.emoji ?? null }));
+
+      // Preview: si el último mensaje es pick de catálogo, mostrar nombre de finca.
+      let preview: {
+        content: string;
+        sender: string;
+        type: string;
+        whatsappStatus: string | null;
+        outbound: boolean;
+      } | null = null;
+      if (lastMsg) {
+        const rid = extractProductRetailerId(lastMsg);
+        let content = previewSlice(lastMsg.content, 90);
+        let type = lastMsg.type ?? 'text';
+        if (rid) {
+          type = 'product';
+          const card = await buildProductCard(ctx, rid, retailerToProp);
+          content = card?.title
+            ? `🏡 ${card.title}`
+            : '🏡 Seleccionó una finca del catálogo';
+        }
+        preview = {
+          content,
+          sender: lastMsg.sender,
+          type,
+          whatsappStatus:
+            lastMsg.sender === 'assistant' ? lastMsg.whatsappStatus ?? null : null,
+          outbound: lastMsg.sender === 'assistant',
+        };
+      }
+
       out.push({
         conversationId: c._id,
         name: contact?.name ?? 'Sin nombre',
         phone: contact?.phone ?? '',
         status: c.status,
         channel: c.channel,
-        unread: c.inboxUnreadCount ?? 0,
+        unread,
         priority: c.priority ?? null,
         operationalState: c.operationalState ?? null,
         assignedUserId: c.assignedUserId ?? null,
@@ -149,17 +244,7 @@ export const listConversations = query({
         archived: c.archived ?? false,
         isOwner: c.isOwner ?? false,
         labels,
-        preview: lastMsg
-          ? {
-              content: previewSlice(lastMsg.content, 90),
-              sender: lastMsg.sender,
-              type: lastMsg.type ?? 'text',
-              // Estado de entrega solo para salientes (no 'user'/'system').
-              whatsappStatus:
-                lastMsg.sender === 'assistant' ? lastMsg.whatsappStatus ?? null : null,
-              outbound: lastMsg.sender === 'assistant',
-            }
-          : null,
+        preview,
       });
     }
     // OJO: el orden "fijadas primero" se aplica en el cliente sobre lo ya
@@ -182,50 +267,24 @@ export const getMessages = query({
     const byWamid = new Map<string, (typeof ordered)[number]>();
     for (const m of ordered) if (m.wamid) byWamid.set(m.wamid, m);
 
-    // Si hay fichas de producto, mapear retailerId -> propertyId una vez.
-    const hasProduct = ordered.some((m) => (m.type ?? 'text') === 'product');
-    let retailerToProp: Map<string, Id<'properties'>> | null = null;
-    if (hasProduct) {
-      retailerToProp = new Map();
+    // Fichas Meta + picks de catálogo (texto con product_retailer_id).
+    const needsCatalog = ordered.some(
+      (m) =>
+        (m.type ?? 'text') === 'product' ||
+        /product_retailer_id:/i.test(m.content),
+    );
+    const retailerToProp = new Map<string, Id<'properties'>>();
+    if (needsCatalog) {
       const maps = await ctx.db.query('propertyWhatsAppCatalog').collect();
       for (const mp of maps) retailerToProp.set(mp.productRetailerId, mp.propertyId);
     }
 
     const out = [];
     for (const m of ordered) {
-      // Ficha de catálogo -> imagen/precio de la finca (tarjeta rica en el inbox).
-      let product: {
-        title: string;
-        image: string | null;
-        priceFrom: number;
-        priceOriginal: number | null;
-        capacity: number;
-        url: string | null;
-      } | null = null;
-      if ((m.type ?? 'text') === 'product' && retailerToProp) {
-        const meta = (m.metadata ?? null) as { productRetailerId?: string } | null;
-        const rid = meta?.productRetailerId;
-        const pid = rid ? retailerToProp.get(rid) : undefined;
-        if (pid) {
-          const p = await ctx.db.get(pid);
-          if (p) {
-            const img = await ctx.db
-              .query('propertyImages')
-              .withIndex('by_property', (q) => q.eq('propertyId', pid))
-              .first();
-            const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
-              (x): x is number => typeof x === 'number' && x > 0,
-            );
-            product = {
-              title: p.title,
-              image: img?.url ?? null,
-              priceFrom: prices.length > 0 ? Math.min(...prices) : 0,
-              priceOriginal: p.priceOriginal ?? null,
-              capacity: p.capacity,
-              url: p.slug ? `https://fincasya.com/fincas/${p.slug}` : null,
-            };
-          }
-        }
+      const rid = extractProductRetailerId(m);
+      let product: ProductCard | null = null;
+      if (rid) {
+        product = await buildProductCard(ctx, rid, retailerToProp);
       }
 
       // Respuesta citada -> preview del mensaje al que responde.
@@ -241,11 +300,17 @@ export const getMessages = query({
         }
       }
 
+      const isCatalogPick = Boolean(rid);
       out.push({
         id: m._id,
         sender: m.sender,
-        content: m.content,
-        type: m.type ?? 'text',
+        // Contenido limpio para la UI: no mostramos IDs crudos del catálogo.
+        content: product
+          ? `Seleccioné: ${product.title}`
+          : isCatalogPick
+            ? 'Seleccioné una finca del catálogo'
+            : m.content,
+        type: product || isCatalogPick ? 'product' : (m.type ?? 'text'),
         mediaUrl: m.mediaUrl ?? null,
         mediaFilename: m.mediaFilename ?? null,
         mediaMime: m.mediaMime ?? null,
@@ -255,7 +320,6 @@ export const getMessages = query({
         byAdvisor: Boolean(m.sentByUserId),
         reaction: m.reaction ?? null,
         transcription: m.transcription ?? null,
-        // wamid: necesario para citar (Responder) y reaccionar por WhatsApp.
         wamid: m.wamid ?? null,
         product,
         replyTo,

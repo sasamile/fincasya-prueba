@@ -298,10 +298,13 @@ export const ingestInboundMessage = internalMutation({
       v.literal('audio'),
       v.literal('video'),
       v.literal('document'),
+      v.literal('product'),
     ),
     mediaUrl: v.optional(v.string()),
     wamid: v.optional(v.string()),
     replyToWamid: v.optional(v.string()),
+    /** Pick de catálogo Meta: id del producto elegido. */
+    productRetailerId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const seen = await ctx.db
@@ -388,15 +391,39 @@ export const ingestInboundMessage = internalMutation({
       isNewConversation = true;
     }
 
+    // Pick de catálogo entrante: a veces llega como TEXTO con el product_retailer_id
+    // en el cuerpo (no como evento 'order'). Resolvemos la finca y guardamos su
+    // NOMBRE para que el operador Y el agente sepan cuál escogió el cliente
+    // (se conserva el product_retailer_id para que la ficha del inbox lo detecte).
+    let pickContent = args.content;
+    let pickRetailerId = args.productRetailerId;
+    const ridMatch = args.content.match(/product_retailer_id:\s*([^\s)\n]+)/i);
+    if (ridMatch) {
+      const rid = ridMatch[1].trim();
+      pickRetailerId = pickRetailerId ?? rid;
+      const mapping = await ctx.db
+        .query('propertyWhatsAppCatalog')
+        .withIndex('by_retailer', (q) => q.eq('productRetailerId', rid))
+        .first();
+      const prop = mapping ? await ctx.db.get(mapping.propertyId) : null;
+      const title = prop?.title?.trim();
+      if (title && !args.content.includes(title)) {
+        pickContent = `🏡 El cliente seleccionó del catálogo: ${title} (product_retailer_id: ${rid})`;
+      }
+    }
+
     const messageId = await ctx.db.insert('messages', {
       conversationId: conversation._id,
       sender: 'user',
-      content: args.content,
+      content: pickContent,
       type: args.msgType,
       mediaUrl: args.mediaUrl,
       wamid: args.wamid,
       replyToWamid: args.replyToWamid,
-      metadata: { source: 'ycloud_inbound_webhook' },
+      metadata: {
+        source: 'ycloud_inbound_webhook',
+        ...(pickRetailerId ? { productRetailerId: pickRetailerId } : {}),
+      },
       createdAt: now,
     });
     await ctx.db.patch(conversation._id, {
