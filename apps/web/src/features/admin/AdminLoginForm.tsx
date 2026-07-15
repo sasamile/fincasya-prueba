@@ -130,7 +130,7 @@ export function AdminLoginForm() {
         <Button
           type="submit"
           disabled={loading}
-          className="w-full h-11 text-base font-bold bg-[#fe4a19] hover:bg-[#fe4a19]/90 text-white rounded-xl mt-4 shadow-lg shadow-[#fe4a19]/20 active:scale-[0.98] disabled:opacity-70"
+          className="w-full h-11 text-base font-bold !bg-[#fe4a19] hover:!bg-[#e54115] !text-white rounded-xl mt-4 shadow-lg shadow-[#fe4a19]/25 active:scale-[0.98] disabled:opacity-70"
         >
           {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
         </Button>

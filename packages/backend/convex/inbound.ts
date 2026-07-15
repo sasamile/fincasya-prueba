@@ -455,7 +455,9 @@ export const ingestInboundMessage = internalMutation({
         createdAt: now + 1,
         metadata: { kind: 'inbox_escalation_alert', escalationReason: 'emergency' },
       });
-      if (!alreadyFlagged) {
+      // Solo respondemos al cliente si la IA global está encendida; con la IA
+      // apagada el bot no le escribe a nadie (la alerta interna sí queda arriba).
+      if (!alreadyFlagged && globalAiEnabled) {
         await ctx.scheduler.runAfter(0, internal.agent.sendHandoffText, {
           conversationId: conversation._id,
           to: args.phone,
@@ -485,16 +487,21 @@ export const ingestInboundMessage = internalMutation({
         type: 'text',
         createdAt: now + 1,
       });
-      await ctx.scheduler.runAfter(0, internal.agent.sendOwnerGreeting, {
-        conversationId: conversation._id,
-        to: args.phone,
-        text: buildOwnerGreeting(contact.ownerName, contact.ownerTratamiento),
-      });
+      // Con la IA apagada el bot no le escribe a nadie: se detecta y escala al
+      // propietario (arriba), pero el saludo por WhatsApp solo sale si la IA está ON.
+      if (globalAiEnabled) {
+        await ctx.scheduler.runAfter(0, internal.agent.sendOwnerGreeting, {
+          conversationId: conversation._id,
+          to: args.phone,
+          text: buildOwnerGreeting(contact.ownerName, contact.ownerTratamiento),
+        });
+      }
       return { duplicate: false, owner: true };
     }
 
     // Mensaje temporal del panel: una sola vez al ABRIR conversación nueva.
-    if (isNewConversation) {
+    // Con la IA apagada, tampoco sale (el bot no le escribe a nadie).
+    if (isNewConversation && globalAiEnabled) {
       await ctx.scheduler.runAfter(
         0,
         internal.whatsappTemporalMessage.sendIfActive,
