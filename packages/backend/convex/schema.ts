@@ -161,6 +161,11 @@ export default defineSchema(
       isOwner: v.optional(v.boolean()),
       /** Ya se envió el saludo de propietario + escalado en esta conversación. */
       ownerGreeted: v.optional(v.boolean()),
+      /**
+       * Ya se envió el ÚNICO mensaje de seguimiento (10 min sin respuesta a la
+       * bienvenida). Evita reenviarlo: solo se manda una vez por conversación.
+       */
+      followupSent: v.optional(v.boolean()),
       /** Fijada arriba en el inbox (clic derecho → Fijar). */
       pinned: v.optional(v.boolean()),
       /** Archivada: oculta del listado principal (clic derecho → Archivar). */

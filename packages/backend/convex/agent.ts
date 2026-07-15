@@ -108,6 +108,28 @@ type CatalogPickResult =
 // Contexto
 // ---------------------------------------------------------------------------
 
+/** Suma días a una fecha "YYYY-MM-DD" (UTC, sin drift de zona). */
+function addDaysIso(iso: string, days: number): string | null {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** "YYYY-MM-DD" → "martes 21 de julio" (es-CO). */
+function formatFechaLarga(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'UTC',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(d);
+}
+
 export const getAgentContext = internalQuery({
   args: { conversationId: v.id('conversations') },
   handler: async (ctx, { conversationId }): Promise<AgentContext | null> => {
@@ -864,6 +886,101 @@ export const markConversationHuman = internalMutation({
 });
 
 // ---------------------------------------------------------------------------
+// Seguimiento a los 10 min (uno solo) si el cliente no responde la bienvenida
+// ---------------------------------------------------------------------------
+
+const FOLLOWUP_DELAY_MS = 10 * 60 * 1000; // 10 minutos
+
+function buildFollowupMessage(): string {
+  return `¡Hola! 👋 Seguimos por aquí para ayudarte a encontrar la finca perfecta para tu plan 🏡✨\n\nApenas me digas las *fechas* y *cuántas personas*, te comparto las mejores opciones disponibles. ¿Damos el primer paso? 🤝`;
+}
+
+/** Decide si toca mandar el seguimiento (cliente sin responder la bienvenida). */
+export const followupPrecheck = internalQuery({
+  args: { conversationId: v.id('conversations'), sinceMs: v.number() },
+  handler: async (ctx, { conversationId, sinceMs }) => {
+    const conv = await ctx.db.get(conversationId);
+    if (!conv) return { shouldSend: false as const };
+    if (conv.status !== 'ai') return { shouldSend: false as const };
+    if (conv.followupSent === true) return { shouldSend: false as const };
+    const settings = await ctx.db
+      .query('agentSettings')
+      .withIndex('by_key', (q) => q.eq('key', 'default'))
+      .first();
+    if (!(settings?.globalAiEnabled ?? false)) {
+      return { shouldSend: false as const };
+    }
+    const msgs = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation', (q) =>
+        q.eq('conversationId', conversationId),
+      )
+      .collect();
+    // ¿El cliente respondió algo DESPUÉS de la bienvenida? → no molestar.
+    const clientReplied = msgs.some(
+      (m) => m.sender === 'user' && !m.deletedAt && m.createdAt > sinceMs,
+    );
+    if (clientReplied) return { shouldSend: false as const };
+    // ¿Un Experto humano ya intervino? → el bot no manda seguimiento.
+    const humanIntervino = msgs.some(
+      (m) => m.sender === 'assistant' && m.sentByUserId && !m.deletedAt,
+    );
+    if (humanIntervino) return { shouldSend: false as const };
+    const contact = await ctx.db.get(conv.contactId);
+    if (!contact?.phone) return { shouldSend: false as const };
+    return { shouldSend: true as const, phone: contact.phone };
+  },
+});
+
+/** Guarda el mensaje de seguimiento y marca la conversación (nunca reenvía). */
+export const recordFollowup = internalMutation({
+  args: {
+    conversationId: v.id('conversations'),
+    content: v.string(),
+    wamid: v.optional(v.string()),
+  },
+  handler: async (ctx, { conversationId, content, wamid }): Promise<void> => {
+    const now = Date.now();
+    await ctx.db.insert('messages', {
+      conversationId,
+      sender: 'assistant',
+      content,
+      type: 'text',
+      wamid,
+      whatsappStatus: wamid ? 'sent' : undefined,
+      metadata: { source: 'followup_no_reply' },
+      createdAt: now,
+    });
+    await ctx.db.patch(conversationId, { followupSent: true, lastMessageAt: now });
+  },
+});
+
+/** Envía el ÚNICO seguimiento de 10 min si sigue sin respuesta. */
+export const sendNoReplyFollowup = internalAction({
+  args: { conversationId: v.id('conversations'), sinceMs: v.number() },
+  handler: async (ctx, { conversationId, sinceMs }): Promise<void> => {
+    const check = await ctx.runQuery(internal.agent.followupPrecheck, {
+      conversationId,
+      sinceMs,
+    });
+    if (!check.shouldSend) return;
+    const text = buildFollowupMessage();
+    let wamid: string | undefined;
+    try {
+      const sent = await sendWhatsappText({ to: check.phone, text });
+      wamid = sent.wamid;
+    } catch (err) {
+      console.error('[agent] fallo el envio del seguimiento', err);
+    }
+    await ctx.runMutation(internal.agent.recordFollowup, {
+      conversationId,
+      content: text,
+      wamid,
+    });
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Orquestador
 // ---------------------------------------------------------------------------
 
@@ -1024,6 +1141,13 @@ export const runAgentTurn = internalAction({
         content: welcome,
         wamid: welcomeWamid,
       });
+      // Seguimiento a los 10 min si el cliente NO responde la bienvenida (uno
+      // solo). Evita que se pierda el lead pensando que es un bot que no atiende.
+      await ctx.scheduler.runAfter(
+        FOLLOWUP_DELAY_MS,
+        internal.agent.sendNoReplyFollowup,
+        { conversationId, sinceMs: Date.now() },
+      );
       return;
     }
 
@@ -1218,6 +1342,27 @@ export const runAgentTurn = internalAction({
                 };
               }
             }
+            // AUTO-AJUSTE DE MÍNIMO DE NOCHES: si el cliente pidió MENOS noches
+            // que el mínimo, en vez de preguntar "¿ajustamos?" y quedarnos
+            // esperando (la gente no responde), extendemos la salida al mínimo y
+            // enviamos las opciones DIRECTO con una nota corta — solo si la
+            // nueva fecha cumple todas las reglas de temporada.
+            let fechaSalidaEfectiva = fechaSalida;
+            let notaAjusteMinimo: string | null = null;
+            if (bloqueo && bloqueo.esMinimo && fechaEntrada && bloqueo.minNoches > 0) {
+              const nuevaSalida = addDaysIso(fechaEntrada, bloqueo.minNoches);
+              if (nuevaSalida) {
+                const reval = await ctx.runQuery(
+                  internal.agent.toolConsultarTemporada,
+                  { fechaEntrada, fechaSalida: nuevaSalida },
+                );
+                if (reval.reglas.every((r) => r.cumple)) {
+                  fechaSalidaEfectiva = nuevaSalida;
+                  notaAjusteMinimo = `Para el ${bloqueo.temporada} la estadía mínima es de ${bloqueo.minNoches} noches, así que tomé la salida el ${formatFechaLarga(nuevaSalida)} 📅. Estas son las mejores opciones para tu grupo 🏡`;
+                  bloqueo = null; // ya cumple: se envía el catálogo, sin preguntar
+                }
+              }
+            }
             if (bloqueo) {
               if (avisoMinimoSentThisTurn) {
                 result = {
@@ -1280,8 +1425,11 @@ export const runAgentTurn = internalAction({
               continue;
             }
             // Fechas en ms para filtrar por disponibilidad (solo fincas libres).
+            // Usa la salida EFECTIVA (por si se auto-ajustó al mínimo de noches).
             const feMs = fechaEntrada ? parseDateMs(fechaEntrada) : undefined;
-            const fsMs = fechaSalida ? parseDateMs(fechaSalida) : undefined;
+            const fsMs = fechaSalidaEfectiva
+              ? parseDateMs(fechaSalidaEfectiva)
+              : undefined;
             let pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
               conversationId,
               personas: typeof args.personas === 'number' ? args.personas : undefined,
@@ -1322,7 +1470,10 @@ export const runAgentTurn = internalAction({
             } else {
               // Intro ANTES de las fichas (asi lo hace el equipo). SIN numero:
               // algunas fichas pueden fallar al enviarse y el conteo mentiria.
-              const introText = buildCatalogoIntro(context.contactName);
+              // Si hubo auto-ajuste de mínimo de noches, la nota va al inicio.
+              const introText =
+                (notaAjusteMinimo ? `${notaAjusteMinimo}\n\n` : '') +
+                buildCatalogoIntro(context.contactName);
               let introWamid: string | undefined;
               try {
                 const introSent = await sendWhatsappText({
