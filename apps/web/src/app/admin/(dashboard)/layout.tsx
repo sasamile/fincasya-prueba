@@ -40,7 +40,7 @@ import {
   Receipt,
   BarChart3,
 } from "lucide-react";
-import { useTheme } from '@/components/theme-provider';
+import { useTheme } from "@/components/theme-provider";
 import { useAdminAccent } from "@/hooks/use-admin-accent";
 import { useState, useEffect, useRef } from "react";
 import { sileo } from "sileo";
@@ -76,9 +76,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { logout, getSession, ensureSessionLogged } from "@/features/auth/api/auth.api";
+import {
+  logout,
+  getSession,
+  ensureSessionLogged,
+} from "@/features/auth/api/auth.api";
 import { useAuthStore } from "@/features/auth/store/auth.store";
-import { UpcomingUpdateDialog } from "@/features/admin/components/upcoming-update-dialog";
+// import { UpcomingUpdateDialog } from "@/features/admin/components/upcoming-update-dialog";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/features/admin/components/notification-bell";
 import { ContractSettingsRemoteSync } from "@/features/admin/components/contracts/contract-settings-remote-sync";
@@ -116,7 +120,7 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         icon: BadgeCheck,
       },
       {
-        label: "Facturación (Siigo)",
+        label: "Facturación",
         href: "/admin/facturacion",
         icon: Receipt,
       },
@@ -174,15 +178,19 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
       { label: "CRM", href: "/admin/crm", icon: Sparkles },
       { label: "Roles y Permisos", href: "/admin/roles", icon: ShieldCheck },
       { label: "Habeas Data", href: "/admin/habeas-data", icon: ShieldCheck },
-      { label: "Historial de accesos", href: "/admin/access-logs", icon: History },
+      {
+        label: "Historial de accesos",
+        href: "/admin/access-logs",
+        icon: History,
+      },
     ],
   },
-  {
-    title: "REDES SOCIALES",
-    items: [
-      { label: "Bandeja social", href: "/admin/canales", icon: Share2 },
-    ],
-  },
+  //{
+  // title: "REDES SOCIALES",
+  // items: [
+  //   { label: "Bandeja social", href: "/admin/canales", icon: Share2 },
+  // ],
+  //},
   {
     title: "COMUNICACIÓN",
     items: [
@@ -191,8 +199,8 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         href: "/admin/sections",
         icon: LayoutDashboard,
       },
-     // { label: "Base de Conocimiento", href: "/ad min/knowledge", icon: Brain },
-    //  { label: "Playbook de Tono", href: "/admin/playbook", icon: GraduationCap },
+      // { label: "Base de Conocimiento", href: "/ad min/knowledge", icon: Brain },
+      //  { label: "Playbook de Tono", href: "/admin/playbook", icon: GraduationCap },
       { label: "Reseñas de Google", href: "/admin/reviews", icon: Star },
       { label: "Notificaciones", href: "/admin/notifications", icon: Bell },
       {
@@ -228,7 +236,7 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
         return acc;
       }, {}),
   );
-  const [upcomingUpdateOpen, setUpcomingUpdateOpen] = useState(false);
+  // const [upcomingUpdateOpen, setUpcomingUpdateOpen] = useState(false);
 
   const filteredTopNavItems = !user
     ? []
@@ -370,7 +378,10 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
                 <Collapsible
                   open={openSections[group.title]}
                   onOpenChange={(isOpen: boolean) =>
-                    setOpenSections((prev) => ({ ...prev, [group.title]: isOpen }))
+                    setOpenSections((prev) => ({
+                      ...prev,
+                      [group.title]: isOpen,
+                    }))
                   }
                   className="w-full"
                 >
@@ -501,13 +512,13 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
                     </DropdownMenuSubContent>
                   </DropdownMenuPortal>
                 </DropdownMenuSub>
-                <DropdownMenuItem
+                {/* <DropdownMenuItem
                   className="flex items-center gap-2"
                   onSelect={() => setUpcomingUpdateOpen(true)}
                 >
                   <Sparkles className="size-4" />
                   <span>Próxima actualización</span>
-                </DropdownMenuItem>
+                </DropdownMenuItem> */}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleLogout}
@@ -520,10 +531,10 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
             </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
-        <UpcomingUpdateDialog
+        {/* <UpcomingUpdateDialog
           open={upcomingUpdateOpen}
           onOpenChange={setUpcomingUpdateOpen}
-        />
+        /> */}
       </SidebarFooter>
       {showRail ? <SidebarRail /> : null}
     </Sidebar>
@@ -566,7 +577,8 @@ export default function AdminLayout({
     pathname.startsWith("/admin/conversations");
   const isSocialCrmRoute = pathname.startsWith("/admin/canales");
   const isFullScreenRoute = isConversationsRoute || isSocialCrmRoute;
-  const [conversationsSidebarOpen, setConversationsSidebarOpen] = useState(false);
+  const [conversationsSidebarOpen, setConversationsSidebarOpen] =
+    useState(false);
 
   useEffect(() => {
     if (isFullScreenRoute) {
@@ -709,11 +721,9 @@ export default function AdminLayout({
     if (!user || isLoadingPermissions || isFullAdminRole(user.role)) return;
 
     if (!canAccessAdminPath(pathname, user.role, permissions)) {
-      const fallback = getDefaultAdminPath(
-        user.role,
-        permissions,
-        [...ADMIN_ROUTE_PRIORITY],
-      );
+      const fallback = getDefaultAdminPath(user.role, permissions, [
+        ...ADMIN_ROUTE_PRIORITY,
+      ]);
       if (fallback && fallback !== pathname) {
         router.replace(fallback);
       }
@@ -738,8 +748,8 @@ export default function AdminLayout({
         <AdminSidebar showRail={false} />
         <SidebarInset
           className={cn(
-            'relative h-dvh max-h-dvh min-h-0 min-w-0 overflow-hidden',
-            isSocialCrmRoute ? 'social-crm' : 'inbox',
+            "relative h-dvh max-h-dvh min-h-0 min-w-0 overflow-hidden",
+            isSocialCrmRoute ? "social-crm" : "inbox",
           )}
         >
           {isChecking ? (
@@ -767,69 +777,75 @@ export default function AdminLayout({
   return (
     <div className="admin">
       <SidebarProvider>
-      <AdminSidebar />
-      <SidebarInset className="relative min-w-0 overflow-x-hidden bg-background">
-        {/* Aesthetic Background Elements - Contained to avoid horizontal overflow */}
-        <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
-          <div className="bg-primary/5 absolute top-0 right-0 h-[600px] w-[600px] translate-x-1/2 -translate-y-1/2 rounded-full blur-[120px]" />
-          <div className="bg-primary/5 absolute bottom-0 left-0 h-[500px] w-[500px] -translate-x-1/2 translate-y-1/2 rounded-full blur-[100px]" />
-        </div>
-        <header
-          className={cn(
-            "border-border bg-background/40 sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 backdrop-blur-md md:h-[60.4px] md:px-6",
-            // Hide dashboard header when on a specific conversation (detail view)
-            // The route for detail is /admin/conversations/[id]
-            pathname.startsWith("/admin/conversations/") && "hidden",
-            (pathname === "/admin/properties/create" || pathname.match(/\/admin\/properties\/[^/]+(\/edit|\/owner)?$/)) && "hidden",
-            pathname.startsWith("/admin/reorder") && "max-md:z-0",
-            // Hide dashboard header on desktop for the main conversations list to allow resizable panels
-            pathname === "/admin/conversations" && "md:hidden",
-          )}
-        >
-          <div className="flex items-center gap-3 md:gap-4">
-            <SidebarTrigger className="text-muted-foreground hover:text-foreground -ml-1 transition-colors" />
-            <div className="bg-border h-4 w-px" />
-            <div className="flex flex-col">
-              <span className="text-foreground text-sm font-bold tracking-tight whitespace-nowrap md:text-base">
-                Panel Admin
-              </span>
-            </div>
+        <AdminSidebar />
+        <SidebarInset className="relative min-w-0 overflow-x-hidden bg-background">
+          {/* Aesthetic Background Elements - Contained to avoid horizontal overflow */}
+          <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+            <div className="bg-primary/5 absolute top-0 right-0 h-[600px] w-[600px] translate-x-1/2 -translate-y-1/2 rounded-full blur-[120px]" />
+            <div className="bg-primary/5 absolute bottom-0 left-0 h-[500px] w-[500px] -translate-x-1/2 translate-y-1/2 rounded-full blur-[100px]" />
           </div>
-
-          <div className="flex items-center gap-3">
-            {showInboxHumanAlerts && <NotificationBell />}
-            {user && (
-              <div className="hidden flex-col items-end sm:flex text-right">
-                <span className="text-foreground text-xs leading-none font-bold tracking-tight">
-                  {user.name || "Administrador"}
-                </span>
-                <span className="text-muted-foreground mt-1 text-[9px] leading-none uppercase font-black opacity-60">
-                  {user.role}
+          <header
+            className={cn(
+              "border-border bg-background/40 sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 backdrop-blur-md md:h-[60.4px] md:px-6",
+              // Hide dashboard header when on a specific conversation (detail view)
+              // The route for detail is /admin/conversations/[id]
+              pathname.startsWith("/admin/conversations/") && "hidden",
+              (pathname === "/admin/properties/create" ||
+                pathname.match(
+                  /\/admin\/properties\/[^/]+(\/edit|\/owner)?$/,
+                )) &&
+                "hidden",
+              pathname.startsWith("/admin/reorder") && "max-md:z-0",
+              // Hide dashboard header on desktop for the main conversations list to allow resizable panels
+              pathname === "/admin/conversations" && "md:hidden",
+            )}
+          >
+            <div className="flex items-center gap-3 md:gap-4">
+              <SidebarTrigger className="text-muted-foreground hover:text-foreground -ml-1 transition-colors" />
+              <div className="bg-border h-4 w-px" />
+              <div className="flex flex-col">
+                <span className="text-foreground text-sm font-bold tracking-tight whitespace-nowrap md:text-base">
+                  Panel Admin
                 </span>
               </div>
-            )}
-            <div className="bg-primary/10 border-primary/20 text-primary flex h-8 w-8 items-center justify-center rounded-xl border text-[10px] font-black uppercase shadow-sm">
-              {initials}
             </div>
-          </div>
-        </header>
-        {isChecking ? (
-          <div className="bg-background z-50 flex min-h-[calc(100vh-4rem)] flex-1 items-center justify-center">
-            <div className="flex flex-col items-center gap-4">
-              <div className="border-primary/20 border-t-primary h-12 w-12 animate-spin rounded-full border-4" />
-              <p className="animate-pulse text-xs font-bold tracking-widest text-gray-400 uppercase">
-                Verificando acceso...
-              </p>
+
+            <div className="flex items-center gap-3">
+              {showInboxHumanAlerts && <NotificationBell />}
+              {user && (
+                <div className="hidden flex-col items-end sm:flex text-right">
+                  <span className="text-foreground text-xs leading-none font-bold tracking-tight">
+                    {user.name || "Administrador"}
+                  </span>
+                  <span className="text-muted-foreground mt-1 text-[9px] leading-none uppercase font-black opacity-60">
+                    {user.role}
+                  </span>
+                </div>
+              )}
+              <div className="bg-primary/10 border-primary/20 text-primary flex h-8 w-8 items-center justify-center rounded-xl border text-[10px] font-black uppercase shadow-sm">
+                {initials}
+              </div>
             </div>
-          </div>
-        ) : (
-          <>
-            <ContractSettingsRemoteSync />
-            <div className="relative z-0 p-4 flex-1 min-w-0 overflow-x-hidden bg-transparent">{children}</div>
-          </>
-        )}
-      </SidebarInset>
-    </SidebarProvider>
+          </header>
+          {isChecking ? (
+            <div className="bg-background z-50 flex min-h-[calc(100vh-4rem)] flex-1 items-center justify-center">
+              <div className="flex flex-col items-center gap-4">
+                <div className="border-primary/20 border-t-primary h-12 w-12 animate-spin rounded-full border-4" />
+                <p className="animate-pulse text-xs font-bold tracking-widest text-gray-400 uppercase">
+                  Verificando acceso...
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <ContractSettingsRemoteSync />
+              <div className="relative z-0 p-4 flex-1 min-w-0 overflow-x-hidden bg-transparent">
+                {children}
+              </div>
+            </>
+          )}
+        </SidebarInset>
+      </SidebarProvider>
     </div>
   );
 }
