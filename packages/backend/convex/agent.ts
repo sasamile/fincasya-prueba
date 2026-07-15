@@ -667,7 +667,7 @@ const TOOL_DEFS: ToolDef[] = [
     function: {
       name: 'consultar_disponibilidad',
       description:
-        'Verifica si una finca esta libre en un rango de fechas. Fechas en formato YYYY-MM-DD.',
+        'Verifica si una finca esta libre en un rango de fechas SEGUN NUESTRO CALENDARIO INTERNO. Fechas en formato YYYY-MM-DD. OJO: el resultado es PRELIMINAR — la disponibilidad REAL la confirma un Experto humano. PROHIBIDO afirmar al cliente "esta disponible" como hecho: di que segun nuestro calendario se ve libre y que un experto la confirma.',
       parameters: {
         type: 'object',
         properties: {
@@ -877,6 +877,42 @@ export const runAgentTurn = internalAction({
         wamid: handoffWamid,
       });
       console.log('[agent] escalado por bucle de precio', { conversationId, priceLoopMotivo });
+      return;
+    }
+
+    // PICK DE CATÁLOGO (candado determinista): si el cliente tocó una finca en
+    // el catálogo de WhatsApp, esa ES su elección → mensaje oficial de
+    // "Excelente elección" + escalado a un Experto EN CÓDIGO (sin LLM). El bot
+    // NO puede confirmar disponibilidad ni seguir la venta: eso lo hace el
+    // experto de forma personalizada.
+    const isCatalogPick =
+      /product_retailer_id/i.test(last.content) ||
+      /seleccion[oó].*(cat[aá]logo|finca)/i.test(last.content);
+    if (isCatalogPick) {
+      const handoffText = buildPropertySelectionHandoff(context.contactName);
+      let handoffWamid: string | undefined;
+      if (context.contactPhone) {
+        try {
+          const sent = await sendWhatsappText({
+            to: context.contactPhone,
+            text: handoffText,
+          });
+          handoffWamid = sent.wamid;
+        } catch (err) {
+          console.error('[agent] fallo el handoff de pick de catalogo', err);
+        }
+      }
+      await ctx.runMutation(internal.agent.saveAssistantMessage, {
+        conversationId,
+        content: handoffText,
+        wamid: handoffWamid,
+      });
+      await ctx.runMutation(internal.agent.toolEscalar, {
+        conversationId,
+        motivo:
+          'cliente eligió finca del catálogo — experto confirma disponibilidad y continúa la reserva',
+      });
+      console.log('[agent] escalado por pick de catalogo', { conversationId });
       return;
     }
 

@@ -82,7 +82,7 @@ export function SidebarFilters({
         <button
           type="button"
           onClick={() => setLabelFilter(null)}
-          className="flex min-w-0 max-w-[7.5rem] shrink items-center gap-1.5 truncate rounded-full px-3 py-1 text-[13px] font-medium"
+          className="flex min-w-0 max-w-30 shrink items-center gap-1.5 truncate rounded-full px-3 py-1 text-[13px] font-medium"
           style={{ backgroundColor: `${activeLabel.color}33`, color: activeLabel.color }}
         >
           <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: activeLabel.color }} />
@@ -198,7 +198,7 @@ export function SidebarFilters({
       {/* Modal crear lista */}
       {editor && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+          className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 p-4"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setEditor(null);
           }}
