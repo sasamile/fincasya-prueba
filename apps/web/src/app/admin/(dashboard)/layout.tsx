@@ -224,6 +224,11 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         href: "/admin/saludo-propietario",
         icon: Home,
       },
+      {
+        label: "Horario de atención",
+        href: "/admin/horarios",
+        icon: CalendarDays,
+      },
     ],
   },
 ];

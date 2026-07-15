@@ -12,6 +12,7 @@ import {
 } from './lib/agentEligibility';
 import { isAppAutoReply } from './lib/appAutoReply';
 import { DEFAULT_OWNER_GREETING } from './ownerGreeting';
+import { isOutOfHours } from './lib/businessHours';
 
 const AGENT_DEBOUNCE_MS = 7000;
 const SETTINGS_KEY = 'default';
@@ -534,6 +535,32 @@ export const ingestInboundMessage = internalMutation({
       return { duplicate: false, owner: true };
     }
 
+    // FUERA DE HORARIO (config /admin/horarios): distinto según cliente NUEVO
+    // vs CON HISTORIAL. Se calcula con festivos y zona Bogotá.
+    const bhRow = await ctx.db
+      .query('businessHoursSettings')
+      .withIndex('by_scope', (q) => q.eq('scope', 'global'))
+      .unique();
+    const fueraDeHorario =
+      (bhRow?.enabled ?? false) && isOutOfHours(now, bhRow?.schedule ?? null);
+    // "Con historial" = ya interactuó antes (otra conversación) o es cliente.
+    const esRecurrente =
+      conversations.some((c) => c._id !== conversation._id) ||
+      contact.crmType === 'client' ||
+      !!contact.lastReservationAt;
+
+    // CON HISTORIAL + fuera de horario → SOLO el saludo, el bot NO atiende.
+    if (fueraDeHorario && esRecurrente) {
+      if (conversation.outOfHoursReturningSent !== true) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.businessHours.sendOutOfHoursReturning,
+          { conversationId: conversation._id },
+        );
+      }
+      return { duplicate: false, outOfHours: 'returning' };
+    }
+
     // Mensaje temporal del panel: una sola vez al ABRIR conversación nueva.
     // Con la IA apagada, tampoco sale (el bot no le escribe a nadie).
     if (isNewConversation && globalAiEnabled) {
@@ -582,6 +609,22 @@ export const ingestInboundMessage = internalMutation({
           AGENT_DEBOUNCE_MS,
           internal.agent.runAgentTurn,
           { conversationId: conversation._id, triggerMessageId: messageId },
+        );
+      }
+
+      // NUEVO + fuera de horario: tras la atención del bot, enviar el cierre
+      // (una sola vez). No en el PRIMER mensaje (la bienvenida) para no
+      // contradecir. El precheck evita duplicados y respeta si un humano toma.
+      if (
+        fueraDeHorario &&
+        !esRecurrente &&
+        !isNewConversation &&
+        conversation.outOfHoursClosingSent !== true
+      ) {
+        await ctx.scheduler.runAfter(
+          AGENT_DEBOUNCE_MS + 12000,
+          internal.businessHours.sendOutOfHoursClosing,
+          { conversationId: conversation._id },
         );
       }
     }

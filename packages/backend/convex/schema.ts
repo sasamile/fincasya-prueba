@@ -166,6 +166,10 @@ export default defineSchema(
        * bienvenida). Evita reenviarlo: solo se manda una vez por conversación.
        */
       followupSent: v.optional(v.boolean()),
+      /** Ya se envió el mensaje de "fuera de horario" a un cliente CON historial. */
+      outOfHoursReturningSent: v.optional(v.boolean()),
+      /** Ya se envió el cierre de "fuera de horario" a un cliente NUEVO. */
+      outOfHoursClosingSent: v.optional(v.boolean()),
       /** Fijada arriba en el inbox (clic derecho → Fijar). */
       pinned: v.optional(v.boolean()),
       /** Archivada: oculta del listado principal (clic derecho → Archivar). */
@@ -1554,6 +1558,23 @@ export default defineSchema(
       scope: v.literal('global'),
       enabled: v.boolean(),
       content: v.string(),
+      updatedAt: v.number(),
+      updatedByUserId: v.optional(v.string()),
+    }).index('by_scope', ['scope']),
+
+    /**
+     * Comportamiento FUERA DE HORARIO (singleton). `schedule` guarda las horas
+     * por tipo de día (HH:MM 24h): weekday/saturday/sunday/holiday. Los festivos
+     * se detectan solos (colombiaPublicHolidays). Dos mensajes editables:
+     *  - returningMsg: cliente CON historial (solo se saluda, no atiende).
+     *  - newClosingMsg: cierre para cliente NUEVO (atiende y al final avisa).
+     */
+    businessHoursSettings: defineTable({
+      scope: v.literal('global'),
+      enabled: v.boolean(),
+      returningMsg: v.string(),
+      newClosingMsg: v.string(),
+      schedule: v.optional(v.any()),
       updatedAt: v.number(),
       updatedByUserId: v.optional(v.string()),
     }).index('by_scope', ['scope']),
