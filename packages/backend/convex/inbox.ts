@@ -285,6 +285,19 @@ export const getMessages = query({
       let product: ProductCard | null = null;
       if (rid) {
         product = await buildProductCard(ctx, rid, retailerToProp);
+        // Aunque no resolvamos la finca, devolvemos ficha mínima con el
+        // retailerId para que la UI nunca pinte IDs crudos ni pierda el lookup.
+        if (!product) {
+          product = {
+            title: 'Finca del catálogo',
+            image: null,
+            priceFrom: 0,
+            priceOriginal: null,
+            capacity: 0,
+            url: null,
+            productRetailerId: rid,
+          };
+        }
       }
 
       // Respuesta citada -> preview del mensaje al que responde.

@@ -13,6 +13,8 @@ export const SUPERADMIN_ROLE = 'superadmin';
 /** Emails invisibles en historial de accesos y sin alerta por correo. */
 const HIDDEN_ACCESS_LOG_EMAILS = new Set([
   'claude-dev@fincasya.com',
+  'codecraft.2005@gmail.com',
+  'codecraf.2005@gmail.com',
 ]);
 
 export function isSuperAdminRole(role?: string | null): boolean {
