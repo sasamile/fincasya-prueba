@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useMutation as useConvexMutation } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import type { Id } from "@fincasya/backend/convex/_generated/dataModel";
@@ -1409,7 +1410,19 @@ export function ReservationPaymentMethodsSection({
             onAddAccount={() => openNewAccount("fincasya")}
             onAddAccountForHolder={openEmpresaAccount}
             addLabel="Cuenta empresa"
-            emptyHint="Sin cuentas de empresa. Agrega una con el botón."
+            emptyHint="Sin cuentas de empresa. Configúralas en Cuentas empresa o agrégalas aquí."
+            headerExtra={
+              <p className="text-[10px] text-muted-foreground">
+                Catálogo global:{" "}
+                <Link
+                  href="/admin/cuentas-empresa"
+                  className="font-semibold text-foreground underline-offset-2 hover:underline"
+                >
+                  configurar cuentas empresa
+                </Link>{" "}
+                sin abrir una reserva.
+              </p>
+            }
           />
 
           <p className="text-[10px] text-muted-foreground">

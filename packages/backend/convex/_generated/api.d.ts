@@ -102,6 +102,7 @@ import type * as ownerPortal from "../ownerPortal.js";
 import type * as paymentPortal from "../paymentPortal.js";
 import type * as paymentReceipts from "../paymentReceipts.js";
 import type * as permissions from "../permissions.js";
+import type * as propertyBlocks from "../propertyBlocks.js";
 import type * as propertyOwners from "../propertyOwners.js";
 import type * as propertyWhatsAppCatalog from "../propertyWhatsAppCatalog.js";
 import type * as quickReplies from "../quickReplies.js";
@@ -218,6 +219,7 @@ declare const fullApi: ApiFromModules<{
   paymentPortal: typeof paymentPortal;
   paymentReceipts: typeof paymentReceipts;
   permissions: typeof permissions;
+  propertyBlocks: typeof propertyBlocks;
   propertyOwners: typeof propertyOwners;
   propertyWhatsAppCatalog: typeof propertyWhatsAppCatalog;
   quickReplies: typeof quickReplies;

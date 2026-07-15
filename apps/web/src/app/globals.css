@@ -365,8 +365,9 @@ body {
   resize: none;
   overflow-y: auto;
   outline: none;
-  font-size: 0.9375rem;
-  line-height: 1.25rem;
+  /* ≥16px evita el zoom automático de iOS Safari al enfocar el input. */
+  font-size: 1rem;
+  line-height: 1.35rem;
   color: var(--foreground);
   cursor: text;
 }

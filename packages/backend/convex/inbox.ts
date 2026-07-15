@@ -302,13 +302,34 @@ export const getMessages = query({
         }
       }
 
-      // Respuesta citada -> preview del mensaje al que responde.
+      // Respuesta citada -> preview del mensaje al que responde. Si el mensaje
+      // citado está en la ventana cargada, sale del mapa; si es más viejo (fuera
+      // de la ventana), se resuelve por el índice by_wamid para que la cita
+      // igual aparezca.
       let replyTo: { content: string; sender: string; fromAdvisor: boolean } | null = null;
       if (m.replyToWamid) {
-        const q = byWamid.get(m.replyToWamid);
+        let q = byWamid.get(m.replyToWamid) ?? null;
+        if (!q) {
+          q = await ctx.db
+            .query('messages')
+            .withIndex('by_wamid', (ix) => ix.eq('wamid', m.replyToWamid))
+            .first();
+        }
         if (q) {
+          const label =
+            q.type === 'audio'
+              ? '🎤 Nota de voz'
+              : q.type === 'image'
+                ? '📷 Foto'
+                : q.type === 'video'
+                  ? '🎥 Video'
+                  : q.type === 'document'
+                    ? '📄 Documento'
+                    : q.type === 'product'
+                      ? '🏡 Ficha de catálogo'
+                      : previewSlice(q.content, 120);
           replyTo = {
-            content: previewSlice(q.content, 120),
+            content: label,
             sender: q.sender,
             fromAdvisor: Boolean(q.sentByUserId),
           };

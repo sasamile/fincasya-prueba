@@ -43,8 +43,10 @@ import {
   Landmark,
   ShieldCheck,
   Banknote,
+  Lock,
 } from "lucide-react";
 import { DetailSection } from "@/features/admin/components/reservations/booking-detail-section";
+import { BlockFincasModal } from "@/features/admin/components/reservations/block-fincas-modal";
 import { downloadCheckinGuestsPdf } from "@/features/admin/utils/download-checkin-guests-pdf";
 import {
   downloadDailyReservationsExcel,
@@ -196,6 +198,7 @@ export default function ReservationsPage() {
   const [fincaDropdownSearch, setFincaDropdownSearch] = useState("");
   const [showDirectOnly, setShowDirectOnly] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingBooking, setEditingBooking] = useState<any>(null);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
@@ -1716,13 +1719,23 @@ export default function ReservationsPage() {
               Línea de Vida y Calendario por Fincas
             </p>
           </div>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-primary text-white font-black text-sm hover:bg-primary/90 transition-all shadow-lg shadow-primary/25 active:scale-[0.98] border-b-4 border-primary-dark"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Nueva Reserva</span>
-          </button>
+          <div className="flex w-full gap-2 sm:w-auto">
+            <button
+              onClick={() => setBlockModalOpen(true)}
+              className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-background border border-border text-foreground font-bold text-sm hover:bg-muted transition-all active:scale-[0.98]"
+              title="Bloquear fincas por fechas (el bot no las envía)"
+            >
+              <Lock className="w-4 h-4 text-red-600" />
+              <span>Bloquear finca</span>
+            </button>
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="flex-1 sm:flex-none shrink-0 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-primary text-white font-black text-sm hover:bg-primary/90 transition-all shadow-lg shadow-primary/25 active:scale-[0.98] border-b-4 border-primary-dark"
+            >
+              <Plus className="w-5 h-5" />
+              <span>Nueva Reserva</span>
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between rounded-2xl border border-border/70 bg-muted/25 px-3 py-3 md:px-4">
@@ -2368,6 +2381,10 @@ export default function ReservationsPage() {
           refetchBookings();
         }}
       />
+
+      {blockModalOpen && (
+        <BlockFincasModal onClose={() => setBlockModalOpen(false)} />
+      )}
 
       <ManualReservationModal
         isOpen={isEditModalOpen}

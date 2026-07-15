@@ -504,9 +504,23 @@ export const ingestInboundMessage = internalMutation({
       const greetingApproved = greetingRow?.enabled ?? true;
       const greetingTemplate =
         (greetingRow?.content?.trim() || '') || DEFAULT_OWNER_GREETING;
-      // Con la IA apagada el bot no le escribe a nadie; y el saludo solo sale si
-      // el admin lo aprobó. La detección/escalado (arriba) se mantiene siempre.
-      if (globalAiEnabled && greetingApproved) {
+      // ¿Un Experto humano YA intervino en esta conversación? Si sí, NO se manda
+      // el saludo automático (el experto ya lo está atendiendo — no hablar
+      // encima). La detección/escalado interno se mantiene igual.
+      const priorMsgs = await ctx.db
+        .query('messages')
+        .withIndex('by_conversation', (q) =>
+          q.eq('conversationId', conversation._id),
+        )
+        .collect();
+      const humanIntervino =
+        conversation.status === 'human' ||
+        priorMsgs.some(
+          (m) => m.sender === 'assistant' && m.sentByUserId && !m.deletedAt,
+        );
+      // Con la IA apagada el bot no le escribe a nadie; solo sale si el admin lo
+      // aprobó Y no hay un humano ya atendiendo esta conversación.
+      if (globalAiEnabled && greetingApproved && !humanIntervino) {
         await ctx.scheduler.runAfter(0, internal.agent.sendOwnerGreeting, {
           conversationId: conversation._id,
           to: args.phone,

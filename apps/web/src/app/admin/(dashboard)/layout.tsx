@@ -33,6 +33,7 @@ import {
   ShoppingBag,
   BadgeCheck,
   Home,
+  Landmark,
   Share2,
   Zap,
   Palette,
@@ -118,6 +119,11 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         label: "Revisión de Pagos",
         href: "/admin/payment-review",
         icon: BadgeCheck,
+      },
+      {
+        label: "Cuentas empresa",
+        href: "/admin/cuentas-empresa",
+        icon: Landmark,
       },
       {
         label: "Facturación",

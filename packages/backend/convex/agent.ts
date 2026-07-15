@@ -66,6 +66,12 @@ type AgentContext = {
   returning: boolean;
   /** Zona persistente que el cliente pidió (ej. "cerca a bogotá"). */
   lastRequestedZone: string | null;
+  /**
+   * El ÚLTIMO mensaje del equipo (lado assistant) lo envió un HUMANO (Experto),
+   * no el bot. Si es true, un humano está atendiendo → el bot NO debe responder
+   * (evita que el bot hable encima del asesor, aunque el toggle esté encendido).
+   */
+  humanHandling: boolean;
 };
 
 type FincaResult = {
@@ -116,8 +122,19 @@ export const getAgentContext = internalQuery({
     const ordered = recent.reverse();
     const history: AgentContext['history'] = [];
     let lastUserMessageId: Id<'messages'> | null = null;
+    // ¿El último mensaje real del equipo (assistant) lo escribió un humano?
+    // Recorremos en orden cronológico: gana el más reciente.
+    let humanHandling = false;
     for (const m of ordered) {
       if (m.sender === 'user' && !m.deletedAt) lastUserMessageId = m._id;
+      if (m.sender === 'assistant' && !m.deletedAt && m.content.trim()) {
+        const src2 = (m.metadata as { source?: string } | null)?.source;
+        const isAutoNoise =
+          src2 === 'ycloud_smb_echo_auto' ||
+          src2 === 'whatsapp_temporal' ||
+          isAppAutoReply(m.content);
+        if (!isAutoNoise) humanHandling = Boolean(m.sentByUserId);
+      }
       if (m.sender === 'system' || m.deletedAt || !m.content.trim()) continue;
       // Respuestas automáticas de la app de WhatsApp (mensaje de ausencia,
       // echo de coexistencia): NO van al hilo del agente — son ruido y
@@ -146,6 +163,7 @@ export const getAgentContext = internalQuery({
       catalogSent: (conversation.lastSentCatalogPropertyIds?.length ?? 0) > 0,
       returning,
       lastRequestedZone: conversation.lastRequestedZone ?? null,
+      humanHandling,
     };
   },
 });
@@ -197,6 +215,8 @@ export const toolBuscarFincas = internalQuery({
     const all = await ctx.db.query('properties').collect();
     const zoneKw = zona ? resolveZoneKeywords(zona).keywords : [];
     const matches = all
+      // No ofrecer fincas inhabilitadas (active) ni ocultas del catálogo (visible).
+      .filter((p) => p.active !== false && p.visible !== false)
       .filter((p) => (personas ? (p.eventCapacity ?? p.capacity) >= personas : true))
       .filter((p) => propertyMatchesZone(p.location, p.departamentos, zoneKw))
       .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
@@ -314,7 +334,15 @@ export const toolCatalogPick = internalQuery({
 
     const base = all
       .filter((p) => !exclude.has(String(p._id)))
-      .filter((p) => p.visible !== false && p.visibleInWhatsAppCatalog !== false)
+      // El bot SOLO envía fincas habilitadas (active), visibles en catálogo
+      // (visible) y con el Catálogo Meta/WhatsApp encendido. Si cualquiera de
+      // los tres está apagado, la finca NO se envía.
+      .filter(
+        (p) =>
+          p.active !== false &&
+          p.visible !== false &&
+          p.visibleInWhatsAppCatalog !== false,
+      )
       .filter((p) => propertyMatchesZone(p.location, p.departamentos, zoneKw))
       .filter((p) => (mascotas ? p.allowsPets === true : true));
 
@@ -824,6 +852,17 @@ export const saveAssistantMessage = internalMutation({
   },
 });
 
+/** Apaga el bot en una conversación (la deja en manos de un Experto humano). */
+export const markConversationHuman = internalMutation({
+  args: { conversationId: v.id('conversations') },
+  handler: async (ctx, { conversationId }): Promise<void> => {
+    await ctx.db.patch(conversationId, {
+      status: 'human',
+      aiManualOverride: false,
+    });
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Orquestador
 // ---------------------------------------------------------------------------
@@ -860,6 +899,20 @@ export const runAgentTurn = internalAction({
     );
     if (!context) return;
     if (context.status !== 'ai') return;
+
+    // CANDADO ANTI-COLISIÓN: si el último mensaje del equipo lo escribió un
+    // HUMANO (Experto), un asesor está atendiendo → el bot NO responde (aunque
+    // el toggle esté encendido o haya carrera de debounce). Además apaga el bot
+    // en esta conversación para que quede en manos del humano.
+    if (context.humanHandling) {
+      await ctx.runMutation(internal.agent.markConversationHuman, {
+        conversationId,
+      });
+      console.log('[agent] turno descartado: un Experto está atendiendo', {
+        conversationId,
+      });
+      return;
+    }
 
     const last = context.history[context.history.length - 1];
     if (!last || last.sender !== 'user') return;
