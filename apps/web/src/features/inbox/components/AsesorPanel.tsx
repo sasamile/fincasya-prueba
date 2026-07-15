@@ -7,7 +7,7 @@
  * no ejecutan.
  */
 import { useEffect, useState } from 'react';
-import { useAction, useQuery } from 'convex/react';
+import { useAction, useMutation, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { toast } from 'sonner';
 import { BankLogoBadge } from '@/features/checkin/components/bank-logo-badge';
@@ -22,14 +22,22 @@ import {
   Home,
   Link2,
   Loader2,
+  Plus,
   Search,
   Send,
   Sparkles,
+  Trash2,
   Wand2,
   X,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  getContractSettingsSnapshot,
+  useContractSettingsStore,
+  type BankAccount as StoreBankAccount,
+} from '@/features/admin/store/contract-settings.store';
+import { BankAccountDialog } from '@/features/admin/components/contracts/bank-account-dialog';
 import { ContractPreviewModal } from '@/features/inbox/components/ContractPreviewModal';
 import { ReservasTool } from '@/features/inbox/components/tools/ReservasTool';
 import { VentaTool } from '@/features/inbox/components/tools/VentaTool';
@@ -308,9 +316,11 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         bankAccounts?: BankAccount[];
         contractBankAccountIds?: string[];
         primaryBankAccountId?: string;
+        [key: string]: unknown;
       }
     | null
     | undefined;
+  const replaceSettings = useMutation(api.adminContractSettings.replaceForAdmin);
   const bankAccounts: BankAccount[] = settings?.bankAccounts ?? [];
   const [draft, setDraft] = useState<ContractDraft>(EMPTY_DRAFT);
   const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
@@ -319,6 +329,9 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const [analyzing, setAnalyzing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [deletingBankId, setDeletingBankId] = useState<string | null>(null);
+  const [bankDialogOpen, setBankDialogOpen] = useState(false);
+  const [savingBank, setSavingBank] = useState(false);
 
   // Selección de cuentas por defecto (las del contrato / la principal).
   useEffect(() => {
@@ -338,6 +351,102 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
     setSelectedBankIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
+  };
+
+  const handleSaveBank = async (data: Omit<StoreBankAccount, 'id'>) => {
+    if (savingBank) return;
+    setSavingBank(true);
+    try {
+      const id = crypto.randomUUID();
+      const newAccount: StoreBankAccount = {
+        id,
+        bankName: data.bankName,
+        accountType: data.accountType,
+        accountNumber: data.accountNumber,
+        ownerName: data.ownerName,
+        ownerCedula: data.ownerCedula,
+        imageUrls: data.imageUrls ?? [],
+        qrOnly: data.qrOnly,
+        brebKey: data.brebKey,
+      };
+
+      const base =
+        settings ??
+        getContractSettingsSnapshot(useContractSettingsStore.getState());
+      const prevAccounts = (base.bankAccounts as StoreBankAccount[] | undefined) ?? [];
+      const prevContractIds =
+        (base.contractBankAccountIds as string[] | undefined) ?? [];
+      const nextAccounts = [...prevAccounts, newAccount];
+      const nextContractIds = [...new Set([...prevContractIds, id])];
+      const nextPrimary =
+        (base.primaryBankAccountId as string | null | undefined) ?? id;
+
+      await replaceSettings({
+        payload: {
+          ...base,
+          bankAccounts: nextAccounts,
+          contractBankAccountIds: nextContractIds,
+          primaryBankAccountId: nextPrimary,
+        },
+      });
+
+      useContractSettingsStore.getState().addBankAccounts([newAccount]);
+      setSelectedBankIds((prev) => [...new Set([...prev, id])]);
+      setBankTouched(true);
+      const ownerKey = (data.ownerName || 'Sin titular').trim();
+      setOpenOwners((prev) => new Set(prev).add(ownerKey));
+      setBankDialogOpen(false);
+      toast.success('Cuenta agregada');
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo guardar la cuenta',
+      );
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
+  const handleDeleteBank = async (id: string, label: string) => {
+    if (!settings || deletingBankId) return;
+    if (
+      !window.confirm(
+        `¿Eliminar la cuenta ${label}? Se quita del catálogo de pagos (no solo de esta selección).`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingBankId(id);
+    try {
+      const nextAccounts = (settings.bankAccounts ?? []).filter((a) => a.id !== id);
+      const nextContractIds = (settings.contractBankAccountIds ?? []).filter(
+        (x) => x !== id,
+      );
+      const nextPrimary =
+        settings.primaryBankAccountId === id
+          ? (nextAccounts[0]?.id ?? null)
+          : (settings.primaryBankAccountId ?? null);
+
+      await replaceSettings({
+        payload: {
+          ...settings,
+          bankAccounts: nextAccounts,
+          contractBankAccountIds: nextContractIds,
+          primaryBankAccountId: nextPrimary,
+        },
+      });
+
+      useContractSettingsStore.getState().removeBankAccount(id);
+      setSelectedBankIds((prev) => prev.filter((x) => x !== id));
+      setBankTouched(true);
+      toast.success('Cuenta eliminada');
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo eliminar la cuenta',
+      );
+    } finally {
+      setDeletingBankId(null);
+    }
   };
 
   const set =
@@ -524,9 +633,20 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         title="Cuentas de pago"
         hint={`${selectedBankIds.length} seleccionada${selectedBankIds.length === 1 ? '' : 's'}`}
       >
+        <div className="mb-3 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setBankDialogOpen(true)}
+            disabled={savingBank}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[11px] font-bold text-foreground hover:bg-muted disabled:opacity-60"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Agregar cuenta
+          </button>
+        </div>
         {bankAccounts.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            No hay cuentas configuradas en Ajustes del contrato.
+            No hay cuentas aún. Agrega la primera con el botón de arriba.
           </p>
         ) : (
           <div className="space-y-2">
@@ -582,42 +702,62 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                     <div className="space-y-1.5 p-2">
                       {accs.map((acc) => {
                         const on = selectedBankIds.includes(acc.id);
+                        const deleting = deletingBankId === acc.id;
+                        const label = `${acc.bankName}${acc.accountNumber ? ` · ${acc.accountNumber}` : ''}`;
                         return (
-                          <button
+                          <div
                             key={acc.id}
-                            type="button"
-                            onClick={() => toggleBank(acc.id)}
                             className={cn(
-                              'flex w-full items-center gap-3 rounded-lg border p-2 text-left transition',
+                              'flex items-center gap-1 rounded-lg border transition',
                               on
                                 ? 'border-primary/50 bg-primary/5'
-                                : 'border-border hover:bg-muted',
+                                : 'border-border',
                             )}
                           >
-                            <span
-                              className={cn(
-                                'grid h-5 w-5 shrink-0 place-items-center rounded-md border-2 transition',
-                                on
-                                  ? 'border-primary bg-primary text-primary-foreground'
-                                  : 'border-border',
-                              )}
+                            <button
+                              type="button"
+                              onClick={() => toggleBank(acc.id)}
+                              className="flex min-w-0 flex-1 items-center gap-3 p-2 text-left hover:bg-muted/40"
                             >
-                              {on ? <Check className="h-3 w-3" /> : null}
-                            </span>
-                            <BankLogoBadge
-                              bankName={acc.bankName ?? ''}
-                              brebKey={Boolean(acc.brebKey)}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-[13px] font-semibold">
-                                {acc.bankName}
-                                {acc.accountType ? ` · ${acc.accountType}` : ''}
-                              </p>
-                              <p className="truncate text-[11px] text-muted-foreground">
-                                {acc.accountNumber}
-                              </p>
-                            </div>
-                          </button>
+                              <span
+                                className={cn(
+                                  'grid h-5 w-5 shrink-0 place-items-center rounded-md border-2 transition',
+                                  on
+                                    ? 'border-primary bg-primary text-primary-foreground'
+                                    : 'border-border',
+                                )}
+                              >
+                                {on ? <Check className="h-3 w-3" /> : null}
+                              </span>
+                              <BankLogoBadge
+                                bankName={acc.bankName ?? ''}
+                                brebKey={Boolean(acc.brebKey)}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[13px] font-semibold">
+                                  {acc.bankName}
+                                  {acc.accountType ? ` · ${acc.accountType}` : ''}
+                                </p>
+                                <p className="truncate text-[11px] text-muted-foreground">
+                                  {acc.accountNumber}
+                                </p>
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              title="Eliminar cuenta"
+                              aria-label={`Eliminar ${label}`}
+                              disabled={deleting || Boolean(deletingBankId)}
+                              onClick={() => void handleDeleteBank(acc.id, label)}
+                              className="mr-1.5 shrink-0 rounded-lg p-2 text-red-500 hover:bg-red-500/10 disabled:opacity-50"
+                            >
+                              {deleting ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -627,6 +767,12 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             })}
           </div>
         )}
+        <BankAccountDialog
+          open={bankDialogOpen}
+          onClose={() => setBankDialogOpen(false)}
+          onSave={(data) => void handleSaveBank(data)}
+          contentClassName="bg-card text-foreground"
+        />
       </Section>
 
       <Section title="Cliente">

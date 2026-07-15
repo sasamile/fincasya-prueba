@@ -91,6 +91,7 @@ type OwnerAccountsOption = {
   propietarioNombre: string;
   propietarioCedula: string;
   bankAccounts: Array<{
+    id?: string;
     bankName: string;
     accountNumber: string;
     accountType: string;
@@ -190,6 +191,7 @@ function buildOwnerOptionFromProperty(
     bankAccounts = ownerInfo.bankAccounts
       .map((account) =>
         normalizeBankAccountFields({
+          id: account.id,
           bankName: String(account.bankName ?? "").trim(),
           accountNumber: String(account.accountNumber ?? "").trim(),
           accountType: String(account.accountType ?? "").trim(),
@@ -198,7 +200,15 @@ function buildOwnerOptionFromProperty(
           brebKey: account.brebKey,
         }),
       )
-      .filter((account) => account.bankName || account.accountNumber);
+      .filter((account) => account.bankName || account.accountNumber)
+      .map((account) => ({
+        id: account.id,
+        bankName: account.bankName,
+        accountNumber: account.accountNumber,
+        accountType: account.accountType,
+        accountHolderName: account.accountHolderName,
+        brebKey: account.brebKey,
+      }));
   } else if (ownerInfo.bankName || ownerInfo.accountNumber) {
     bankAccounts = [
       {
@@ -974,7 +984,7 @@ export function ReservationPaymentMethodsSection({
           acc.accountHolderName?.trim() || option.propietarioNombre || "";
         const normalized = normalizeBankAccountFields(acc);
         const candidate: BankAccount = {
-          id: crypto.randomUUID(),
+          id: acc.id?.trim() || crypto.randomUUID(),
           bankName: normalized.bankName,
           accountType: normalized.accountType,
           accountNumber: acc.accountNumber,
@@ -1086,13 +1096,72 @@ export function ReservationPaymentMethodsSection({
 
   const isExtraAccount = (id: string) => extraAccounts.some((a) => a.id === id);
 
-  const handleRemoveAccount = (id: string) => {
+  const persistOwnerBankAccounts = async (
+    nextAccounts: OwnerBankAccount[],
+  ) => {
+    if (!propertyId || !propertyOwnerInfo) return false;
+    const primaryBank = nextAccounts[0];
+    await updatePropertyOwnerInfo({
+      id: propertyId,
+      payload: {
+        ownerUserId: propertyOwnerInfo.ownerUserId ?? "",
+        rutNumber: propertyOwnerInfo.rutNumber ?? "",
+        bankName: primaryBank?.bankName ?? "",
+        accountNumber: primaryBank?.accountNumber ?? "",
+        bankAccounts: nextAccounts,
+        rntNumber: propertyOwnerInfo.rntNumber ?? "",
+        propietarioNombre: propertyOwnerInfo.propietarioNombre ?? "",
+        propietarioTratamiento: propertyOwnerInfo.propietarioTratamiento ?? "",
+        propietarioTelefono: propertyOwnerInfo.propietarioTelefono ?? "",
+        propietarioCedula: propertyOwnerInfo.propietarioCedula ?? "",
+        propietarioCorreo: propertyOwnerInfo.propietarioCorreo ?? "",
+        checkinUbicacionUrl: propertyOwnerInfo.checkinUbicacionUrl ?? "",
+        checkinWazeUrl: propertyOwnerInfo.checkinWazeUrl ?? "",
+        checkinIndicacionesLlegada:
+          propertyOwnerInfo.checkinIndicacionesLlegada ?? "",
+        checkinRecomendaciones: propertyOwnerInfo.checkinRecomendaciones ?? "",
+      },
+    });
+    setPropertyOwnerInfo((prev) =>
+      prev ? { ...prev, bankAccounts: nextAccounts } : prev,
+    );
+    return true;
+  };
+
+  const handleRemoveAccount = async (id: string) => {
     if (isExtraAccount(id)) {
+      const removed = extraAccounts.find((a) => a.id === id);
       setExtraAccounts((prev) => prev.filter((a) => a.id !== id));
       setSelectedAccountIds((prev) => prev.filter((x) => x !== id));
+
+      if (propertyId && propertyOwnerInfo && removed) {
+        const removedKey = `${removed.bankName.trim().toLowerCase()}|${removed.accountNumber
+          .trim()
+          .toLowerCase()}`;
+        const nextOwnerAccounts = (propertyOwnerInfo.bankAccounts ?? []).filter(
+          (account) => {
+            if (account.id && account.id === id) return false;
+            const key = `${String(account.bankName ?? "")
+              .trim()
+              .toLowerCase()}|${String(account.accountNumber ?? "")
+              .trim()
+              .toLowerCase()}`;
+            return key !== removedKey;
+          },
+        );
+        try {
+          await persistOwnerBankAccounts(nextOwnerAccounts);
+          toast.success("Cuenta eliminada de la reserva y de la ficha");
+        } catch {
+          toast.message(
+            "Se quitó de la reserva, pero no se pudo borrar de la ficha de la finca.",
+          );
+        }
+      }
       return;
     }
     removeBankAccount(id);
+    toast.success("Cuenta eliminada del catálogo");
   };
 
   const openEditAccount = (account: BankAccount) => {
@@ -1134,8 +1203,9 @@ export function ReservationPaymentMethodsSection({
     }
 
     if (bankDialogTarget === "owner") {
+      const sharedId = crypto.randomUUID();
       const newAccount: BankAccount = {
-        id: crypto.randomUUID(),
+        id: sharedId,
         ...payload,
         imageUrls: payload.imageUrls ?? [],
       };
@@ -1144,7 +1214,7 @@ export function ReservationPaymentMethodsSection({
 
       if (propertyId && propertyOwnerInfo) {
         const newOwnerAccount: OwnerBankAccount = {
-          id: crypto.randomUUID(),
+          id: sharedId,
           bankName: payload.bankName.trim(),
           accountNumber: payload.accountNumber.trim(),
           ...(payload.brebKey ? { brebKey: true } : {}),
@@ -1182,39 +1252,8 @@ export function ReservationPaymentMethodsSection({
             (account) =>
               account.bankName.length > 0 || account.accountNumber.length > 0,
           );
-        const primaryBank = existingAccounts[0] ?? newOwnerAccount;
         try {
-          await updatePropertyOwnerInfo({
-            id: propertyId,
-            payload: {
-              ownerUserId: propertyOwnerInfo.ownerUserId ?? "",
-              rutNumber: propertyOwnerInfo.rutNumber ?? "",
-              bankName: primaryBank.bankName,
-              accountNumber: primaryBank.accountNumber,
-              bankAccounts: [...existingAccounts, newOwnerAccount],
-              rntNumber: propertyOwnerInfo.rntNumber ?? "",
-              propietarioNombre: propertyOwnerInfo.propietarioNombre ?? "",
-              propietarioTratamiento:
-                propertyOwnerInfo.propietarioTratamiento ?? "",
-              propietarioTelefono: propertyOwnerInfo.propietarioTelefono ?? "",
-              propietarioCedula: propertyOwnerInfo.propietarioCedula ?? "",
-              propietarioCorreo: propertyOwnerInfo.propietarioCorreo ?? "",
-              checkinUbicacionUrl: propertyOwnerInfo.checkinUbicacionUrl ?? "",
-              checkinWazeUrl: propertyOwnerInfo.checkinWazeUrl ?? "",
-              checkinIndicacionesLlegada:
-                propertyOwnerInfo.checkinIndicacionesLlegada ?? "",
-              checkinRecomendaciones:
-                propertyOwnerInfo.checkinRecomendaciones ?? "",
-            },
-          });
-          setPropertyOwnerInfo((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  bankAccounts: [...existingAccounts, newOwnerAccount],
-                }
-              : prev,
-          );
+          await persistOwnerBankAccounts([...existingAccounts, newOwnerAccount]);
           toast.success("Cuenta del propietario guardada en la finca");
         } catch {
           toast.message(
