@@ -2055,6 +2055,25 @@ export const ingestDmMessage = internalMutation({
   },
 });
 
+/**
+ * Borra UN hilo de DM social (Instagram/Messenger) y todos sus mensajes.
+ * Operación por conversación (no masiva); reutilizable por un botón "Eliminar
+ * conversación" en la bandeja social.
+ */
+export const deleteDmThread = internalMutation({
+  args: { threadId: v.id('metaDmThreads') },
+  handler: async (ctx, { threadId }) => {
+    const msgs = await ctx.db
+      .query('metaDmMessages')
+      .filter((q) => q.eq(q.field('threadId'), threadId))
+      .collect();
+    for (const m of msgs) await ctx.db.delete(m._id);
+    const thread = await ctx.db.get(threadId);
+    if (thread) await ctx.db.delete(threadId);
+    return { deleted: Boolean(thread), messages: msgs.length };
+  },
+});
+
 export const listDmThreads = query({
   args: {
     pageId: v.string(),

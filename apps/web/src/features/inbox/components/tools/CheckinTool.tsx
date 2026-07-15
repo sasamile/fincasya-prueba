@@ -23,6 +23,7 @@ import {
   Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { authClient } from '@/lib/auth-client';
 import { Switch } from '@/components/ui/switch';
 import type { ConversationRow } from '@/features/inbox/types';
 import {
@@ -151,6 +152,10 @@ export function CheckinTool({
   const [savingProofUpload, setSavingProofUpload] = useState(false);
 
   const sendMessage = useMutation(api.inbox.sendAdvisorMessage);
+  // Actor logueado — viaja en las mutaciones para el historial de atención.
+  const { data: session } = authClient.useSession();
+  const actorId = session?.user?.id ? String(session.user.id) : undefined;
+  const actorName = session?.user?.name ?? undefined;
   const markOwnerSent = useMutation(api.bookings.markOwnerPortalSent);
   const markCheckinSent = useMutation(api.bookings.markCheckinSent);
   const saveOwnerPortalShare = useMutation(api.bookings.saveOwnerPortalShare);
@@ -334,6 +339,8 @@ export function CheckinTool({
       await sendMessage({
         conversationId: conversation.conversationId,
         content: text,
+        actorId,
+        actorName,
       });
       if (audience === 'owner') {
         await markOwnerSent({

@@ -175,6 +175,31 @@ export default defineSchema(
       .index('by_operational_state', ['operationalState'])
       .index('by_assigned_user', ['assignedUserId']),
 
+    /**
+     * Auditoría de conversaciones (trazabilidad multi-asesor): quién tomó,
+     * liberó, transfirió, resolvió o escribió en cada chat. Los nombres van
+     * denormalizados (`userName`) para no depender de lookups al mostrar.
+     */
+    conversationAuditEvents: defineTable({
+      conversationId: v.id('conversations'),
+      eventType: v.union(
+        v.literal('assigned'),
+        v.literal('unassigned'),
+        v.literal('transferred'),
+        v.literal('resolved'),
+        v.literal('message_sent'),
+      ),
+      /** Actor del evento (user._id de Better Auth, o 'system'). */
+      userId: v.string(),
+      userName: v.optional(v.string()),
+      /** Solo en 'transferred'/'unassigned': quién lo tenía antes. */
+      previousUserId: v.optional(v.string()),
+      previousUserName: v.optional(v.string()),
+      createdAt: v.number(),
+    })
+      .index('by_conversation', ['conversationId', 'createdAt'])
+      .index('by_user', ['userId', 'createdAt']),
+
     /** Listas/etiquetas del inbox (nombre + color + emoji), estilo WhatsApp Business. */
     labels: defineTable({
       name: v.string(),
@@ -1082,6 +1107,8 @@ export default defineSchema(
           ),
         }),
       ),
+      /** Resumen de pago enviado por WhatsApp al completar el check-in (anti doble envío). */
+      checkinPaymentSentAt: v.optional(v.number()),
       /**
        * Portal público de pago (`/pago/:reference`): cuentas seleccionadas por el
        * equipo para mostrar al cliente en el link compartido.
@@ -1214,9 +1241,33 @@ export default defineSchema(
       updatedAt: v.number(),
     })
       .index('by_property', ['propertyId'])
+      .index('by_retailer', ['productRetailerId'])
       .index('by_catalog', ['catalogId'])
       .index('by_property_and_catalog', ['propertyId', 'catalogId']),
 
+    /**
+     * Reseñas por finca (CRUD portado de v1). `updatePropertyStats` recalcula
+     * `properties.rating`/`reviewsCount` en cada cambio.
+     */
+    reviews: defineTable({
+      propertyId: v.id('properties'),
+      bookingId: v.optional(v.id('bookings')),
+      userId: v.optional(v.string()),
+      /**
+       * Nombre del huésped DENORMALIZADO en el doc: los usuarios viven en el
+       * componente Better Auth (sin lookup desde aquí), así que `create` lo
+       * recibe opcional y `list` lo expone como `user.name` (fallback 'Huésped').
+       */
+      userName: v.optional(v.string()),
+      rating: v.number(),
+      comment: v.optional(v.string()),
+      verified: v.optional(v.boolean()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index('by_property', ['propertyId'])
+      .index('by_booking', ['bookingId'])
+      .index('by_user', ['userId']),
 
     playbookExemplars: defineTable({
       /** Clave estable única (idempotencia con el RAG + edición). */

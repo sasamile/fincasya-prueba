@@ -589,6 +589,33 @@ export const toolEscalar = internalMutation({
 });
 
 /**
+ * Envía un texto de handoff (p. ej. la respuesta inmediata de EMERGENCIA) y lo
+ * registra en el hilo como mensaje del asistente. La conversación ya quedó
+ * escalada a humano en el ingest.
+ */
+export const sendHandoffText = internalAction({
+  args: {
+    conversationId: v.id('conversations'),
+    to: v.string(),
+    text: v.string(),
+  },
+  handler: async (ctx, { conversationId, to, text }): Promise<void> => {
+    let wamid: string | undefined;
+    try {
+      const sent = await sendWhatsappText({ to, text });
+      wamid = sent.wamid;
+    } catch (err) {
+      console.error('[agent] fallo el mensaje de handoff', err);
+    }
+    await ctx.runMutation(internal.agent.saveAssistantMessage, {
+      conversationId,
+      content: text,
+      wamid,
+    });
+  },
+});
+
+/**
  * Envía el saludo especial a un PROPIETARIO y lo guarda como mensaje del
  * asistente. La conversación ya quedó escalada a humano en el ingest; esto
  * solo manda el "hola" cordial antes de que el Experto tome el chat.

@@ -18,7 +18,7 @@ import {
   query,
 } from './_generated/server';
 import { internal } from './_generated/api';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
@@ -45,6 +45,21 @@ import {
 } from './lib/agentEligibility';
 
 const ADVISOR_SENDER_ID = 'panel-Experto';
+
+/** Registra un evento de auditoría de la conversación (trazabilidad multi-asesor). */
+async function audit(
+  ctx: MutationCtx,
+  ev: {
+    conversationId: Id<'conversations'>;
+    eventType: 'assigned' | 'unassigned' | 'transferred' | 'resolved' | 'message_sent';
+    userId: string;
+    userName?: string;
+    previousUserId?: string;
+    previousUserName?: string;
+  },
+): Promise<void> {
+  await ctx.db.insert('conversationAuditEvents', { ...ev, createdAt: Date.now() });
+}
 
 /** Recorte seguro por code points: no parte emojis (surrogates UTF-16). */
 function previewSlice(text: string, max: number): string {
@@ -409,8 +424,11 @@ export const sendAdvisorMessage = mutation({
     content: v.string(),
     /** wamid del mensaje citado (Responder). */
     replyToWamid: v.optional(v.string()),
+    /** Actor (auditoría): user._id y nombre del Experto logueado. */
+    actorId: v.optional(v.string()),
+    actorName: v.optional(v.string()),
   },
-  handler: async (ctx, { conversationId, content, replyToWamid }) => {
+  handler: async (ctx, { conversationId, content, replyToWamid, actorId, actorName }) => {
     const text = content.trim();
     if (!text) return;
     const conversation = await ctx.db.get(conversationId);
@@ -427,6 +445,14 @@ export const sendAdvisorMessage = mutation({
     });
     // El Experto toma el control: el agente IA deja de responder este chat.
     await ctx.db.patch(conversationId, { status: 'human', lastMessageAt: now, aiManualOverride: false });
+    if (actorId) {
+      await audit(ctx, {
+        conversationId,
+        eventType: 'message_sent',
+        userId: actorId,
+        userName: actorName,
+      });
+    }
     await ctx.scheduler.runAfter(0, internal.inbox.deliverAdvisorMessage, {
       messageId,
       conversationId,
@@ -448,8 +474,11 @@ export const setConversationStatus = mutation({
   args: {
     conversationId: v.id('conversations'),
     status: v.union(v.literal('ai'), v.literal('human'), v.literal('resolved')),
+    /** Actor (auditoría): user._id y nombre del Experto logueado. */
+    actorId: v.optional(v.string()),
+    actorName: v.optional(v.string()),
   },
-  handler: async (ctx, { conversationId, status }) => {
+  handler: async (ctx, { conversationId, status, actorId, actorName }) => {
     const conversation = await ctx.db.get(conversationId);
     if (!conversation) throw new Error('Conversacion no existe');
 
@@ -464,6 +493,15 @@ export const setConversationStatus = mutation({
       status,
       aiManualOverride: status === 'ai',
     });
+
+    if (status === 'resolved' && actorId) {
+      await audit(ctx, {
+        conversationId,
+        eventType: 'resolved',
+        userId: actorId,
+        userName: actorName,
+      });
+    }
 
     if (status === 'ai') {
       await ctx.scheduler.runAfter(0, internal.agent.runAgentTurn, {
@@ -603,13 +641,24 @@ export const sendAdvisorMedia = mutation({
     mimeType: v.string(),
     size: v.optional(v.number()),
     caption: v.optional(v.string()),
+    /** Actor (auditoría): user._id y nombre del Experto logueado. */
+    actorId: v.optional(v.string()),
+    actorName: v.optional(v.string()),
   },
   handler: async (
     ctx,
-    { conversationId, storageId, kind, filename, mimeType, size, caption },
+    { conversationId, storageId, kind, filename, mimeType, size, caption, actorId, actorName },
   ) => {
     const conversation = await ctx.db.get(conversationId);
     if (!conversation) throw new Error('Conversacion no existe');
+    if (actorId) {
+      await audit(ctx, {
+        conversationId,
+        eventType: 'message_sent',
+        userId: actorId,
+        userName: actorName,
+      });
+    }
     const url = await ctx.storage.getUrl(storageId);
     if (!url) throw new Error('No se pudo obtener la URL del archivo');
     const now = Date.now();
@@ -735,10 +784,21 @@ export const sendAdvisorDocumentByUrl = mutation({
     documentUrl: v.string(),
     filename: v.string(),
     caption: v.optional(v.string()),
+    /** Actor (auditoría): user._id y nombre del Experto logueado. */
+    actorId: v.optional(v.string()),
+    actorName: v.optional(v.string()),
   },
-  handler: async (ctx, { conversationId, documentUrl, filename, caption }) => {
+  handler: async (ctx, { conversationId, documentUrl, filename, caption, actorId, actorName }) => {
     const conversation = await ctx.db.get(conversationId);
     if (!conversation) throw new Error('Conversacion no existe');
+    if (actorId) {
+      await audit(ctx, {
+        conversationId,
+        eventType: 'message_sent',
+        userId: actorId,
+        userName: actorName,
+      });
+    }
     const now = Date.now();
     const cap = caption?.trim() || undefined;
     const messageId = await ctx.db.insert('messages', {
@@ -876,6 +936,10 @@ export const deleteConversation = mutation({
       .withIndex('by_conversation', (q) => q.eq('conversationId', conversationId))
       .collect();
     await Promise.all(msgs.map((m) => ctx.db.patch(m._id, { deletedAt: now })));
+    // Cascade: la auditoría de un chat eliminado no debe quedar huérfana.
+    await ctx.runMutation(internal.conversationAudit.removeByConversation, {
+      conversationId,
+    });
   },
 });
 
@@ -933,22 +997,71 @@ async function collectConversationsByRange(
   return rows.filter((c) => !c.deletedAt && !c.archived);
 }
 
+/**
+ * Auditoría de una (des)asignación: assigned si no tenía dueño, transferred si
+ * cambia de manos, unassigned si se libera. Sin evento si no cambió nada.
+ */
+async function auditAssignment(
+  ctx: MutationCtx,
+  conv: Doc<'conversations'>,
+  next: { id: string | null; name?: string },
+  actor: { id?: string; name?: string },
+): Promise<void> {
+  const prevId = conv.assignedUserId;
+  const prevName = conv.assignedUserName;
+  if (!next.id) {
+    if (!prevId) return; // ya estaba libre
+    await audit(ctx, {
+      conversationId: conv._id,
+      eventType: 'unassigned',
+      userId: actor.id ?? 'system',
+      userName: actor.name,
+      previousUserId: prevId,
+      previousUserName: prevName,
+    });
+    return;
+  }
+  if (prevId === next.id) return; // sin cambio
+  await audit(ctx, {
+    conversationId: conv._id,
+    eventType: prevId ? 'transferred' : 'assigned',
+    userId: next.id,
+    userName: next.name,
+    ...(prevId ? { previousUserId: prevId, previousUserName: prevName } : {}),
+  });
+}
+
 /** Asigna (o desasigna con assignedUserId=null) una selección manual de chats. */
 export const assignConversations = mutation({
   args: {
     conversationIds: v.array(v.id('conversations')),
     assignedUserId: v.union(v.string(), v.null()),
     assignedUserName: v.optional(v.string()),
+    /** Actor (auditoría): quién hace la asignación desde el panel. */
+    actorId: v.optional(v.string()),
+    actorName: v.optional(v.string()),
   },
-  handler: async (ctx, { conversationIds, assignedUserId, assignedUserName }) => {
+  handler: async (
+    ctx,
+    { conversationIds, assignedUserId, assignedUserName, actorId, actorName },
+  ) => {
+    const name = assignedUserName?.trim() || undefined;
     const patch: {
       assignedUserId: string | undefined;
       assignedUserName: string | undefined;
     } = assignedUserId
-      ? { assignedUserId, assignedUserName: assignedUserName?.trim() || undefined }
+      ? { assignedUserId, assignedUserName: name }
       : { assignedUserId: undefined, assignedUserName: undefined };
     let done = 0;
     for (const id of conversationIds) {
+      const conv = await ctx.db.get(id);
+      if (!conv) continue;
+      await auditAssignment(
+        ctx,
+        conv,
+        { id: assignedUserId, name },
+        { id: actorId, name: actorName },
+      );
       await ctx.db.patch(id, patch);
       done++;
     }
@@ -963,17 +1076,30 @@ export const assignByRange = mutation({
     to: v.optional(v.number()),
     assignedUserId: v.union(v.string(), v.null()),
     assignedUserName: v.optional(v.string()),
+    /** Actor (auditoría): quién hace la asignación desde el panel. */
+    actorId: v.optional(v.string()),
+    actorName: v.optional(v.string()),
   },
-  handler: async (ctx, { from, to, assignedUserId, assignedUserName }) => {
+  handler: async (
+    ctx,
+    { from, to, assignedUserId, assignedUserName, actorId, actorName },
+  ) => {
     const rows = await collectConversationsByRange(ctx, from, to);
+    const name = assignedUserName?.trim() || undefined;
     const patch: {
       assignedUserId: string | undefined;
       assignedUserName: string | undefined;
     } = assignedUserId
-      ? { assignedUserId, assignedUserName: assignedUserName?.trim() || undefined }
+      ? { assignedUserId, assignedUserName: name }
       : { assignedUserId: undefined, assignedUserName: undefined };
     let done = 0;
     for (const c of rows) {
+      await auditAssignment(
+        ctx,
+        c,
+        { id: assignedUserId, name },
+        { id: actorId, name: actorName },
+      );
       await ctx.db.patch(c._id, patch);
       done++;
     }

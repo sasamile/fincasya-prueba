@@ -471,6 +471,13 @@ export const submitCheckin = internalMutation({
       }
     }
 
+    // Resumen de pago por WhatsApp (idempotente vía checkinPaymentSentAt).
+    await ctx.scheduler.runAfter(
+      0,
+      internal.checkinPaymentSend.sendPaymentSummaryToBooking,
+      { bookingId: booking._id },
+    );
+
     return { ok: true as const, completed: true, total: guests.length };
   },
 });

@@ -2,7 +2,6 @@
 
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { convex } from '@/lib/convex-client';
-import { authClient } from '@/lib/auth-client';
 
 export type UserRole =
   | 'admin'
@@ -51,6 +50,10 @@ export interface CreateUserData {
   documentId?: string;
 }
 
+const CONVEX_SITE_URL =
+  process.env.NEXT_PUBLIC_CONVEX_SITE_URL ??
+  'https://modest-husky-871.convex.site';
+
 function mapUser(raw: Record<string, unknown>): User {
   const id = String(raw._id ?? raw.id ?? '');
   return {
@@ -73,25 +76,81 @@ export async function getUsers(limit = 100): Promise<User[]> {
 }
 
 export async function createUser(data: CreateUserData): Promise<User> {
+  const email = data.email.trim().toLowerCase();
+  const name = data.name.trim();
   const password = data.password?.trim() || 'FincasYa2026!';
-  const { data: signUpData, error } = await authClient.signUp.email({
-    email: data.email,
-    password,
-    name: data.name,
-  });
-  if (error) throw new Error(error.message ?? 'No se pudo crear el usuario');
+  if (!email.includes('@')) throw new Error('Correo inválido');
+  if (!name) throw new Error('El nombre es obligatorio');
+  if (password.length < 8) {
+    throw new Error('La contraseña debe tener al menos 8 caracteres');
+  }
 
-  await convex.mutation(api.users.updateByEmail, {
-    email: data.email,
-    name: data.name,
-    role: data.role as 'admin' | 'vendedor' | 'asesor_limitado' | 'contabilidad' | 'propietario' | 'client' | 'user',
-    phone: data.phone,
-    position: data.position,
-    documentId: data.documentId,
-  });
+  // Provision en servidor: NO usar authClient.signUp (pisa la sesión del admin).
+  try {
+    await convex.action(api.ownerAuth.provisionUserLogin, {
+      email,
+      name,
+      password,
+      role: data.role,
+      phone: data.phone,
+      position: data.position,
+      documentId: data.documentId,
+    });
+  } catch (actionErr) {
+    // Fallback HTTP sin cookies del browser.
+    const existing = await getUserByEmail(email);
+    if (existing?.id) {
+      await updateUser(existing.id, {
+        name,
+        role: data.role,
+        phone: data.phone,
+        position: data.position,
+        documentId: data.documentId,
+        password,
+      });
+      return getUserById(existing.id);
+    }
 
-  const user = signUpData?.user as Record<string, unknown> | undefined;
-  return mapUser({ ...(user ?? {}), role: data.role, phone: data.phone, position: data.position, documentId: data.documentId });
+    const origin =
+      typeof window !== 'undefined'
+        ? window.location.origin
+        : 'http://localhost:3789';
+    const res = await fetch(`${CONVEX_SITE_URL}/api/auth/sign-up/email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: origin,
+      },
+      credentials: 'omit',
+      body: JSON.stringify({ email, password, name }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        message?: string;
+      } | null;
+      const actionMsg =
+        actionErr instanceof Error ? actionErr.message : 'Error en action';
+      throw new Error(
+        body?.message ||
+          `No se pudo crear el usuario (${res.status}). ${actionMsg}`,
+      );
+    }
+
+    await convex.mutation(api.users.updateByEmail, {
+      email,
+      name,
+      role: data.role,
+      phone: data.phone,
+      position: data.position,
+      documentId: data.documentId,
+    });
+  }
+
+  const created = await getUserByEmail(email);
+  if (!created?.id) {
+    throw new Error('Usuario creado pero no aparece aún. Reintentá.');
+  }
+  return created;
 }
 
 export async function getUserById(id: string): Promise<User> {
@@ -132,10 +191,6 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   return mapUser(raw as Record<string, unknown>);
 }
 
-const CONVEX_SITE_URL =
-  process.env.NEXT_PUBLIC_CONVEX_SITE_URL ??
-  "https://modest-husky-871.convex.site";
-
 /**
  * Crea o actualiza la cuenta de login del propietario (rol propietario).
  * Usado desde /admin/propietarios — no desde Usuarios.
@@ -160,10 +215,11 @@ export async function ensurePropietarioLogin(data: {
   }
 
   try {
-    const result = await convex.action(api.ownerAuth.provisionPropietarioLogin, {
+    const result = await convex.action(api.ownerAuth.provisionUserLogin, {
       email,
       name,
       password,
+      role: 'propietario',
       phone: data.phone,
       documentId: data.documentId,
     });

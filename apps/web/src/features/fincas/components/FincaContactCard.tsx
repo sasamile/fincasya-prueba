@@ -54,7 +54,7 @@ export function FincaContactCard({ finca, modoVenta }: FincaContactCardProps) {
           <div className="flex items-center gap-1 text-sm pt-1">
             <Star className="w-4 h-4 fill-foreground text-foreground" />
             <span className="font-medium">
-              {rating && rating > 0 ? rating.toFixed(1) : getSeededRating(finca.id)}
+              {reviewsCount > 0 && rating ? rating.toFixed(1) : getSeededRating(finca.id)}
             </span>
             <span className="text-muted-foreground">
               · {reviewsCount > 0 ? `${reviewsCount} evaluaciones` : 'Nuevo'}

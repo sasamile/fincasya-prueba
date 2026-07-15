@@ -172,6 +172,7 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
       { label: "Propietarios", href: "/admin/propietarios", icon: Home },
       { label: "CRM", href: "/admin/crm", icon: Sparkles },
       { label: "Roles y Permisos", href: "/admin/roles", icon: ShieldCheck },
+      { label: "Habeas Data", href: "/admin/habeas-data", icon: ShieldCheck },
       { label: "Historial de accesos", href: "/admin/access-logs", icon: History },
     ],
   },
@@ -213,6 +214,7 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
   const { setTheme, theme } = useTheme();
   const { accent, setAccent, accents } = useAdminAccent();
   const { permissions } = useRolePermissions(user?.role, user?.id);
+  const habeasPendingCount = useQuery(api.habeasData.countPending, {});
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
     () =>
       collapsibleNavGroups.reduce<Record<string, boolean>>((acc, group) => {
@@ -260,6 +262,19 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
               <span className="truncate text-[12.5px] font-medium tracking-tight">
                 {item.label}
               </span>
+              {item.href === "/admin/habeas-data" &&
+              typeof habeasPendingCount === "number" &&
+              habeasPendingCount > 0 ? (
+                <span
+                  className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums ${
+                    isActive
+                      ? "bg-white/20 text-white"
+                      : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                  }`}
+                >
+                  {habeasPendingCount > 99 ? "99+" : habeasPendingCount}
+                </span>
+              ) : null}
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>

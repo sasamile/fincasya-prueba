@@ -19,6 +19,7 @@ import {
   Send,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { authClient } from '@/lib/auth-client';
 import type { ConversationRow } from '@/features/inbox/types';
 
 type Contract = {
@@ -84,6 +85,10 @@ export function ConfirmarReservaTool({
 
   const sendMessage = useMutation(api.inbox.sendAdvisorMessage);
   const sendDocument = useMutation(api.inbox.sendAdvisorDocumentByUrl);
+  // Actor logueado — viaja en las mutaciones para el historial de atención.
+  const { data: session } = authClient.useSession();
+  const actorId = session?.user?.id ? String(session.user.id) : undefined;
+  const actorName = session?.user?.name ?? undefined;
 
   const trimmed = code.trim();
   const results = useQuery(
@@ -116,6 +121,8 @@ export function ConfirmarReservaTool({
       await sendMessage({
         conversationId: conversation.conversationId,
         content: buildConfirmationMessage(selected),
+        actorId,
+        actorName,
       });
       if (selected.confirmationPdfUrl) {
         await sendDocument({
@@ -124,6 +131,8 @@ export function ConfirmarReservaTool({
           filename:
             selected.confirmationPdfFilename ??
             `Confirmacion-${selected.contractNumber.replace(/\s+/g, '-')}.pdf`,
+          actorId,
+          actorName,
         });
       }
       toast.success(

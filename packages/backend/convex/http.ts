@@ -50,6 +50,14 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
       video?: { link?: string; caption?: string };
       document?: { link?: string; caption?: string; filename?: string };
       reaction?: { messageId?: string; message_id?: string; emoji?: string };
+      /** Pick del catálogo de WhatsApp: el cliente escogió una finca (producto). */
+      order?: {
+        catalog_id?: string;
+        text?: string;
+        product_items?: Array<{ product_retailer_id?: string; quantity?: number }>;
+      };
+      /** Algunas variantes ponen los items en la raíz del evento. */
+      product_items?: Array<{ product_retailer_id?: string; quantity?: number }>;
       context?: { id?: string; messageId?: string; message_id?: string };
     };
     whatsappMessage?: {
@@ -184,6 +192,25 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
       msgType = 'document';
       mediaUrl = evt.document.link;
       content = evt.document.filename?.trim() || '[documento]';
+    } else if (
+      (evt.type === 'order' && evt.order?.product_items?.length) ||
+      (Array.isArray(evt.product_items) && evt.product_items.length)
+    ) {
+      // Pick del catálogo: el cliente tocó "enviar" sobre una finca. YCloud manda
+      // un evento `order` con el product_retailer_id → lo resolvemos al nombre de
+      // la finca para que el agente sepa cuál escogió (antes se caía y el bot no
+      // se enteraba de nada).
+      const items = evt.order?.product_items ?? evt.product_items ?? [];
+      const retailerId = String(items[0]?.product_retailer_id ?? '').trim();
+      const finca = retailerId
+        ? (await ctx.runQuery(internal.inbound.resolveCatalogPick, { retailerId }))?.title ?? ''
+        : '';
+      msgType = 'text';
+      content = finca
+        ? `🏡 El cliente seleccionó esta finca del catálogo: ${finca} (product_retailer_id: ${retailerId})`
+        : retailerId
+          ? `🏡 El cliente seleccionó una finca del catálogo (product_retailer_id: ${retailerId})`
+          : evt.order?.text?.trim() || 'El cliente seleccionó una finca del catálogo.';
     }
 
     // Respuesta citada: wamid del mensaje al que responde el cliente.
@@ -402,6 +429,101 @@ http.route({
 /** OPTIONS preflight (CORS) para el portal de check-in. */
 http.route({
   pathPrefix: '/api/checkin/',
+  method: 'OPTIONS',
+  handler: httpAction(async () => {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }),
+});
+
+/** GET /api/checkout/:reference → reglas de salida + estado del depósito. */
+http.route({
+  pathPrefix: '/api/checkout/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/checkout/', ''),
+    ).trim();
+
+    if (!key)
+      return jsonResponse({ error: 'Referencia inválida' }, 400, CHECKIN_CORS);
+
+    const data = await ctx.runQuery(internal.checkoutPortal.getForPortal, { key });
+    if (!data) {
+      return jsonResponse(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        404,
+        CHECKIN_CORS,
+      );
+    }
+    return jsonResponse({ ok: true, ...data }, 200, CHECKIN_CORS);
+  }),
+});
+
+/** POST /api/checkout/:reference → guarda la cuenta bancaria de devolución. */
+http.route({
+  pathPrefix: '/api/checkout/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/checkout/', ''),
+    ).trim();
+
+    if (!key)
+      return jsonResponse({ error: 'Referencia inválida' }, 400, CHECKIN_CORS);
+
+    let body: {
+      cuenta?: {
+        titular?: string;
+        tipo?: string;
+        numero?: string;
+        banco?: string;
+        documento?: string;
+        observaciones?: string;
+      };
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400, CHECKIN_CORS);
+    }
+
+    const c = body?.cuenta ?? {};
+    const result = await ctx.runMutation(internal.checkoutPortal.saveDepositAccount, {
+      key,
+      cuenta: {
+        titular: String(c.titular ?? '').trim() || undefined,
+        tipo: String(c.tipo ?? '').trim() || undefined,
+        numero: String(c.numero ?? '').trim() || undefined,
+        banco: String(c.banco ?? '').trim() || undefined,
+        documento: String(c.documento ?? '').trim() || undefined,
+        observaciones: String(c.observaciones ?? '').trim() || undefined,
+      },
+    });
+
+    if (!result.ok) {
+      return jsonResponse(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        404,
+        CHECKIN_CORS,
+      );
+    }
+    return jsonResponse({ ok: true }, 200, CHECKIN_CORS);
+  }),
+});
+
+/** OPTIONS preflight (CORS) para el portal de check-out. */
+http.route({
+  pathPrefix: '/api/checkout/',
   method: 'OPTIONS',
   handler: httpAction(async () => {
     return new Response(null, {

@@ -304,14 +304,17 @@ export const MASCOTAS_POLITICA = `✨🐶 Tus mascotas son bienvenidas en la may
 ❗Recuerda: El incumplimiento de estas normas puede generar descuentos en el depósito de garantía. ¡Gracias por cuidar la propiedad mientras disfrutas con tus peluditos! 💚`;
 
 /**
- * Intro oficial ANTES de las fichas del catalogo (verbatim del equipo).
- * Va justo antes de las tarjetas de WhatsApp; el cierre va despues.
+ * Mensaje oficial que ACOMPAÑA las fichas del catalogo (verbatim del equipo).
+ * Va junto a las tarjetas de WhatsApp e invita al cliente a decir cual finca le
+ * interesa (para profundizar, video o comodidades). NO es el mensaje de reserva
+ * ("¡Excelente eleccion!"): ese solo lo manda iniciar_reserva cuando el cliente
+ * CONFIRMA una finca.
  */
-export const CATALOGO_INTRO = `Con gusto en atenderte 🙋
+export const CATALOGO_INTRO = `Estas son nuestras mejores opciones disponibles para ti! 🤩🏡
 
-A continuación, te comparto las opciones disponibles para tus fechas 📅
-💰 Tarifa: El valor reflejado corresponde al precio por noche en temporada actual.
-🏊 Gestión: Si alguna de estas propiedades te gusta, dímelo y te ayudaré a gestionar el mejor precio posible 🤝`;
+Si deseas conocer alguna propiedad más a fondo, ver un video detallado o recibir información específica sobre sus comodidades, por favor indícanos cuál es la de tu interés.
+
+Estamos listos para ayudarte a elegir el lugar perfecto para tu estadía 🎥✨`;
 
 /**
  * Horario DETALLADO (de la respuesta rapida oficial "/fuera de horario").

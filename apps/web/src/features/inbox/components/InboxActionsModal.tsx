@@ -8,8 +8,14 @@
  */
 'use client';
 import { useState } from 'react';
-import { CalendarDays, CheckCheck, ListChecks, UserCheck, X } from 'lucide-react';
+import { CalendarDays, CheckCheck, ListChecks, UserCheck, Volume2, VolumeX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  ensureNotificationPermission,
+  isSoundEnabled,
+  playNotificationSound,
+  setSoundEnabled,
+} from '@/features/inbox/lib/notification-sound';
 
 export type DateRange = { from?: number; to?: number; label: string };
 export type Operator = { id: string; name: string };
@@ -109,6 +115,7 @@ export function InboxActionsModal({
   const [rangeTo, setRangeTo] = useState('');
   const [assignOpId, setAssignOpId] = useState<string>(currentUser?.id ?? '');
   const [busy, setBusy] = useState(false);
+  const [soundOn, setSoundOn] = useState(() => isSoundEnabled());
 
   const customRange = (): DateRange | null => {
     const from = parseDateInput(rangeFrom, false);
@@ -153,6 +160,43 @@ export function InboxActionsModal({
         </div>
 
         <div className="space-y-6 px-5 py-4">
+          {/* 0. Sonido de notificaciones (estilo WhatsApp) */}
+          <section className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3.5 py-2.5">
+            <div className="flex items-center gap-2 text-[13px] font-semibold">
+              {soundOn ? (
+                <Volume2 className="h-4 w-4 text-primary" />
+              ) : (
+                <VolumeX className="h-4 w-4 text-muted-foreground" />
+              )}
+              Sonido al llegar mensajes
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={soundOn}
+              onClick={() => {
+                const next = !soundOn;
+                setSoundEnabled(next);
+                setSoundOn(next);
+                if (next) {
+                  ensureNotificationPermission(); // notificación de escritorio
+                  playNotificationSound(); // muestra de cómo suena
+                }
+              }}
+              className={cn(
+                'relative h-6 w-11 rounded-full transition-colors',
+                soundOn ? 'bg-primary' : 'bg-muted-foreground/30',
+              )}
+            >
+              <span
+                className={cn(
+                  'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                  soundOn ? 'left-[22px]' : 'left-0.5',
+                )}
+              />
+            </button>
+          </section>
+
           {/* 1. Filtrar la lista por fecha */}
           <section>
             <SectionTitle icon={CalendarDays}>Ver chats por fecha</SectionTitle>

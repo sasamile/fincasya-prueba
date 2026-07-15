@@ -1,5 +1,5 @@
 import { v } from 'convex/values';
-import { internalAction, internalQuery, mutation } from './_generated/server';
+import { internalAction, internalQuery, mutation, query } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { sendEmail } from './lib/email';
@@ -105,6 +105,79 @@ export const getById = internalQuery({
   args: { requestId: v.id('habeas_data_requests') },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.requestId);
+  },
+});
+
+/* ─────────────────────────────────────────────────────────────
+ * Panel admin (Ley 1581): listar, contar pendientes y gestionar
+ * el estado de cada solicitud (con notas internas del equipo).
+ * ───────────────────────────────────────────────────────────── */
+
+const STATUSES = ['pending', 'in_progress', 'resolved', 'rejected'] as const;
+type Status = (typeof STATUSES)[number];
+
+function assertStatus(value: string): Status {
+  if ((STATUSES as readonly string[]).includes(value)) return value as Status;
+  throw new Error('Estado inválido.');
+}
+
+/** Lista de solicitudes para el panel (filtro opcional por estado). */
+export const list = query({
+  args: {
+    status: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(args.limit ?? 100, 1), 500);
+    if (args.status) {
+      const status = assertStatus(args.status);
+      return await ctx.db
+        .query('habeas_data_requests')
+        .withIndex('by_status', (q) => q.eq('status', status))
+        .order('desc')
+        .take(limit);
+    }
+    return await ctx.db
+      .query('habeas_data_requests')
+      .withIndex('by_submittedAt')
+      .order('desc')
+      .take(limit);
+  },
+});
+
+/** Solicitudes pendientes (badge del menú admin). */
+export const countPending = query({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db
+      .query('habeas_data_requests')
+      .withIndex('by_status', (q) => q.eq('status', 'pending'))
+      .collect();
+    return rows.length;
+  },
+});
+
+/** Cambia el estado de una solicitud y/o guarda notas internas. */
+export const updateStatus = mutation({
+  args: {
+    id: v.id('habeas_data_requests'),
+    status: v.string(),
+    adminNotes: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const request = await ctx.db.get(args.id);
+    if (!request) throw new Error('Solicitud no encontrada.');
+    const status = assertStatus(args.status);
+
+    const patch: Partial<Doc<'habeas_data_requests'>> = { status };
+    if (args.adminNotes !== undefined) {
+      patch.adminNotes = trim(args.adminNotes, 4000) || undefined;
+    }
+    if (status === 'resolved' || status === 'rejected') {
+      patch.resolvedAt = Date.now();
+    }
+    await ctx.db.patch(args.id, patch);
+    return { ok: true as const };
   },
 });
 

@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LoadingArea, Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
+import { authClient } from '@/lib/auth-client';
 import { messagesCache, withCache } from '@/lib/queryCache';
 import { formatCop, formatDay, formatTime } from '@/lib/format';
 import { Avatar, BotToggle, DeliveryTick } from '@/features/inbox/components/primitives';
@@ -556,6 +557,10 @@ export function ChatPanel({
   const setStatus = useMutation(api.inbox.setConversationStatus);
   const generateUploadUrl = useMutation(api.inbox.generateUploadUrl);
   const sendMedia = useMutation(api.inbox.sendAdvisorMedia);
+  // Actor logueado — viaja en las mutaciones para el historial de atención.
+  const { data: session } = authClient.useSession();
+  const actorId = session?.user?.id ? String(session.user.id) : undefined;
+  const actorName = session?.user?.name ?? undefined;
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -623,6 +628,8 @@ export function ChatPanel({
         filename: file.name,
         mimeType: file.type || 'application/octet-stream',
         size: file.size,
+        actorId,
+        actorName,
       });
     } catch {
       setAttachNotice('No se pudo enviar el archivo');
@@ -758,6 +765,8 @@ export function ChatPanel({
         conversationId: conv.conversationId,
         content: text,
         replyToWamid: replyingTo?.wamid ?? undefined,
+        actorId,
+        actorName,
       });
       setDraft('');
       setReplyingTo(null);
@@ -783,6 +792,8 @@ export function ChatPanel({
       await setStatus({
         conversationId: conv.conversationId,
         status: on ? 'ai' : 'human',
+        actorId,
+        actorName,
       });
     } catch (err) {
       setBotError(err instanceof Error ? err.message : 'No se pudo activar el bot');

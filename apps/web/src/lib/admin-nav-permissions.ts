@@ -44,6 +44,7 @@ export const ADMIN_NAV_PERMISSIONS: Record<
   "/admin/crm": { module: "crm", action: "read" },
   "/admin/canales": { module: "channels", action: "read" },
   "/admin/roles": { module: "roles", action: "read" },
+  "/admin/habeas-data": { module: "habeas_data", action: "read" },
   "/admin/access-logs": { module: "access_logs", action: "read" },
   "/admin/sections": {
     module: "contents",
@@ -184,6 +185,7 @@ export const ADMIN_ROUTE_PRIORITY = [
   "/admin/automatizaciones",
   "/admin/users",
   "/admin/roles",
+  "/admin/habeas-data",
   "/admin/access-logs",
   "/admin",
 ] as const;

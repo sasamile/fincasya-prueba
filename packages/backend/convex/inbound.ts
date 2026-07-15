@@ -2,7 +2,7 @@
  * Persistencia de mensajes entrantes: contacto -> conversacion -> mensaje,
  * con dedup por evento YCloud, y agenda el turno del agente.
  */
-import { internalMutation } from './_generated/server';
+import { internalMutation, internalQuery } from './_generated/server';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import {
@@ -14,6 +14,18 @@ import { isAppAutoReply } from './lib/appAutoReply';
 
 const AGENT_DEBOUNCE_MS = 7000;
 const SETTINGS_KEY = 'default';
+
+/**
+ * EMERGENCIA — red de seguridad determinística (portada de v1, calibrada con
+ * casos reales). NO dependemos del criterio del LLM para algo crítico; corre
+ * ANTES del agente, 24/7. OJO: "ladron" SUELTO falseaba con nombres de finca
+ * ("¿está la finca el ladrón?"), por eso exige verbo de acción antes.
+ */
+const EMERGENCY_RE =
+  /\b(emergencia|accidente|me\s+robaron|nos\s+robaron|(?:hay|entr[oó]|vimos|vinieron|estan?\s+entrando)\s+(?:un\s+|unos\s+|varios\s+|los\s+)?ladr[oó]n\w*|asalto|atraco|herid[oa]|sangr\w+|ambulancia|polic[ií]a|incendio|fuego|se\s+est[aá]\s+quemando|me\s+desmay\w*|infarto|convuls\w+|amenaza|amenazan|me\s+amenaz\w*|ayuda\s+urgente|necesito\s+ayuda\s+ya|secuestr\w+|me\s+atacaron)\b/;
+
+const EMERGENCY_HANDOFF_TEXT =
+  'Recibí tu mensaje y ya alertamos a nuestro equipo de operaciones para atenderte de inmediato 🚨\n\nSi es una emergencia *médica o de seguridad*, por favor llama también al *123* (línea única nacional). Un experto te contacta por aquí en minutos.';
 
 /** Clave de teléfono para comparar propietario vs contacto: últimos 10 dígitos
  *  (celular colombiano), ignorando indicativo/país y separadores. */
@@ -256,6 +268,24 @@ export const ingestAdvisorAppMessage = internalMutation({
   },
 });
 
+/**
+ * Resuelve el `product_retailer_id` (finca escogida en el catálogo de WhatsApp)
+ * al nombre de la finca, para que al ingresar el pick el agente sepa CUÁL es.
+ */
+export const resolveCatalogPick = internalQuery({
+  args: { retailerId: v.string() },
+  handler: async (ctx, { retailerId }) => {
+    const mapping = await ctx.db
+      .query('propertyWhatsAppCatalog')
+      .withIndex('by_retailer', (q) => q.eq('productRetailerId', retailerId))
+      .first();
+    if (!mapping) return null;
+    const prop = await ctx.db.get(mapping.propertyId);
+    if (!prop) return null;
+    return { propertyId: mapping.propertyId, title: prop.title ?? '' };
+  },
+});
+
 export const ingestInboundMessage = internalMutation({
   args: {
     eventId: v.string(),
@@ -374,6 +404,39 @@ export const ingestInboundMessage = internalMutation({
       inboxUnreadCount: (conversation.inboxUnreadCount ?? 0) + 1,
       ...(conversation.archived ? { archived: false } : {}),
     });
+
+    // EMERGENCIA (regex determinística, 24/7): escala DURO a humano con
+    // prioridad urgente sin pasar por el agente. La respuesta al cliente y el
+    // tag solo se mandan la primera vez (mensajes seguidos de la misma
+    // emergencia no hacen spam), pero la alerta al panel se registra siempre.
+    if (args.msgType === 'text' && EMERGENCY_RE.test(args.content.toLowerCase())) {
+      const prevTags = conversation.tags ?? [];
+      const alreadyFlagged = prevTags.includes('emergencia');
+      await ctx.db.patch(conversation._id, {
+        status: 'human',
+        priority: 'urgent',
+        operationalState: 'requires_advisor',
+        aiManualOverride: false,
+        ...(alreadyFlagged ? {} : { tags: [...prevTags, 'emergencia'] }),
+      });
+      await ctx.db.insert('messages', {
+        conversationId: conversation._id,
+        sender: 'system',
+        content:
+          '🚨🚨🚨 EMERGENCIA detectada en el mensaje del cliente. PRIORIDAD CRÍTICA — contactar de inmediato. La IA quedó en pausa.',
+        type: 'text',
+        createdAt: now + 1,
+        metadata: { kind: 'inbox_escalation_alert', escalationReason: 'emergency' },
+      });
+      if (!alreadyFlagged) {
+        await ctx.scheduler.runAfter(0, internal.agent.sendHandoffText, {
+          conversationId: conversation._id,
+          to: args.phone,
+          text: EMERGENCY_HANDOFF_TEXT,
+        });
+      }
+      return { duplicate: false, emergency: true };
+    }
 
     // PROPIETARIO: si el contacto es un propietario registrado y aún no lo
     // hemos saludado en esta conversación, se le manda un saludo especial y se

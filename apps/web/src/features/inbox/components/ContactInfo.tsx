@@ -3,14 +3,94 @@
  * Editar nombre, notas del cliente, copiar número y asignar foto (subida real
  * a Convex storage). Se abre al hacer clic sobre el nombre en la cabecera.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
-import { Bell, Camera, Check, ChevronRight, Copy, Pencil, Search, Star, X } from 'lucide-react';
+import {
+  ArrowRightLeft,
+  Bell,
+  Camera,
+  Check,
+  CheckCheck,
+  ChevronRight,
+  Copy,
+  MessageSquare,
+  Pencil,
+  Search,
+  Star,
+  UserCheck,
+  UserMinus,
+  X,
+} from 'lucide-react';
 import { avatarColorFor } from '@/lib/avatarColor';
 import { LoadingArea } from '@/components/ui/spinner';
+
+/** Evento del historial ya colapsado (rachas de mensajes del mismo usuario). */
+type AuditItem = {
+  key: string;
+  eventType: 'assigned' | 'unassigned' | 'transferred' | 'resolved' | 'message_sent';
+  userId: string;
+  userName: string;
+  previousUserName: string | null;
+  createdAt: number;
+  count: number;
+};
+
+const auditTimeFmt = new Intl.DateTimeFormat('es-CO', {
+  day: 'numeric',
+  month: 'short',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true,
+});
+
+/** Ícono, color y texto de cada tipo de evento del historial de atención. */
+function auditVisual(item: AuditItem): {
+  Icon: typeof UserCheck;
+  cls: string;
+  text: string;
+} {
+  switch (item.eventType) {
+    case 'assigned':
+      return {
+        Icon: UserCheck,
+        cls: 'text-emerald-500',
+        text: `«${item.userName}» tomó la conversación`,
+      };
+    case 'unassigned':
+      return {
+        Icon: UserMinus,
+        cls: 'text-muted-foreground',
+        text:
+          item.userName && item.userName !== 'system'
+            ? `«${item.userName}» liberó la conversación`
+            : 'Se liberó la conversación',
+      };
+    case 'transferred':
+      return {
+        Icon: ArrowRightLeft,
+        cls: 'text-amber-500',
+        text: `${item.previousUserName ?? '—'} → ${item.userName}`,
+      };
+    case 'resolved':
+      return {
+        Icon: CheckCheck,
+        cls: 'text-violet-500',
+        text: `«${item.userName}» resolvió el chat`,
+      };
+    case 'message_sent':
+      return {
+        Icon: MessageSquare,
+        cls: 'text-sky-500',
+        text:
+          item.count > 1
+            ? `«${item.userName}» escribió ${item.count} mensajes`
+            : `«${item.userName}» escribió`,
+      };
+  }
+}
 
 export function ContactInfo({
   conversationId,
@@ -24,6 +104,9 @@ export function ContactInfo({
   onOpenSearch?: () => void;
 }) {
   const info = useQuery(api.inbox.getContactInfo, { conversationId });
+  const auditEvents = useQuery(api.conversationAudit.listByConversation, {
+    conversationId,
+  });
   const updateName = useMutation(api.inbox.updateContactName);
   const updateNotes = useMutation(api.inbox.updateContactNotes);
   const generateUploadUrl = useMutation(api.inbox.generateUploadUrl);
@@ -45,6 +128,33 @@ export function ContactInfo({
       if (!notesDirty) setNotesDraft(info.notes);
     }
   }, [info, notesDirty]);
+
+  // Timeline del historial: colapsa rachas de "escribió" del mismo usuario.
+  const auditItems = useMemo<AuditItem[]>(() => {
+    const items: AuditItem[] = [];
+    for (const e of auditEvents ?? []) {
+      const last = items[items.length - 1];
+      if (
+        e.eventType === 'message_sent' &&
+        last?.eventType === 'message_sent' &&
+        last.userId === e.userId
+      ) {
+        last.count += 1;
+        last.createdAt = e.createdAt; // hora del último mensaje de la racha
+      } else {
+        items.push({
+          key: e._id,
+          eventType: e.eventType,
+          userId: e.userId,
+          userName: e.userName,
+          previousUserName: e.previousUserName,
+          createdAt: e.createdAt,
+          count: 1,
+        });
+      }
+    }
+    return items;
+  }, [auditEvents]);
 
   if (info === undefined) {
     return (
@@ -227,6 +337,37 @@ export function ContactInfo({
             <ChevronRight className="h-4 w-4" />
           </span>
         </button>
+
+        <Divider />
+
+        {/* Historial de atención (auditoría de la conversación) */}
+        <div className="px-6 py-4">
+          <label className="mb-2 block text-[12px] font-medium text-muted-foreground">
+            Historial de atención
+          </label>
+          {auditItems.length === 0 ? (
+            <p className="text-[13px] text-muted-foreground">
+              Sin historial de atención aún
+            </p>
+          ) : (
+            <ol className="ml-2.5 space-y-3 border-l border-border/70 pl-4">
+              {auditItems.map((item) => {
+                const { Icon, cls, text } = auditVisual(item);
+                return (
+                  <li key={item.key} className="relative">
+                    <span className="absolute -left-[26px] top-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-border/70 bg-card">
+                      <Icon className={`h-3 w-3 ${cls}`} />
+                    </span>
+                    <p className="text-[13px] leading-snug text-foreground">{text}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {auditTimeFmt.format(item.createdAt)}
+                    </p>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
 
         <Divider />
 

@@ -30,6 +30,7 @@ import { FincaDetailSkeleton } from './components/FincaDetailSkeleton';
 import { FincaMap } from './components/FincaMap';
 import { ShareButton } from './components/ShareButton';
 import { FincaContactCard } from './components/FincaContactCard';
+import { ReviewsSection } from '@/features/reviews/components/ReviewsSection';
 import { MARKETPLACE_WHATSAPP_E164 } from '@/features/marketplace/lib/sale-whatsapp';
 
 import { openChatAssistant } from '@/features/landing/components/ChatAssistantWidget';
@@ -111,7 +112,7 @@ export function FincaDetailPage({ slug, modoVenta }: FincaDetailPageProps) {
                     <div className="flex flex-wrap items-center gap-3 mb-4 mt-2 md:mt-8">
                       <Badge variant="secondary" className="gap-1">
                         <Star className="w-3 h-3 fill-current" />
-                        {finca.rating && finca.rating > 0
+                        {finca.reviewsCount > 0 && finca.rating
                           ? finca.rating.toFixed(1)
                           : getSeededRating(finca.id)}
                       </Badge>
@@ -305,6 +306,8 @@ export function FincaDetailPage({ slug, modoVenta }: FincaDetailPageProps) {
               </div>
 
               <FincaMap lat={finca.lat} lng={finca.lng} location={finca.location} />
+
+              <ReviewsSection propertyId={finca.id} />
 
               <div className="mt-10 mb-12 md:mt-12 md:mb-16">
                 <OpenChatButton

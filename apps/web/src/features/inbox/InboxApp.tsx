@@ -3,7 +3,7 @@
  * El shell (rail + sidebar + panel). Los componentes grandes viven en
  * `@/features/inbox/components/*` y los tipos en `@/features/inbox/types`.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
@@ -30,6 +30,7 @@ import {
   type Operator,
 } from '@/features/inbox/components/InboxActionsModal';
 import { authClient } from '@/lib/auth-client';
+import { playNotificationSound } from '@/features/inbox/lib/notification-sound';
 import type { ConversationRow, Filter } from '@/features/inbox/types';
 
 export default function App() {
@@ -95,6 +96,25 @@ export default function App() {
     [usersList],
   );
 
+  // Sonido de notificación (estilo WhatsApp): suena cuando entra un mensaje
+  // nuevo del cliente. Se compara contra el último lastMessageAt visto, así la
+  // carga inicial y la paginación (chats viejos) no suenan; y como los mensajes
+  // del Experto ponen unread en 0, tampoco suenan los envíos propios.
+  const soundWatermark = useRef<number | null>(null);
+  useEffect(() => {
+    if (conversations.length === 0) return;
+    const maxAll = Math.max(...conversations.map((c) => c.lastMessageAt ?? 0));
+    if (soundWatermark.current === null) {
+      soundWatermark.current = maxAll; // primera carga: solo calibrar
+      return;
+    }
+    const hasFresh = conversations.some(
+      (c) => c.unread > 0 && (c.lastMessageAt ?? 0) > (soundWatermark.current ?? 0),
+    );
+    if (hasFresh) playNotificationSound();
+    if (maxAll > soundWatermark.current) soundWatermark.current = maxAll;
+  }, [conversations]);
+
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -118,6 +138,8 @@ export default function App() {
       conversationIds: ids,
       assignedUserId: op.id,
       assignedUserName: op.name,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
     });
     toast.success(`${r.done} chats asignados a ${op.name.split(' ')[0]}`);
     exitSelectMode();
@@ -571,6 +593,8 @@ export default function App() {
               to: r.to,
               assignedUserId: op.id,
               assignedUserName: op.name,
+              actorId: currentUser?.id,
+              actorName: currentUser?.name,
             });
             toast.success(
               `${res.done} chats asignados a ${op.name.split(' ')[0]}${res.capped ? ' (tope por lote)' : ''}`,

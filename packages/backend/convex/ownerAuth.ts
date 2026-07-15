@@ -1,6 +1,7 @@
 /**
- * Provisioning de login para propietarios.
- * Usa Better Auth (signUpEmail / hash oficial) para que el login verifique igual.
+ * Provisioning de login para staff / propietarios.
+ * Usa Better Auth (signUpEmail / hash oficial) en el servidor para que NO
+ * pise la cookie/sesión del admin que está creando al usuario.
  */
 import { v } from 'convex/values';
 import { action } from './_generated/server';
@@ -8,12 +9,14 @@ import { api } from './_generated/api';
 import { hashPassword } from 'better-auth/crypto';
 import { authComponent, createAuth } from './betterAuth/auth';
 
-export const provisionPropietarioLogin = action({
+export const provisionUserLogin = action({
   args: {
     email: v.string(),
     name: v.string(),
     password: v.string(),
+    role: v.string(),
     phone: v.optional(v.string()),
+    position: v.optional(v.string()),
     documentId: v.optional(v.string()),
   },
   handler: async (
@@ -23,8 +26,10 @@ export const provisionPropietarioLogin = action({
     const email = args.email.trim().toLowerCase();
     const password = args.password.trim();
     const name = args.name.trim();
+    const role = args.role.trim().toLowerCase();
     if (!email.includes('@')) throw new Error('Correo inválido');
     if (!name) throw new Error('El nombre es obligatorio');
+    if (!role) throw new Error('El rol es obligatorio');
     if (password.length < 8) {
       throw new Error('La contraseña debe tener al menos 8 caracteres');
     }
@@ -42,8 +47,9 @@ export const provisionPropietarioLogin = action({
       await ctx.runMutation(api.users.update, {
         id: userId,
         name,
-        role: 'propietario',
+        role,
         phone: args.phone,
+        position: args.position,
         documentId: args.documentId,
       });
 
@@ -59,7 +65,7 @@ export const provisionPropietarioLogin = action({
       return { userId, created: false };
     }
 
-    // Crear con la API oficial de Better Auth (mismo hasher que el login).
+    // Crear con la API oficial de Better Auth en servidor (sin cookies al browser).
     const { auth } = await authComponent.getAuth(createAuth, ctx);
     try {
       await auth.api.signUpEmail({
@@ -88,8 +94,9 @@ export const provisionPropietarioLogin = action({
       await ctx.runMutation(api.users.update, {
         id: userId,
         name,
-        role: 'propietario',
+        role,
         phone: args.phone,
+        position: args.position,
         documentId: args.documentId,
       });
       const newPasswordHash = await hashPassword(password);
@@ -104,8 +111,9 @@ export const provisionPropietarioLogin = action({
     await ctx.runMutation(api.users.updateByEmail, {
       email,
       name,
-      role: 'propietario',
+      role,
       phone: args.phone,
+      position: args.position,
       documentId: args.documentId,
     });
 
