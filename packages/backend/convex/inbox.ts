@@ -1077,12 +1077,15 @@ export const deliverCatalogStep = internalAction({
       });
     }
 
+    // Si esta ficha salió por el catálogo fallback, las siguientes parten de ahí.
+    const nextCatalogMetaId = row.catalogIdUsed ?? catalogMetaId;
+
     const nextIndex = index + 1;
     if (nextIndex < cards.length && nextOk < MAX_CATALOG_CARDS) {
       await ctx.scheduler.runAfter(BETWEEN_CATALOG_SENDS_MS, internal.inbox.deliverCatalogStep, {
         conversationId,
         to,
-        catalogMetaId,
+        catalogMetaId: nextCatalogMetaId,
         cards,
         index: nextIndex,
         okCount: nextOk,
