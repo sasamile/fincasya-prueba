@@ -304,17 +304,26 @@ export const MASCOTAS_POLITICA = `✨🐶 Tus mascotas son bienvenidas en la may
 ❗Recuerda: El incumplimiento de estas normas puede generar descuentos en el depósito de garantía. ¡Gracias por cuidar la propiedad mientras disfrutas con tus peluditos! 💚`;
 
 /**
- * Mensaje oficial que ACOMPAÑA las fichas del catalogo (verbatim del equipo).
- * Va junto a las tarjetas de WhatsApp e invita al cliente a decir cual finca le
- * interesa (para profundizar, video o comodidades). NO es el mensaje de reserva
- * ("¡Excelente eleccion!"): ese solo lo manda iniciar_reserva cuando el cliente
- * CONFIRMA una finca.
+ * Mensaje oficial que ACOMPAÑA las fichas del catalogo (verbatim del equipo,
+ * version Camilo 15-jul). Saluda con Sr./Sra. + nombre cuando se conoce. Ya
+ * incluye la aclaracion de valor por noche y la invitacion a elegir / ver mas
+ * opciones — el bot NO debe repetir nada de eso despues de las fichas. NO es el
+ * mensaje de reserva ("¡Excelente eleccion!"): ese solo lo manda iniciar_reserva
+ * cuando el cliente CONFIRMA una finca.
  */
-export const CATALOGO_INTRO = `Estas son nuestras mejores opciones disponibles para ti! 🤩🏡
+export function buildCatalogoIntro(contactName?: string | null): string {
+  const formal = formalSalutationName(contactName);
+  const apertura = formal
+    ? `${formal}, te compartimos las opciones disponibles para tus fechas y tu grupo 🏡✨`
+    : `Te compartimos las opciones disponibles para tus fechas y tu grupo 🏡✨`;
+  return `${apertura}
 
-Si deseas conocer alguna propiedad más a fondo, ver un video detallado o recibir información específica sobre sus comodidades, por favor indícanos cuál es la de tu interés.
+El valor que aparece en cada opción corresponde al valor por noche y puede variar según la temporada 📆
 
-Estamos listos para ayudarte a elegir el lugar perfecto para tu estadía 🎥✨`;
+Si alguna finca te gustó, cuéntanos cuál 🙌🏼 Podemos ayudarte a validar la mejor tarifa disponible para tus fechas y brindarte toda la información para que tomes la mejor decisión 🤝✨
+
+Y si quieres ver más opciones, también podemos seguir buscando para ti 🏡`;
+}
 
 /**
  * Horario DETALLADO (de la respuesta rapida oficial "/fuera de horario").
@@ -398,9 +407,15 @@ export function buildPropertySelectionHandoff(
   // (protocolo 14-jul); si el género no es claro, sin nombre.
   const formal = formalSalutationName(contactName);
   const opener = formal
-    ? `¡Excelente elección, ${formal}!`
-    : `¡Excelente elección!`;
-  return `${opener} Nos alegra saber que esta propiedad es de tu interés. En breve, uno de nuestros expertos se comunicará contigo para brindarte toda la información, resolver tus dudas y ayudarte a gestionar el mejor precio posible para tu reserva. ¡Gracias por confiar en nosotros!`;
+    ? `¡Excelente elección, ${formal}! 🏡✨`
+    : `¡Excelente elección! 🏡✨`;
+  return `${opener} Nos alegra saber que esta propiedad es de tu interés.
+
+A partir de este momento, uno de nuestros expertos continuará contigo de manera personalizada 🙌🏼 Revisará todos los detalles de tu solicitud, te brindará la información que necesites y podrá ayudarte a validar la mejor tarifa disponible para tu reserva.
+
+⏳ Este proceso puede tomar algunos minutos, pero queremos brindarte una atención personalizada y revisar muy bien tu solicitud.
+
+Gracias por confiar en FincasYa.com 🤝🏡 En breve continuaremos contigo.`;
 }
 
 /**

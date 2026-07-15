@@ -28,7 +28,7 @@ import {
   buildPropertySelectionHandoff,
   buildWelcomeMessage,
   burstHasOnlyGreeting,
-  CATALOGO_INTRO,
+  buildCatalogoIntro,
   formalSalutationName,
   getUserBurstSinceLastBot,
   MASCOTAS_POLITICA,
@@ -1116,24 +1116,43 @@ export const runAgentTurn = internalAction({
               console.log('[agent] catalogo bloqueado por temporada', bloqueo.detalle);
               continue;
             }
-            const pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
+            let pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
               conversationId,
               personas: typeof args.personas === 'number' ? args.personas : undefined,
               zona: effectiveZona,
               mascotas:
                 typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
             });
+            // REGLA DEL EQUIPO: nunca dejar al cliente sin opciones. Si la zona
+            // pedida no tiene fincas para ese grupo, se amplía SOLO a otros
+            // municipios (favoritas de distintas zonas, hasta el Meta si toca)
+            // y se envían esas fichas como alternativas cercanas.
+            let zonaAmpliada = false;
+            if (pick.ok && pick.items.length === 0 && effectiveZona) {
+              const retry = await ctx.runQuery(internal.agent.toolCatalogPick, {
+                conversationId,
+                personas:
+                  typeof args.personas === 'number' ? args.personas : undefined,
+                zona: undefined,
+                mascotas:
+                  typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
+              });
+              if (retry.ok && retry.items.length > 0) {
+                pick = retry;
+                zonaAmpliada = true;
+              }
+            }
             if (!pick.ok) {
               result = { enviadas: [], error: pick.motivo };
             } else if (pick.items.length === 0) {
               result = {
                 enviadas: [],
-                nota: 'ninguna finca cumple esos filtros (o ya se enviaron todas las que aplican); ofrece ajustar zona/fechas/cupo',
+                nota: 'No se encontraron opciones NI AMPLIANDO a otros municipios. REGLA DURA: PROHIBIDO responder "no tenemos fincas/disponibilidad" — di con calidez que un experto del equipo va a buscar opciones para su grupo y fechas, y llama escalar_a_humano EN ESTE MISMO TURNO (motivo: "sin opciones de catálogo para zona/cupo — buscar con experto").',
               };
             } else {
               // Intro ANTES de las fichas (asi lo hace el equipo). SIN numero:
               // algunas fichas pueden fallar al enviarse y el conteo mentiria.
-              const introText = CATALOGO_INTRO;
+              const introText = buildCatalogoIntro(context.contactName);
               let introWamid: string | undefined;
               try {
                 const introSent = await sendWhatsappText({
@@ -1187,7 +1206,9 @@ export const runAgentTurn = internalAction({
               if (sent.length > 0) {
                 result = {
                   enviadas: sent.map((s) => s.title),
-                  nota: 'Ya se envio el intro y las fichas. El intro YA dijo lo de gestionar el mejor precio — NO lo repitas. Escribe SOLO el CIERRE corto (1-2 lineas), sin "gracias" al inicio: aclara que el valor que muestra cada finca es por noche y varia segun la temporada (sin nombrar media/alta/baja) e invita a decir cual le gusta o si quiere ver mas opciones. Ejemplo del tono: "El valor que muestra cada finca es por noche y varia segun la temporada. Si alguna te llama la atencion, dinos cual y seguimos 🤝"',
+                  nota: zonaAmpliada
+                    ? 'OJO: en la zona que pidio el cliente NO habia fincas para ese grupo, asi que se enviaron opciones de municipios CERCANOS/otras zonas (esto es lo correcto — PROHIBIDO decir "no tenemos fincas/disponibilidad"). El mensaje oficial YA salio completo con las fichas (valor por noche, invitacion a elegir, mas opciones) — NO repitas nada de eso. Escribe SOLO 1-2 lineas con empatia aclarando que estas opciones estan en zonas cercanas a la que pidio, y que si prefiere, un experto le busca en su zona exacta.'
+                    : 'El mensaje oficial YA salio completo junto a las fichas (valor por noche, invitacion a decir cual le gusto, ayuda con la mejor tarifa y ver mas opciones). PROHIBIDO escribir un cierre que repita algo de eso. Solo escribe algo si el cliente pregunto algo puntual que aun NO se ha respondido; si no hay nada pendiente, no escribas nada este turno.',
                 };
               } else {
                 // Catalogo no conectado al numero / producto invalido: NO
