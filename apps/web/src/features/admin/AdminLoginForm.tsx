@@ -1,21 +1,21 @@
-'use client';
+"use client";
 
-import { useState, type FormEvent } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
-import { authClient } from '@/lib/auth-client';
-import { ensureSessionLogged, getSession } from '@/features/auth/api/auth.api';
-import { useAuthStore } from '@/features/auth/store/auth.store';
-import { canAccessAdminPanel } from '@/lib/admin-nav-permissions';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { authClient } from "@/lib/auth-client";
+import { ensureSessionLogged, getSession } from "@/features/auth/api/auth.api";
+import { useAuthStore } from "@/features/auth/store/auth.store";
+import { canAccessAdminPanel } from "@/lib/admin-nav-permissions";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 export function AdminLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const setUser = useAuthStore((s) => s.setUser);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -31,12 +31,17 @@ export function AdminLoginForm() {
         password,
       });
       if (signInError) {
-        setError(signInError.message ?? 'Credenciales incorrectas. Inténtalo de nuevo.');
+        setError(
+          signInError.message ??
+            "Credenciales incorrectas. Inténtalo de nuevo.",
+        );
         return;
       }
       const sessionUser = await getSession();
       if (!sessionUser) {
-        setError('Sesión iniciada pero no se pudo leer el usuario. Recarga e intenta de nuevo.');
+        setError(
+          "Sesión iniciada pero no se pudo leer el usuario. Recarga e intenta de nuevo.",
+        );
         return;
       }
       const role = (sessionUser.role ?? "").trim().toLowerCase();
@@ -55,11 +60,10 @@ export function AdminLoginForm() {
         await ensureSessionLogged(sessionUser);
       }
       const callbackParam = searchParams.get("callbackUrl");
-      const callbackUrl =
-        callbackParam || (isOwner ? "/owner" : "/admin");
+      const callbackUrl = callbackParam || (isOwner ? "/owner" : "/admin");
       router.push(callbackUrl);
     } catch {
-      setError('No se pudo iniciar sesión. Intenta de nuevo.');
+      setError("No se pudo iniciar sesión. Intenta de nuevo.");
     } finally {
       setLoading(false);
     }
@@ -87,7 +91,9 @@ export function AdminLoginForm() {
 
       <form onSubmit={onSubmit} className="space-y-5 px-6">
         <div>
-          <label className="text-foreground/80 font-semibold text-sm">Correo Electrónico</label>
+          <label className="text-foreground/80 font-semibold text-sm">
+            Correo Electrónico
+          </label>
           <div className="relative mt-1.5">
             <Mail className="absolute left-3 top-4 h-4 w-4 text-muted-foreground/60" />
             <Input
@@ -103,11 +109,13 @@ export function AdminLoginForm() {
         </div>
 
         <div>
-          <label className="text-foreground/80 font-semibold text-sm">Contraseña</label>
+          <label className="text-foreground/80 font-semibold text-sm">
+            Contraseña
+          </label>
           <div className="relative mt-1.5">
             <Lock className="absolute left-3 top-4 h-4 w-4 text-muted-foreground/60" />
             <Input
-              type={showPassword ? 'text' : 'password'}
+              type={showPassword ? "text" : "password"}
               required
               autoComplete="current-password"
               value={password}
@@ -120,7 +128,11 @@ export function AdminLoginForm() {
               onClick={() => setShowPassword(!showPassword)}
               className="absolute right-3 top-4 text-muted-foreground/60 hover:text-primary transition-colors"
             >
-              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {showPassword ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
             </button>
           </div>
         </div>
@@ -130,9 +142,9 @@ export function AdminLoginForm() {
         <Button
           type="submit"
           disabled={loading}
-          className="w-full h-11 text-base font-bold !bg-[#fe4a19] hover:!bg-[#e54115] !text-white rounded-xl mt-4 shadow-lg shadow-[#fe4a19]/25 active:scale-[0.98] disabled:opacity-70"
+          className="w-full h-11 text-base font-bold bg-[#fe4a19]! hover:bg-[#e54115]! text-white! rounded-xl mt-4 shadow-lg shadow-[#fe4a19]/25 active:scale-[0.98] disabled:opacity-70"
         >
-          {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
+          {loading ? "Iniciando sesión..." : "Iniciar sesión"}
         </Button>
       </form>
     </div>
