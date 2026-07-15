@@ -1526,6 +1526,19 @@ export default defineSchema(
       updatedByUserId: v.optional(v.string()),
     }).index('by_scope', ['scope']),
 
+    /**
+     * Saludo automático al propietario (editable + aprobación desde el panel
+     * /admin/saludo-propietario). `enabled` = el admin aprueba que se envíe;
+     * `content` = plantilla con placeholder {nombre}. Singleton (scope global).
+     */
+    ownerGreetingSettings: defineTable({
+      scope: v.literal('global'),
+      enabled: v.boolean(),
+      content: v.string(),
+      updatedAt: v.number(),
+      updatedByUserId: v.optional(v.string()),
+    }).index('by_scope', ['scope']),
+
     adminSessionLogs: defineTable({
       userId: v.string(),
       userEmail: v.string(),

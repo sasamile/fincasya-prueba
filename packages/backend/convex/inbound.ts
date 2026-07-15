@@ -11,6 +11,7 @@ import {
   isConversationEligibleForAi,
 } from './lib/agentEligibility';
 import { isAppAutoReply } from './lib/appAutoReply';
+import { DEFAULT_OWNER_GREETING } from './ownerGreeting';
 
 const AGENT_DEBOUNCE_MS = 7000;
 const SETTINGS_KEY = 'default';
@@ -51,14 +52,20 @@ function normalizeTratamiento(raw?: string): string {
   return '';
 }
 
-/** Saludo especial para un propietario registrado (cordial + tuteo). Solo
- *  saluda; el Experto humano continúa la atención. */
-function buildOwnerGreeting(name?: string, tratamiento?: string): string {
+/** Renderiza el saludo del propietario a partir de la plantilla configurable
+ *  del panel, sustituyendo {nombre} por "Sr./Sra. Nombre" (o nada si no hay). */
+function renderOwnerGreeting(
+  template: string,
+  name?: string,
+  tratamiento?: string,
+): string {
   const n = titleCase((name ?? '').trim());
   const t = normalizeTratamiento(tratamiento);
   const nombreMostrado = n ? `${t ? `${t} ` : ''}${n}` : '';
-  const saludo = nombreMostrado ? `¡Hola, ${nombreMostrado}!` : '¡Hola!';
-  return `${saludo} 🏡✨ Te saluda el equipo de FincasYa.com. En un momento uno de nuestros Expertos se comunica contigo para atenderte personalmente 🤝`;
+  let out = String(template ?? '').replace(/\{nombre\}/gi, nombreMostrado);
+  // Sin nombre: limpia "¡Hola, !" -> "¡Hola!".
+  out = out.replace(/¡Hola,\s*!/g, '¡Hola!').replace(/\bHola,\s*!/g, 'Hola!');
+  return out.trim();
 }
 
 /** Orden de estados de WhatsApp: solo se avanza hacia adelante, nunca atrás. */
@@ -487,13 +494,27 @@ export const ingestInboundMessage = internalMutation({
         type: 'text',
         createdAt: now + 1,
       });
-      // Con la IA apagada el bot no le escribe a nadie: se detecta y escala al
-      // propietario (arriba), pero el saludo por WhatsApp solo sale si la IA está ON.
-      if (globalAiEnabled) {
+      // Saludo configurable desde el panel (/admin/saludo-propietario): el admin
+      // edita el texto y aprueba (enciende/apaga) si se envía. Sin fila: ON por
+      // defecto con la plantilla estándar (comportamiento actual).
+      const greetingRow = await ctx.db
+        .query('ownerGreetingSettings')
+        .withIndex('by_scope', (q) => q.eq('scope', 'global'))
+        .unique();
+      const greetingApproved = greetingRow?.enabled ?? true;
+      const greetingTemplate =
+        (greetingRow?.content?.trim() || '') || DEFAULT_OWNER_GREETING;
+      // Con la IA apagada el bot no le escribe a nadie; y el saludo solo sale si
+      // el admin lo aprobó. La detección/escalado (arriba) se mantiene siempre.
+      if (globalAiEnabled && greetingApproved) {
         await ctx.scheduler.runAfter(0, internal.agent.sendOwnerGreeting, {
           conversationId: conversation._id,
           to: args.phone,
-          text: buildOwnerGreeting(contact.ownerName, contact.ownerTratamiento),
+          text: renderOwnerGreeting(
+            greetingTemplate,
+            contact.ownerName,
+            contact.ownerTratamiento,
+          ),
         });
       }
       return { duplicate: false, owner: true };

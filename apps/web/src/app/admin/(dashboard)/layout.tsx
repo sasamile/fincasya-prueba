@@ -78,6 +78,7 @@ import {
 } from "@/components/ui/collapsible";
 import { logout, getSession, ensureSessionLogged } from "@/features/auth/api/auth.api";
 import { useAuthStore } from "@/features/auth/store/auth.store";
+import { UpcomingUpdateDialog } from "@/features/admin/components/upcoming-update-dialog";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/features/admin/components/notification-bell";
 import { ContractSettingsRemoteSync } from "@/features/admin/components/contracts/contract-settings-remote-sync";
@@ -204,6 +205,11 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         href: "/admin/automatizaciones",
         icon: Zap,
       },
+      {
+        label: "Saludo al propietario",
+        href: "/admin/saludo-propietario",
+        icon: Home,
+      },
     ],
   },
 ];
@@ -222,6 +228,7 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
         return acc;
       }, {}),
   );
+  const [upcomingUpdateOpen, setUpcomingUpdateOpen] = useState(false);
 
   const filteredTopNavItems = !user
     ? []
@@ -494,6 +501,13 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
                     </DropdownMenuSubContent>
                   </DropdownMenuPortal>
                 </DropdownMenuSub>
+                <DropdownMenuItem
+                  className="flex items-center gap-2"
+                  onSelect={() => setUpcomingUpdateOpen(true)}
+                >
+                  <Sparkles className="size-4" />
+                  <span>Próxima actualización</span>
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleLogout}
@@ -506,6 +520,10 @@ function AdminSidebar({ showRail = true }: { showRail?: boolean }) {
             </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
+        <UpcomingUpdateDialog
+          open={upcomingUpdateOpen}
+          onOpenChange={setUpcomingUpdateOpen}
+        />
       </SidebarFooter>
       {showRail ? <SidebarRail /> : null}
     </Sidebar>
