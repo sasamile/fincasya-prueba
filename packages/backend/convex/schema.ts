@@ -1518,6 +1518,19 @@ export default defineSchema(
       updatedByUserId: v.optional(v.string()),
     }).index('by_scope', ['scope']),
 
+    /**
+     * Overrides del cuerpo (y footer) de plantillas WhatsApp oficiales.
+     * Los defaults viven en templateCatalog.ts; aquí solo el copy editable
+     * desde Admin → Automatizaciones. Nombre Meta y paramKeys no cambian.
+     */
+    whatsappTemplateOverrides: defineTable({
+      key: v.string(),
+      bodyText: v.string(),
+      footer: v.optional(v.union(v.string(), v.null())),
+      updatedAt: v.number(),
+      updatedByUserId: v.optional(v.string()),
+    }).index('by_key', ['key']),
+
     whatsappTemporalMessage: defineTable({
       scope: v.literal('global'),
       enabled: v.boolean(),

@@ -574,6 +574,7 @@ export const toolEscalar = internalMutation({
     await ctx.db.patch(conversationId, {
       status: 'human',
       priority: 'urgent',
+      operationalState: 'requires_advisor',
       aiManualOverride: false,
       lastMessageAt: now,
     });

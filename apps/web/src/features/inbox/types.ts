@@ -6,4 +6,4 @@ export type ConversationRow = FunctionReturnType<
   typeof api.inbox.listConversations
 >['page'][number];
 export type Message = NonNullable<FunctionReturnType<typeof api.inbox.getMessages>>[number];
-export type Filter = 'todas' | 'human' | 'ai' | 'unread' | 'whatsapp' | 'web' | 'nuevas';
+export type Filter = 'todas' | 'human' | 'ai' | 'escalated' | 'unread' | 'whatsapp' | 'web' | 'nuevas';

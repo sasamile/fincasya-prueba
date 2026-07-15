@@ -35,6 +35,7 @@ import {
   setMessageSchedule,
   setScheduledMessageTypeDisabled,
   setScheduledMessagingEnabled,
+  upsertWhatsappTemplateOverride,
   type MessageSchedule,
 } from "@/features/admin/api/automation-settings.api";
 import { useAuthStore } from "@/features/auth/store/auth.store";
@@ -187,9 +188,11 @@ type CatalogTemplate = {
   key: string;
   name: string;
   bodyText: string;
+  defaultBodyText: string;
   audience: "turista" | "propietario";
   when: string;
   paramKeys: string[];
+  isCustomized: boolean;
 };
 
 function MessageRow({
@@ -408,8 +411,11 @@ function MetaTemplatesPanel({
   isAdmin: boolean;
   isLoading: boolean;
 }) {
+  const queryClient = useQueryClient();
   const [registeringKey, setRegisteringKey] = useState<string | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [savingKey, setSavingKey] = useState<string | null>(null);
 
   const registerMutation = useMutation({
     mutationFn: (onlyKeys?: string[]) =>
@@ -423,7 +429,9 @@ function MetaTemplatesPanel({
         );
       } else {
         toast.error(
-          `${ok} ok, ${fail.length} con error: ${fail.map((f) => f.name).join(", ")}`,
+          `${ok} ok, ${fail.length} con error: ${fail
+            .map((f) => `${f.name}${f.error ? `: ${f.error}` : ""}`)
+            .join("; ")}`,
         );
       }
     },
@@ -434,8 +442,43 @@ function MetaTemplatesPanel({
     onSettled: () => setRegisteringKey(null),
   });
 
+  const saveMutation = useMutation({
+    mutationFn: ({ key, bodyText }: { key: string; bodyText: string }) =>
+      upsertWhatsappTemplateOverride({ key, bodyText }),
+    onSuccess: (res, vars) => {
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[vars.key];
+        return next;
+      });
+      toast.success(
+        res.isCustomized
+          ? "Texto guardado en FincasYa. Usa Registrar para enviarlo a Meta (~24 h)."
+          : "Texto restaurado al default del catálogo.",
+      );
+      void queryClient.invalidateQueries({ queryKey: TEMPLATES_QUERY_KEY });
+    },
+    onError: (err) =>
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo guardar el texto",
+      ),
+    onSettled: () => setSavingKey(null),
+  });
+
   const tourist = (templates ?? []).filter((t) => t.audience === "turista");
   const owners = (templates ?? []).filter((t) => t.audience === "propietario");
+
+  function draftFor(t: CatalogTemplate) {
+    return drafts[t.key] ?? t.bodyText;
+  }
+
+  function openTemplate(key: string) {
+    const t = templates?.find((x) => x.key === key);
+    if (t) {
+      setDrafts((prev) => ({ ...prev, [key]: prev[key] ?? t.bodyText }));
+    }
+    setExpandedKey(key);
+  }
 
   function runRegister(keys?: string[]) {
     const confirmed = window.confirm(
@@ -446,6 +489,16 @@ function MetaTemplatesPanel({
     if (!confirmed) return;
     setRegisteringKey(keys?.length === 1 ? keys[0]! : "__all__");
     registerMutation.mutate(keys);
+  }
+
+  function runSave(t: CatalogTemplate) {
+    const bodyText = draftFor(t).trim();
+    if (!bodyText) {
+      toast.error("El cuerpo no puede quedar vacío");
+      return;
+    }
+    setSavingKey(t.key);
+    saveMutation.mutate({ key: t.key, bodyText });
   }
 
   function TemplateGroup({
@@ -473,6 +526,9 @@ function MetaTemplatesPanel({
           const busy =
             registerMutation.isPending &&
             (registeringKey === t.key || registeringKey === "__all__");
+          const saving = saveMutation.isPending && savingKey === t.key;
+          const draft = draftFor(t);
+          const dirty = draft !== t.bodyText;
           const label =
             SCHEDULED_MESSAGE_TYPES.find((s) => s.key === t.key)?.label ?? t.key;
           return (
@@ -482,7 +538,14 @@ function MetaTemplatesPanel({
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">{label}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold">{label}</p>
+                    {t.isCustomized ? (
+                      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-200">
+                        Personalizado
+                      </span>
+                    ) : null}
+                  </div>
                   <code className="mt-0.5 inline-block font-mono text-[11px] text-muted-foreground">
                     {t.name}
                   </code>
@@ -497,9 +560,11 @@ function MetaTemplatesPanel({
                     variant="outline"
                     size="sm"
                     className="h-8 rounded-lg text-xs"
-                    onClick={() => setExpandedKey(open ? null : t.key)}
+                    onClick={() =>
+                      open ? setExpandedKey(null) : openTemplate(t.key)
+                    }
                   >
-                    {open ? "Ocultar" : "Ver texto"}
+                    {open ? "Ocultar" : isAdmin ? "Editar" : "Ver texto"}
                   </Button>
                   <Button
                     type="button"
@@ -520,9 +585,68 @@ function MetaTemplatesPanel({
                 </div>
               </div>
               {open ? (
-                <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 font-sans text-[11px] leading-relaxed">
-                  {t.bodyText}
-                </pre>
+                <div className="mt-3 space-y-2">
+                  {isAdmin ? (
+                    <>
+                      <textarea
+                        value={draft}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [t.key]: e.target.value,
+                          }))
+                        }
+                        rows={10}
+                        className="max-h-64 w-full resize-y rounded-lg border border-border bg-muted/30 p-3 font-sans text-[11px] leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        spellCheck
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-8 rounded-lg text-xs"
+                          disabled={saving || !dirty}
+                          onClick={() => runSave(t)}
+                        >
+                          {saving ? (
+                            <Loader2 className="mr-1 size-3.5 animate-spin" />
+                          ) : (
+                            <Pencil className="mr-1 size-3.5" />
+                          )}
+                          Guardar
+                        </Button>
+                        {t.isCustomized || dirty ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 rounded-lg text-xs"
+                            disabled={saving}
+                            onClick={() => {
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [t.key]: t.defaultBodyText,
+                              }));
+                            }}
+                          >
+                            Restaurar default
+                          </Button>
+                        ) : null}
+                        <p className="text-[11px] text-muted-foreground">
+                          Conserva las variables{" "}
+                          {t.paramKeys
+                            .map((_, i) => `{{${i + 1}}}`)
+                            .join(" ")}
+                          . Guardar = FincasYa; Registrar = Meta (~24 h).
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 font-sans text-[11px] leading-relaxed">
+                      {t.bodyText}
+                    </pre>
+                  )}
+                </div>
               ) : null}
             </div>
           );
@@ -540,13 +664,13 @@ function MetaTemplatesPanel({
             Plantillas oficiales (Meta)
           </h2>
           <p className="max-w-lg text-sm text-muted-foreground">
-            El texto lo aprueba Meta. Aquí ves cuáles van a{" "}
-            <strong className="text-foreground/80">cliente</strong> y cuáles a{" "}
-            <strong className="text-foreground/80">propietario</strong>. El
-            horario lo programas arriba; el copy se cambia en código y se vuelve
-            a <strong className="text-foreground/80">Registrar</strong> (~24 h de
-            revisión Meta). No se crean plantillas WhatsApp nuevas desde el
-            panel: Meta exige aprobación previa.
+            Puedes <strong className="text-foreground/80">editar y Guardar</strong>{" "}
+            el texto aquí (FincasYa). Luego{" "}
+            <strong className="text-foreground/80">Registrar</strong> lo manda a
+            Meta (~24 h de revisión). No se puede añadir/quitar variables{" "}
+            <code className="text-[11px]">{"{{n}}"}</code> ni crear plantillas
+            nuevas: Meta exige aprobación previa. Si el nombre ya existe en Meta,
+            el registro puede fallar hasta borrar/reemplazar en Business Manager.
           </p>
         </div>
         <Button

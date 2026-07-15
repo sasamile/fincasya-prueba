@@ -186,6 +186,10 @@ export default function App() {
       if (labelFilter && !c.labels.some((l) => String(l.id) === labelFilter)) return false;
       if (filter === 'ai') return c.status === 'ai';
       if (filter === 'human') return c.status === 'human';
+      // Escalados por el bot (toolEscalar / emergencia / propietario → urgent).
+      if (filter === 'escalated') {
+        return c.status === 'human' && c.priority === 'urgent';
+      }
       if (filter === 'unread') return c.unread > 0;
       if (filter === 'nuevas') return c.aiEligible;
       if (filter === 'whatsapp') return c.channel === 'whatsapp';

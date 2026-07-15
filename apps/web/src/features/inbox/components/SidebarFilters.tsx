@@ -9,8 +9,8 @@ import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import { ChevronDown, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { Filter } from '@/features/inbox/types';
 
-type Filter = 'todas' | 'human' | 'ai' | 'unread' | 'whatsapp' | 'web' | 'nuevas';
 type Label = { id: Id<'labels'>; name: string; color: string; emoji: string | null };
 
 const PRIMARY: Array<{ id: Filter; label: string }> = [
@@ -82,20 +82,29 @@ export function SidebarFilters({
         <button
           type="button"
           onClick={() => setLabelFilter(null)}
-          className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-medium"
+          className="flex min-w-0 max-w-[7.5rem] shrink items-center gap-1.5 truncate rounded-full px-3 py-1 text-[13px] font-medium"
           style={{ backgroundColor: `${activeLabel.color}33`, color: activeLabel.color }}
         >
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: activeLabel.color }} />
-          {activeLabel.emoji ? `${activeLabel.emoji} ` : ''}
-          {activeLabel.name}
-          <X className="h-3 w-3" />
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: activeLabel.color }} />
+          <span className="truncate">
+            {activeLabel.emoji ? `${activeLabel.emoji} ` : ''}
+            {activeLabel.name}
+          </span>
+          <X className="h-3 w-3 shrink-0" />
         </button>
       )}
 
-      {/* Botón dropdown */}
+      {/* Botón dropdown — resalta si Escalados (u otro filtro del menú) está activo */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        data-active={
+          !labelFilter &&
+          (filter === 'escalated' ||
+            filter === 'whatsapp' ||
+            filter === 'web' ||
+            filter === 'nuevas')
+        }
         className="wa-chip ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
         title="Más filtros y listas"
       >
@@ -104,6 +113,26 @@ export function SidebarFilters({
 
       {open && (
         <div className="absolute right-3 top-full z-50 mt-1 w-56 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-2xl">
+          <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Estado
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setFilter('escalated');
+              setLabelFilter(null);
+              setOpen(false);
+            }}
+            className={cn(
+              'flex w-full items-center px-3 py-1.5 text-left text-[14px] hover:bg-muted/60',
+              !labelFilter && filter === 'escalated' && 'bg-muted/40 font-medium',
+            )}
+          >
+            Escalados
+            <span className="ml-auto text-[11px] text-muted-foreground">bot → humano</span>
+          </button>
+
+          <div className="my-1 border-t border-border/70" />
           <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             Canales
           </p>
@@ -116,7 +145,10 @@ export function SidebarFilters({
                 setLabelFilter(null);
                 setOpen(false);
               }}
-              className="flex w-full items-center px-3 py-1.5 text-left text-[14px] hover:bg-muted/60"
+              className={cn(
+                'flex w-full items-center px-3 py-1.5 text-left text-[14px] hover:bg-muted/60',
+                !labelFilter && filter === f && 'bg-muted/40 font-medium',
+              )}
             >
               {f === 'whatsapp' ? 'WhatsApp' : f === 'web' ? 'Web' : 'Favoritos'}
             </button>

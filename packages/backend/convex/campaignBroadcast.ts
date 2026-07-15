@@ -13,11 +13,14 @@ import { sendTemplateToYcloud } from "./lib/ycloud/senders";
 import {
   ALL_TEMPLATES,
   buildSendComponents,
-  getTemplateDef,
   MANUAL_TEMPLATE_KEYS,
   renderTemplateBody,
   type TemplateDef,
 } from "./lib/ycloud/templateCatalog";
+import {
+  loadOverrideMap,
+  resolveWithOverrideMap,
+} from "./whatsappTemplateOverrides";
 
 const BETWEEN_SENDS_MS = 250;
 
@@ -35,9 +38,11 @@ function normalizeOutboundPhone(raw: string | undefined | null): string {
 /** Plantillas disponibles para envío masivo (mismas que el envío manual). */
 export const listTemplates = query({
   args: {},
-  handler: async () =>
-    MANUAL_TEMPLATE_KEYS.map((key) => {
-      const def = ALL_TEMPLATES[key];
+  handler: async (ctx) => {
+    const map = await loadOverrideMap(ctx);
+    return MANUAL_TEMPLATE_KEYS.map((key) => {
+      const base = ALL_TEMPLATES[key];
+      const { def } = resolveWithOverrideMap(base, map);
       const buttons = def.buttons ?? (def.button ? [def.button] : []);
       return {
         key: def.key,
@@ -49,7 +54,8 @@ export const listTemplates = query({
         footer: def.footer ?? null,
         buttons: buttons.map((b) => ({ type: b.type, text: b.text })),
       };
-    }),
+    });
+  },
 });
 
 /** Contactos elegibles para broadcast: con dataConsentStatus=granted y teléfono válido. */
@@ -213,7 +219,10 @@ export const sendBroadcast = action({
     totalFailed?: number;
     totalSkipped?: number;
   }> => {
-    const def = getTemplateDef(args.templateKey);
+    const def = (await ctx.runQuery(
+      internal.whatsappTemplateOverrides.getResolvedInternal,
+      { key: args.templateKey },
+    )) as TemplateDef | null;
     if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
 
     const contacts = await ctx.runQuery(

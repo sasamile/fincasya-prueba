@@ -69,3 +69,15 @@ export async function registerCheckinTemplatesToYcloud(onlyKeys?: string[]) {
     }>
   >;
 }
+
+/** Guarda el cuerpo editable de una plantilla oficial (override en Convex). */
+export async function upsertWhatsappTemplateOverride(args: {
+  key: string;
+  bodyText: string;
+  footer?: string | null;
+}) {
+  return convex.mutation(api.whatsappTemplateOverrides.upsert, args) as Promise<{
+    ok: true;
+    isCustomized: boolean;
+  }>;
+}

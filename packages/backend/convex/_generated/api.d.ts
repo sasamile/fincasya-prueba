@@ -113,6 +113,7 @@ import type * as siigo from "../siigo.js";
 import type * as siteAnalytics from "../siteAnalytics.js";
 import type * as userPermissions from "../userPermissions.js";
 import type * as users from "../users.js";
+import type * as whatsappTemplateOverrides from "../whatsappTemplateOverrides.js";
 import type * as whatsappTemplates from "../whatsappTemplates.js";
 import type * as whatsappTemporalMessage from "../whatsappTemporalMessage.js";
 
@@ -228,6 +229,7 @@ declare const fullApi: ApiFromModules<{
   siteAnalytics: typeof siteAnalytics;
   userPermissions: typeof userPermissions;
   users: typeof users;
+  whatsappTemplateOverrides: typeof whatsappTemplateOverrides;
   whatsappTemplates: typeof whatsappTemplates;
   whatsappTemporalMessage: typeof whatsappTemporalMessage;
 }>;

@@ -17,7 +17,6 @@ import {
   buildRegisterPayload,
   assertBodyParamsCount,
   buildSendComponents,
-  CHECKIN_TEMPLATES,
   formatTemplateSendError,
   getTemplateDef,
   MANUAL_TEMPLATE_KEYS,
@@ -25,6 +24,10 @@ import {
   type CheckinTemplateKey,
   type TemplateDef,
 } from "./lib/ycloud/templateCatalog";
+import {
+  loadOverrideMap,
+  resolveWithOverrideMap,
+} from "./whatsappTemplateOverrides";
 import {
   ownerSalutationName,
   resolveOwnerContactFields,
@@ -200,21 +203,27 @@ const TEMPLATE_WHEN: Record<CheckinTemplateKey, string> = {
 
 export const listCheckinTemplates = query({
   args: {},
-  handler: async () =>
-    ALL_TEMPLATE_KEYS.map((key) => {
-      const def = CHECKIN_TEMPLATES[key];
+  handler: async (ctx) => {
+    const map = await loadOverrideMap(ctx);
+    return ALL_TEMPLATE_KEYS.map((key) => {
+      const base = getTemplateDef(key)!;
+      const { def, isCustomized } = resolveWithOverrideMap(base, map);
       return {
         key: def.key,
         name: def.name,
         language: def.language,
         category: def.category,
         bodyText: def.bodyText,
+        defaultBodyText: base.bodyText,
         paramKeys: def.paramKeys,
         footer: def.footer ?? null,
+        defaultFooter: base.footer ?? null,
+        isCustomized,
         audience: TEMPLATE_AUDIENCE[key],
         when: TEMPLATE_WHEN[key],
       };
-    }),
+    });
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,9 +237,11 @@ export const listCheckinTemplates = query({
  */
 export const listManualTemplates = query({
   args: {},
-  handler: async () =>
-    MANUAL_TEMPLATE_KEYS.map((key) => {
-      const def = ALL_TEMPLATES[key];
+  handler: async (ctx) => {
+    const map = await loadOverrideMap(ctx);
+    return MANUAL_TEMPLATE_KEYS.map((key) => {
+      const base = ALL_TEMPLATES[key];
+      const { def } = resolveWithOverrideMap(base, map);
       const buttons = def.buttons ?? (def.button ? [def.button] : []);
       return {
         key: def.key,
@@ -243,7 +254,8 @@ export const listManualTemplates = query({
         footer: def.footer ?? null,
         buttons: buttons.map((b) => ({ type: b.type, text: b.text })),
       };
-    }),
+    });
+  },
 });
 
 /** Destinatario (teléfono + nombre) de una conversación, para el envío manual. */
@@ -276,7 +288,10 @@ export const sendTemplateToConversation = action({
     sentByUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const def = getTemplateDef(args.templateKey);
+    const def = (await ctx.runQuery(
+      internal.whatsappTemplateOverrides.getResolvedInternal,
+      { key: args.templateKey },
+    )) as TemplateDef | null;
     if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
 
     const recipient = (await ctx.runQuery(
@@ -379,7 +394,7 @@ export const registerCheckinTemplates = action({
     wabaId: v.optional(v.string()),
     onlyKeys: v.optional(v.array(v.string())),
   },
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
     const apiKey = process.env.YCLOUD_API_KEY;
     if (!apiKey) throw new Error("Configura YCLOUD_API_KEY en Convex");
     const wabaId = (args.wabaId || process.env.YCLOUD_WABA_ID || "").trim();
@@ -389,11 +404,10 @@ export const registerCheckinTemplates = action({
       );
     }
 
-    const keys = (
-      args.onlyKeys && args.onlyKeys.length > 0
-        ? args.onlyKeys
-        : ALL_TEMPLATE_KEYS
-    ).filter((k): k is CheckinTemplateKey => Boolean(getTemplateDef(k)));
+    const defs = (await ctx.runQuery(
+      internal.whatsappTemplateOverrides.listResolvedCheckinInternal,
+      { onlyKeys: args.onlyKeys },
+    )) as TemplateDef[];
 
     const results: Array<{
       key: string;
@@ -403,8 +417,7 @@ export const registerCheckinTemplates = action({
       error?: string;
     }> = [];
 
-    for (const key of keys) {
-      const def = CHECKIN_TEMPLATES[key];
+    for (const def of defs) {
       const payload = buildRegisterPayload(def, wabaId);
       try {
         const res = await fetch(YCLOUD_TEMPLATES_BASE, {
@@ -934,7 +947,10 @@ export const sendTemplateToBooking = action({
     dryRun: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const def = getTemplateDef(args.templateKey);
+    const def = (await ctx.runQuery(
+      internal.whatsappTemplateOverrides.getResolvedInternal,
+      { key: args.templateKey },
+    )) as TemplateDef | null;
     if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
     const key = args.templateKey as CheckinTemplateKey;
 
@@ -1032,7 +1048,10 @@ export const runScheduledMomentInternal = internalAction({
     dryRun: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const def = getTemplateDef(args.key);
+    const def = (await ctx.runQuery(
+      internal.whatsappTemplateOverrides.getResolvedInternal,
+      { key: args.key },
+    )) as TemplateDef | null;
     if (!def) throw new Error(`Plantilla desconocida: ${args.key}`);
     const key = args.key as CheckinTemplateKey;
 
@@ -1143,8 +1162,10 @@ export const listBookingsForBatch = query({
     tag: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const def = getTemplateDef(args.templateKey);
-    if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
+    const map = await loadOverrideMap(ctx);
+    const base = getTemplateDef(args.templateKey);
+    if (!base) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
+    const { def } = resolveWithOverrideMap(base, map);
     const key = args.templateKey as CheckinTemplateKey;
     const dateField =
       key === "tourist_departure" ? "fechaSalida" : "fechaEntrada";
@@ -1220,7 +1241,10 @@ export const sendBatchTemplate = action({
     dryRun: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const def = getTemplateDef(args.templateKey);
+    const def = (await ctx.runQuery(
+      internal.whatsappTemplateOverrides.getResolvedInternal,
+      { key: args.templateKey },
+    )) as TemplateDef | null;
     if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
 
     let sent = 0;
@@ -1312,8 +1336,11 @@ export const sendSingleTemplate = internalAction({
     templateKey: v.string(),
     bodyParams: v.array(v.string()),
   },
-  handler: async (_ctx, args) => {
-    const def = getTemplateDef(args.templateKey);
+  handler: async (ctx, args) => {
+    const def = (await ctx.runQuery(
+      internal.whatsappTemplateOverrides.getResolvedInternal,
+      { key: args.templateKey },
+    )) as TemplateDef | null;
     if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
     return sendTemplateToYcloud({
       to: normalizeOutboundPhone(args.to),

@@ -219,6 +219,60 @@ export function getTemplateDef(key: string): TemplateDef | undefined {
   return (ALL_TEMPLATES as Record<string, TemplateDef>)[key];
 }
 
+/** Índices `{{n}}` hallados en el cuerpo (pueden repetirse). */
+export function extractPlaceholderIndices(bodyText: string): number[] {
+  const matches = bodyText.matchAll(/\{\{(\d+)\}\}/g);
+  return [...matches].map((m) => Number(m[1]));
+}
+
+/**
+ * Exige exactamente `{{1}}…{{paramCount}}` en el cuerpo (pueden repetirse,
+ * pero el conjunto de números únicos debe coincidir 1…n sin huecos ni extras).
+ */
+export function assertBodyPlaceholders(
+  bodyText: string,
+  paramCount: number,
+): void {
+  const unique = [...new Set(extractPlaceholderIndices(bodyText))].sort(
+    (a, b) => a - b,
+  );
+  const expected = Array.from({ length: paramCount }, (_, i) => i + 1);
+  const ok =
+    unique.length === expected.length &&
+    unique.every((n, i) => n === expected[i]);
+  if (!ok) {
+    throw new Error(
+      paramCount === 0
+        ? "Este cuerpo no debe incluir variables {{n}}."
+        : `El cuerpo debe usar exactamente {{1}}…{{${paramCount}}} (sin añadir ni quitar variables).`,
+    );
+  }
+}
+
+export type TemplateOverrideFields = {
+  bodyText: string;
+  footer?: string | null;
+};
+
+/** Aplica override de copy sobre la def del catálogo (nombre/vars intactos). */
+export function applyTemplateOverride(
+  def: TemplateDef,
+  override: TemplateOverrideFields | null | undefined,
+): TemplateDef {
+  if (!override) return def;
+  const footer =
+    override.footer === undefined
+      ? def.footer
+      : override.footer === null || override.footer === ""
+        ? undefined
+        : override.footer;
+  return {
+    ...def,
+    bodyText: override.bodyText,
+    footer,
+  };
+}
+
 /**
  * Rellena los `paramKeys` con un mapa de valores y devuelve el array ordenado
  * para `sendTemplateToYcloud({ bodyParams })`. Las variables faltantes quedan
