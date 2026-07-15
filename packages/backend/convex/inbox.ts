@@ -30,6 +30,8 @@ import {
   sendVideoToYcloud,
 } from './lib/ycloud/senders';
 import { sendCatalogCard, BETWEEN_CATALOG_SENDS_MS, MAX_CATALOG_CARDS, formatCop } from './lib/catalogSend';
+import { buildCatalogoIntro } from './lib/copys';
+import { chatCompletion } from './lib/openai';
 import {
   buildWebFichaCaption,
   sendWebFichaCard,
@@ -1467,6 +1469,168 @@ export const sendCatalogSelection = action({
     });
 
     return { ok: true, sent: 0, failed: 0, queued: built.cards.length };
+  },
+});
+
+/** Contexto minimo (telefono + nombre) para el envio automatico de catalogo. */
+export const _autoCatalogContact = internalQuery({
+  args: { conversationId: v.id('conversations') },
+  handler: async (ctx, { conversationId }) => {
+    const conv = await ctx.db.get(conversationId);
+    if (!conv) return null;
+    const contact = await ctx.db.get(conv.contactId);
+    if (!contact?.phone) return null;
+    return { to: contact.phone, name: contact.baseName ?? contact.name ?? '' };
+  },
+});
+
+/**
+ * Envio MANUAL de catalogo con la MISMA logica del bot (disponibilidad +
+ * favoritas + cupo + zona), en un clic. Lo dispara el operador desde el chat
+ * cuando esta ocupado. Envia el intro oficial + las fichas y toma la
+ * conversacion (queda en modo humano).
+ */
+export const sendAutoCatalog = action({
+  args: {
+    conversationId: v.id('conversations'),
+    personas: v.optional(v.number()),
+    zona: v.optional(v.string()),
+    mascotas: v.optional(v.boolean()),
+    /** YYYY-MM-DD (para filtrar por disponibilidad). */
+    fechaEntrada: v.optional(v.string()),
+    fechaSalida: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    ok: boolean;
+    queued?: number;
+    enviadas?: string[];
+    motivo?: string;
+  }> => {
+    const feMs = args.fechaEntrada ? Date.parse(args.fechaEntrada) : NaN;
+    const fsMs = args.fechaSalida ? Date.parse(args.fechaSalida) : NaN;
+    const pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
+      conversationId: args.conversationId,
+      personas: args.personas,
+      zona: args.zona,
+      mascotas: args.mascotas,
+      fechaEntradaMs: Number.isFinite(feMs) ? feMs : undefined,
+      fechaSalidaMs: Number.isFinite(fsMs) ? fsMs : undefined,
+    });
+    if (!pick.ok) return { ok: false, motivo: pick.motivo };
+    if (pick.items.length === 0) {
+      return {
+        ok: false,
+        motivo:
+          'No hay fincas disponibles con esos filtros (fechas / cupo / zona). Ajusta el filtro o busca en otra zona.',
+      };
+    }
+    const propertyIds = pick.items.map((i) => i.propertyId as Id<'properties'>);
+
+    const built = await ctx.runQuery(
+      internal.inbox.buildCatalogCardsForSelection,
+      { conversationId: args.conversationId, propertyIds },
+    );
+    if (!built.ok) return { ok: false, motivo: built.motivo };
+
+    await ctx.runMutation(internal.inbox.takeOverConversation, {
+      conversationId: args.conversationId,
+    });
+
+    // Intro oficial (con el nombre del cliente), igual que el bot.
+    const cinfo = await ctx.runQuery(internal.inbox._autoCatalogContact, {
+      conversationId: args.conversationId,
+    });
+    if (cinfo?.to) {
+      const introText = buildCatalogoIntro(cinfo.name);
+      let introWamid: string | undefined;
+      try {
+        const s = await sendWhatsappText({ to: cinfo.to, text: introText });
+        introWamid = s.wamid;
+      } catch (err) {
+        console.error('[sendAutoCatalog] fallo el intro', err);
+      }
+      await ctx.runMutation(internal.agent.saveAssistantMessage, {
+        conversationId: args.conversationId,
+        content: introText,
+        wamid: introWamid,
+      });
+    }
+
+    await ctx.scheduler.runAfter(0, internal.inbox.deliverCatalogStep, {
+      conversationId: args.conversationId,
+      to: built.to,
+      catalogMetaId: built.catalogMetaId,
+      cards: built.cards,
+      index: 0,
+      okCount: 0,
+    });
+
+    return {
+      ok: true,
+      queued: built.cards.length,
+      enviadas: pick.items.map((i) => i.title),
+    };
+  },
+});
+
+/**
+ * Mejora la redacción de un borrador del operador con IA, en el tono del equipo
+ * FincasYa (botón "✨ Mejorar" del composer). Corrige ortografía/gramática y
+ * pule el estilo SIN inventar datos ni agregar información nueva.
+ */
+export const improveMessageText = action({
+  args: { text: v.string() },
+  returns: v.object({ improved: v.string() }),
+  handler: async (ctx, { text }): Promise<{ improved: string }> => {
+    const draft = text.trim();
+    if (draft.length === 0) return { improved: '' };
+    const system = `Eres el editor de estilo del equipo de FincasYa.com (alquiler de fincas para descanso, atencion por WhatsApp). Reescribe el mensaje que el operador le va a enviar a un cliente. REGLAS:
+- Corrige ortografia, tildes y gramatica en espanol colombiano; sin espanglish.
+- Aplica el tono del equipo: calido, empatico, profesional y breve (es WhatsApp, no un correo). TUTEO ("tu", "te", "cuentanos") + titulo "Sr."/"Sra." + nombre SOLO si el nombre ya aparece en el mensaje. Nunca "usted".
+- 1 a 3 emojis naturales al FINAL del mensaje (🏡 🤝 ✨ 📅 😊 🙌), nunca a media frase.
+- PROHIBIDO "pet friendly": di "fincas que aceptan mascotas".
+- NO inventes ni agregues datos que no esten en el mensaje (precios, fechas, disponibilidad, nombres, promesas). NO agregues despedidas ni frases nuevas: solo mejora lo que el operador ya escribio.
+- Conserva el idioma y la intencion original.
+Devuelve UNICAMENTE el mensaje reescrito, sin comillas ni explicaciones.`;
+    try {
+      const { content } = await chatCompletion({
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: draft },
+        ],
+        temperature: 0.4,
+      });
+      const improved = (content ?? '').trim();
+      return { improved: improved.length > 0 ? improved : draft };
+    } catch (err) {
+      console.error('[improveMessageText] fallo IA', err);
+      // Si la IA falla, devolvemos el texto original (el operador no pierde nada).
+      return { improved: draft };
+    }
+  },
+});
+
+/** Prefill del formulario de catálogo automático con lo último que pidió el cliente. */
+export const getCatalogPrefill = query({
+  args: { conversationId: v.id('conversations') },
+  handler: async (ctx, { conversationId }) => {
+    const conv = await ctx.db.get(conversationId);
+    if (!conv) return null;
+    const s = conv.lastCatalogSearch;
+    const toIso = (ms?: number) =>
+      typeof ms === 'number' && ms > 0
+        ? new Date(ms).toISOString().slice(0, 10)
+        : '';
+    return {
+      zona: (conv.lastRequestedZone ?? s?.location ?? '').trim(),
+      personas: typeof s?.minCapacity === 'number' ? s.minCapacity : null,
+      mascotas: s?.hasPets === true,
+      fechaEntrada: toIso(s?.fechaEntrada),
+      fechaSalida: toIso(s?.fechaSalida),
+    };
   },
 });
 

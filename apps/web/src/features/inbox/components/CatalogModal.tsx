@@ -7,7 +7,7 @@ import { useAction, useQuery } from 'convex/react';
 import type { FunctionReturnType } from 'convex/server';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
-import { Link2, Search, Store, X } from 'lucide-react';
+import { Link2, Search, Store, X, Zap } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { catalogCache } from '@/lib/queryCache';
@@ -111,6 +111,48 @@ export function CatalogModal({
   const [result, setResult] = useState<string | null>(null);
   const [dept, setDept] = useState<string>('Todos');
 
+  // --- Envío automático (misma lógica del bot) ---
+  const sendAuto = useAction(api.inbox.sendAutoCatalog);
+  const prefill = useQuery(api.inbox.getCatalogPrefill, { conversationId });
+  const [autoFe, setAutoFe] = useState('');
+  const [autoFs, setAutoFs] = useState('');
+  const [autoPersonas, setAutoPersonas] = useState('');
+  const [autoZona, setAutoZona] = useState('');
+  const [autoInit, setAutoInit] = useState(false);
+  const [autoSending, setAutoSending] = useState(false);
+  if (prefill && !autoInit) {
+    setAutoFe(prefill.fechaEntrada || '');
+    setAutoFs(prefill.fechaSalida || '');
+    setAutoPersonas(prefill.personas != null ? String(prefill.personas) : '');
+    setAutoZona(prefill.zona || '');
+    setAutoInit(true);
+  }
+
+  async function handleAutoSend() {
+    if (autoSending) return;
+    setAutoSending(true);
+    setResult(null);
+    try {
+      const res = await sendAuto({
+        conversationId,
+        personas: autoPersonas ? Number(autoPersonas) : undefined,
+        zona: autoZona.trim() || undefined,
+        fechaEntrada: autoFe || undefined,
+        fechaSalida: autoFs || undefined,
+      });
+      if (res.ok) {
+        setResult(`✓ Enviando ${res.queued ?? 0} finca(s) disponibles…`);
+        setTimeout(onClose, 500);
+      } else {
+        setResult(res.motivo ?? 'No se pudo enviar');
+      }
+    } catch (err) {
+      setResult(err instanceof Error ? err.message : 'Error al enviar');
+    } finally {
+      setAutoSending(false);
+    }
+  }
+
   const departments = useMemo(() => {
     const counts = new Map<string, number>();
     for (const p of properties ?? []) {
@@ -197,6 +239,70 @@ export function CatalogModal({
           <X className="h-5 w-5" />
         </button>
       </header>
+
+      {/* Envío automático: misma lógica del bot (disponibilidad + favoritas) en un clic */}
+      <div className="mx-4 mb-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
+        <p className="flex items-center gap-1.5 text-[13px] font-semibold">
+          <Zap className="h-4 w-4 text-primary" /> Enviar catálogo automático (como el bot)
+        </p>
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          Manda las fincas <b>disponibles</b> para el filtro, con las favoritas de primeras.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[11px] font-medium text-muted-foreground">
+            Entrada
+            <input
+              type="date"
+              value={autoFe}
+              onChange={(e) => setAutoFe(e.target.value)}
+              className="mt-0.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground"
+            />
+          </label>
+          <label className="text-[11px] font-medium text-muted-foreground">
+            Salida
+            <input
+              type="date"
+              value={autoFs}
+              onChange={(e) => setAutoFs(e.target.value)}
+              className="mt-0.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground"
+            />
+          </label>
+          <label className="text-[11px] font-medium text-muted-foreground">
+            Personas
+            <input
+              type="number"
+              min={1}
+              value={autoPersonas}
+              onChange={(e) => setAutoPersonas(e.target.value)}
+              placeholder="Ej: 10"
+              className="mt-0.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground"
+            />
+          </label>
+          <label className="text-[11px] font-medium text-muted-foreground">
+            Zona (opcional)
+            <input
+              type="text"
+              value={autoZona}
+              onChange={(e) => setAutoZona(e.target.value)}
+              placeholder="Ej: Melgar"
+              className="mt-0.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground"
+            />
+          </label>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleAutoSend()}
+          disabled={autoSending}
+          className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-[13px] font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+        >
+          <Zap className="h-4 w-4" />
+          {autoSending ? 'Enviando…' : 'Enviar catálogo automático'}
+        </button>
+      </div>
+
+      <div className="px-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        …o elige fincas manualmente
+      </div>
 
       <div className="flex gap-2 px-4 pb-2">
         <button

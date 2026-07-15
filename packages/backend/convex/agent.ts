@@ -287,10 +287,13 @@ export const toolCatalogPick = internalQuery({
     personas: v.optional(v.number()),
     zona: v.optional(v.string()),
     mascotas: v.optional(v.boolean()),
+    /** ms epoch — si vienen, solo se envian fincas LIBRES esas fechas. */
+    fechaEntradaMs: v.optional(v.number()),
+    fechaSalidaMs: v.optional(v.number()),
   },
   handler: async (
     ctx,
-    { conversationId, personas, zona, mascotas },
+    { conversationId, personas, zona, mascotas, fechaEntradaMs, fechaSalidaMs },
   ): Promise<CatalogPickResult> => {
     const conversation = await ctx.db.get(conversationId);
     const exclude = new Set(
@@ -373,9 +376,36 @@ export const toolCatalogPick = internalQuery({
       matches = interleaved;
     }
 
+    // FAVORITAS DE PRIMERAS (regla del equipo): sin romper la variedad/orden ya
+    // calculado, se llevan las favoritas al frente de la lista.
+    matches = [
+      ...matches.filter((p) => p.isFavorite === true),
+      ...matches.filter((p) => p.isFavorite !== true),
+    ];
+
+    // ¿Filtramos por disponibilidad? Solo si vienen fechas válidas.
+    const checkAvailability =
+      typeof fechaEntradaMs === 'number' &&
+      typeof fechaSalidaMs === 'number' &&
+      fechaSalidaMs > fechaEntradaMs;
+
     const items: Extract<CatalogPickResult, { ok: true }>['items'] = [];
     for (const p of matches) {
       if (items.length >= MAX_CATALOG_CANDIDATES) break;
+      // DISPONIBILIDAD: no enviar fincas con reserva/bloqueo que se cruce con las
+      // fechas pedidas (propertyAvailability incluye reservas + bloqueos manuales).
+      if (checkAvailability) {
+        const blocks = await ctx.db
+          .query('propertyAvailability')
+          .withIndex('by_property', (q) => q.eq('propertyId', p._id))
+          .collect();
+        const ocupada = blocks.some(
+          (b) =>
+            b.fechaEntrada < (fechaSalidaMs as number) &&
+            b.fechaSalida > (fechaEntradaMs as number),
+        );
+        if (ocupada) continue; // ocupada esas fechas → no se ofrece
+      }
       const mapping = await ctx.db
         .query('propertyWhatsAppCatalog')
         .withIndex('by_property_and_catalog', (q) =>
@@ -1061,6 +1091,49 @@ export const runAgentTurn = internalAction({
               typeof args.fechaEntrada === 'string' ? args.fechaEntrada : '';
             const fechaSalida =
               typeof args.fechaSalida === 'string' ? args.fechaSalida : '';
+
+            // INICIO DE AÑO (regla del negocio): las fincas siguen ocupadas por
+            // la temporada de fin de año hasta el 4 de enero; solo se ofrecen
+            // fechas de llegada DESDE el 5 de enero. Candado determinista: no se
+            // envia catalogo para llegadas del 1 al 4 de enero.
+            const janMatch = fechaEntrada.match(/^\d{4}-01-(\d{2})$/);
+            const janDay = janMatch ? Number(janMatch[1]) : 0;
+            if (janDay >= 1 && janDay <= 4) {
+              const aviso = `Para inicio de año las fincas están disponibles a partir del *5 de enero* 🗓️ — las fechas anteriores siguen ocupadas por la temporada de fin de año 🎄.\n\n¿Te sirve del 5 de enero en adelante? Con gusto te comparto las opciones 🏡`;
+              let avisoWamid: string | undefined;
+              if (context.contactPhone) {
+                try {
+                  const sent = await sendWhatsappText({
+                    to: context.contactPhone,
+                    text: aviso,
+                  });
+                  avisoWamid = sent.wamid;
+                } catch (err) {
+                  console.error('[agent] fallo el aviso de inicio de año', err);
+                }
+              }
+              await ctx.runMutation(internal.agent.saveAssistantMessage, {
+                conversationId,
+                content: aviso,
+                wamid: avisoWamid,
+              });
+              skipFinalReply = true;
+              result = {
+                enviadas: [],
+                error: 'inicio de año: solo disponible desde el 5 de enero',
+                nota: 'El aviso oficial de inicio de año YA se envio TAL CUAL como mensaje aparte. NO escribas mas texto este turno y NO envies catalogo hasta que el cliente de una fecha de llegada del 5 de enero o posterior.',
+              };
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: JSON.stringify(result),
+              });
+              console.log('[agent] catalogo bloqueado: inicio de año antes del 5-ene', {
+                fechaEntrada,
+              });
+              continue;
+            }
+
             let bloqueo: {
               detalle: string;
               temporada: string;
@@ -1153,12 +1226,17 @@ export const runAgentTurn = internalAction({
               console.log('[agent] catalogo bloqueado por temporada', bloqueo.detalle);
               continue;
             }
+            // Fechas en ms para filtrar por disponibilidad (solo fincas libres).
+            const feMs = fechaEntrada ? parseDateMs(fechaEntrada) : undefined;
+            const fsMs = fechaSalida ? parseDateMs(fechaSalida) : undefined;
             let pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
               conversationId,
               personas: typeof args.personas === 'number' ? args.personas : undefined,
               zona: effectiveZona,
               mascotas:
                 typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
+              fechaEntradaMs: feMs,
+              fechaSalidaMs: fsMs,
             });
             // REGLA DEL EQUIPO: nunca dejar al cliente sin opciones. Si la zona
             // pedida no tiene fincas para ese grupo, se amplía SOLO a otros
@@ -1173,6 +1251,8 @@ export const runAgentTurn = internalAction({
                 zona: undefined,
                 mascotas:
                   typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
+                fechaEntradaMs: feMs,
+                fechaSalidaMs: fsMs,
               });
               if (retry.ok && retry.items.length > 0) {
                 pick = retry;

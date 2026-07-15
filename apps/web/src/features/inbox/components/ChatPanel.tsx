@@ -20,6 +20,7 @@ import {
   Search,
   Send,
   Smile,
+  Sparkles,
   UserRound,
   X,
 } from 'lucide-react';
@@ -557,12 +558,29 @@ export function ChatPanel({
   const setStatus = useMutation(api.inbox.setConversationStatus);
   const generateUploadUrl = useMutation(api.inbox.generateUploadUrl);
   const sendMedia = useMutation(api.inbox.sendAdvisorMedia);
+  const improveText = useAction(api.inbox.improveMessageText);
   // Actor logueado — viaja en las mutaciones para el historial de atención.
   const { data: session } = authClient.useSession();
   const actorId = session?.user?.id ? String(session.user.id) : undefined;
   const actorName = session?.user?.name ?? undefined;
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [improving, setImproving] = useState(false);
+
+  async function handleImprove() {
+    const text = draft.trim();
+    if (!text || improving) return;
+    setImproving(true);
+    try {
+      const res = await improveText({ text });
+      if (res?.improved) setDraft(res.improved);
+    } catch {
+      // Silencioso: si la IA falla, el operador conserva su texto.
+    } finally {
+      setImproving(false);
+      draftRef.current?.focus();
+    }
+  }
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [botError, setBotError] = useState<string | null>(null);
   const [showAttach, setShowAttach] = useState(false);
@@ -1169,9 +1187,28 @@ export function ChatPanel({
                   }}
                   rows={1}
                   placeholder="Escribe un mensaje"
+                  spellCheck
+                  lang="es"
+                  autoCorrect="on"
                   className="wa-composer-field"
                 />
               </div>
+              {draft.trim() && (
+                <button
+                  type="button"
+                  className="wa-composer-icon"
+                  title="Mejorar redacción con IA (tono FincasYa)"
+                  aria-label="Mejorar redacción con IA"
+                  onClick={() => void handleImprove()}
+                  disabled={improving}
+                >
+                  {improving ? (
+                    <Spinner className="h-5 w-5" />
+                  ) : (
+                    <Sparkles className="h-6 w-6" strokeWidth={1.5} />
+                  )}
+                </button>
+              )}
               {draft.trim() ? (
                 <button
                   type="button"

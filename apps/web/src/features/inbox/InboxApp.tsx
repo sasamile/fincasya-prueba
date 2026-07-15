@@ -62,6 +62,12 @@ export default function App() {
     status: convStatus,
     loadMore,
   } = usePaginatedQuery(api.inbox.listConversations, listArgs, { initialNumItems: 60 });
+  // Evita el bucle: lista corta → siempre "al fondo" → loadMore → spinner
+  // cambia la altura → dispara scroll otra vez → loadMore sin fin.
+  const loadingMoreRef = useRef(false);
+  useEffect(() => {
+    if (convStatus !== 'LoadingMore') loadingMoreRef.current = false;
+  }, [convStatus]);
   const agentSettings = useQuery(api.agentSettings.getAgentSettings);
   const setGlobalAi = useMutation(api.agentSettings.setGlobalAiEnabled);
   const markRead = useMutation(api.inbox.markConversationRead);
@@ -439,10 +445,17 @@ export default function App() {
         <div
           className="flex-1 overflow-y-auto border-t border-border"
           onScroll={(e) => {
+            if (convStatus !== 'CanLoadMore' || loadingMoreRef.current) return;
             const el = e.currentTarget;
-            const nearBottom =
-              el.scrollHeight - el.scrollTop - el.clientHeight < 500;
-            if (nearBottom && convStatus === 'CanLoadMore') loadMore(60);
+            // Si el contenido no llena el panel, no hay "fondo" real: no auto-cargar
+            // (evita el spinner infinito con pocos chats visibles tras filtros).
+            if (el.scrollHeight <= el.clientHeight + 8) return;
+            const distanceFromBottom =
+              el.scrollHeight - el.scrollTop - el.clientHeight;
+            if (distanceFromBottom < 320) {
+              loadingMoreRef.current = true;
+              loadMore(60);
+            }
           }}
         >
           {convStatus === 'LoadingFirstPage' ? (
@@ -507,7 +520,11 @@ export default function App() {
               ) : convStatus === 'CanLoadMore' ? (
                 <button
                   type="button"
-                  onClick={() => loadMore(60)}
+                  onClick={() => {
+                    if (loadingMoreRef.current) return;
+                    loadingMoreRef.current = true;
+                    loadMore(60);
+                  }}
                   className="block w-full py-3 text-center text-[12px] text-muted-foreground transition-colors hover:text-foreground"
                 >
                   Cargar más conversaciones
