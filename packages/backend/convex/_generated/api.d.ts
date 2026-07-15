@@ -97,6 +97,7 @@ import type * as notificationSettings from "../notificationSettings.js";
 import type * as notifications from "../notifications.js";
 import type * as opportunities from "../opportunities.js";
 import type * as ownerAuth from "../ownerAuth.js";
+import type * as ownerGreeting from "../ownerGreeting.js";
 import type * as ownerPortal from "../ownerPortal.js";
 import type * as paymentPortal from "../paymentPortal.js";
 import type * as paymentReceipts from "../paymentReceipts.js";
@@ -211,6 +212,7 @@ declare const fullApi: ApiFromModules<{
   notifications: typeof notifications;
   opportunities: typeof opportunities;
   ownerAuth: typeof ownerAuth;
+  ownerGreeting: typeof ownerGreeting;
   ownerPortal: typeof ownerPortal;
   paymentPortal: typeof paymentPortal;
   paymentReceipts: typeof paymentReceipts;

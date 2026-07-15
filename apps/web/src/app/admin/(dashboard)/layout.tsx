@@ -204,6 +204,11 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         href: "/admin/automatizaciones",
         icon: Zap,
       },
+      {
+        label: "Saludo al propietario",
+        href: "/admin/saludo-propietario",
+        icon: Home,
+      },
     ],
   },
 ];

@@ -60,6 +60,7 @@ export const ADMIN_NAV_PERMISSIONS: Record<
     action: "read",
   },
   "/admin/automatizaciones": { module: "automations", action: "read" },
+  "/admin/saludo-propietario": { module: "automations", action: "read" },
 };
 
 export function isFullAdminRole(role: string | undefined): boolean {
@@ -183,6 +184,7 @@ export const ADMIN_ROUTE_PRIORITY = [
   "/admin/notifications",
   "/admin/whatsapp-temporal-message",
   "/admin/automatizaciones",
+  "/admin/saludo-propietario",
   "/admin/users",
   "/admin/roles",
   "/admin/habeas-data",
