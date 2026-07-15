@@ -7,6 +7,7 @@ import { api } from "@fincasya/backend/convex/_generated/api";
 import {
   Building2,
   CreditCard,
+  Download,
   Eye,
   EyeOff,
   Home,
@@ -57,6 +58,11 @@ import {
   ensurePropietarioLogin,
   getUserByEmail,
 } from "@/features/admin/api/users.api";
+import {
+  downloadOwnersExcel,
+  filterOwnersByFincas,
+  type OwnersFincasFilter,
+} from "@/features/admin/lib/export-owners-excel";
 
 type OwnerDirectoryRow = {
   id: string;
@@ -108,6 +114,8 @@ const EMPTY_FORM = {
 
 export function OwnersManager() {
   const [search, setSearch] = useState("");
+  const [fincasFilter, setFincasFilter] = useState<OwnersFincasFilter>("todos");
+  const [exporting, setExporting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<OwnerDirectoryRow | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -119,6 +127,9 @@ export function OwnersManager() {
   const [saving, setSaving] = useState(false);
 
   const owners = useQuery(api.propertyOwners.listDirectory, {
+    search: search.trim() || undefined,
+  });
+  const fincasSinDueno = useQuery(api.propertyOwners.listPropertiesWithoutOwner, {
     search: search.trim() || undefined,
   });
   const allProperties = useQuery(api.adminProperties.listAll, {});
@@ -153,7 +164,116 @@ export function OwnersManager() {
     return propertyOptions.filter((p) => p.label.toLowerCase().includes(q));
   }, [propertyOptions, propertyFilter]);
 
-  const isLoading = owners === undefined;
+  const isLoading =
+    owners === undefined ||
+    fincasSinDueno === undefined ||
+    allProperties === undefined;
+
+  const fincasCounts = useMemo(() => {
+    const list = owners ?? [];
+    const totalFincas = allProperties?.length ?? 0;
+    return {
+      todos: list.length,
+      con_fincas: list.filter((o) => o.properties.length > 0).length,
+      propietario_sin_finca: list.filter((o) => o.properties.length === 0).length,
+      fincas_sin_propietario: fincasSinDueno?.length ?? 0,
+      totalFincas,
+    };
+  }, [owners, fincasSinDueno, allProperties]);
+
+  const visibleOwners = useMemo(
+    () =>
+      fincasFilter === "fincas_sin_propietario"
+        ? []
+        : filterOwnersByFincas(owners ?? [], fincasFilter),
+    [owners, fincasFilter],
+  );
+
+  const visibleOrphanProperties = useMemo(() => {
+    if (fincasFilter !== "fincas_sin_propietario") return [];
+    return fincasSinDueno ?? [];
+  }, [fincasFilter, fincasSinDueno]);
+
+  function handleExportExcel() {
+    const ownerRows = owners ?? [];
+    const orphanRows = fincasSinDueno ?? [];
+    if (fincasFilter === "fincas_sin_propietario") {
+      if (!orphanRows.length) {
+        sileo.error({
+          title: "Nada que exportar",
+          description: "No hay fincas sin dueño en el listado.",
+          fill: "#fee2e2",
+        });
+        return;
+      }
+    } else if (!ownerRows.length) {
+      sileo.error({
+        title: "Nada que exportar",
+        description: "No hay propietarios en el listado actual.",
+        fill: "#fee2e2",
+      });
+      return;
+    }
+    setExporting(true);
+    try {
+      downloadOwnersExcel({
+        owners: ownerRows.map((o) => {
+          const email = o.propietarioCorreo?.trim().toLowerCase() ?? "";
+          const hasAccess =
+            Boolean(o.ownerUserId?.trim()) ||
+            (email ? loginEmails.has(email) : false);
+          return {
+            id: o.id,
+            propietarioNombre: o.propietarioNombre,
+            propietarioTratamiento: o.propietarioTratamiento,
+            propietarioTelefono: o.propietarioTelefono,
+            propietarioCorreo: o.propietarioCorreo,
+            propietarioCedula: o.propietarioCedula,
+            ownerUserId: hasAccess ? o.ownerUserId || "login" : undefined,
+            properties: o.properties.map((p) => ({
+              title: p.title,
+              code: p.code,
+            })),
+            bankAccounts: o.bankAccounts.map((a) => ({
+              bankName: a.bankName,
+              accountNumber: a.accountNumber,
+              accountType: a.accountType,
+              accountHolderName: a.accountHolderName,
+            })),
+          };
+        }),
+        orphanProperties: orphanRows.map((p) => ({
+          propertyId: p.propertyId,
+          title: p.title,
+          code: p.code,
+          location: p.location,
+          category: p.category,
+          active: p.active,
+        })),
+        filter: fincasFilter,
+      });
+      sileo.success({
+        title: "Excel descargado",
+        description:
+          fincasFilter === "fincas_sin_propietario"
+            ? "Fincas sin dueño asignado en el directorio."
+            : fincasFilter === "todos"
+              ? "Incluye propietarios y fincas sin dueño."
+              : fincasFilter === "con_fincas"
+                ? "Solo propietarios con fincas asociadas."
+                : "Solo propietarios sin ninguna finca.",
+        fill: "#f0fdf4",
+      });
+    } catch (err) {
+      sileo.error({
+        title: "No se pudo exportar",
+        description: err instanceof Error ? err.message : "Error desconocido",
+        fill: "#fee2e2",
+      });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   function syncDefaultPassword(cedula: string) {
     const pwd = digitsOnly(cedula);
@@ -370,24 +490,92 @@ export function OwnersManager() {
             Dueños de fincas, cuentas, acceso a /owner (contraseña = cédula por
             defecto).
           </p>
+          {!isLoading ? (
+            <p className="text-muted-foreground mt-2 text-xs">
+              {fincasCounts.todos} propietarios · {fincasCounts.totalFincas}{" "}
+              fincas en catálogo · {fincasCounts.fincas_sin_propietario} fincas
+              sin dueño en directorio
+            </p>
+          ) : null}
         </div>
-        <Button
-          onClick={openCreate}
-          className="rounded-2xl shadow-lg shadow-primary/20"
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Nuevo propietario
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={
+              isLoading ||
+              exporting ||
+              (fincasFilter === "fincas_sin_propietario"
+                ? !fincasSinDueno?.length
+                : !owners?.length)
+            }
+            onClick={handleExportExcel}
+            className="rounded-2xl"
+          >
+            {exporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            Exportar Excel
+          </Button>
+          <Button
+            onClick={openCreate}
+            className="rounded-2xl shadow-lg shadow-primary/20"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Nuevo propietario
+          </Button>
+        </div>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, cédula, teléfono o finca…"
-          className="rounded-xl pl-9"
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-md flex-1">
+          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nombre, cédula, teléfono o finca…"
+            className="rounded-xl pl-9"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              { id: "todos", label: "Propietarios", count: fincasCounts.todos },
+              {
+                id: "con_fincas",
+                label: "Con fincas",
+                count: fincasCounts.con_fincas,
+              },
+              {
+                id: "propietario_sin_finca",
+                label: "Dueño sin finca",
+                count: fincasCounts.propietario_sin_finca,
+              },
+              {
+                id: "fincas_sin_propietario",
+                label: "Fincas sin dueño",
+                count: fincasCounts.fincas_sin_propietario,
+              },
+            ] as const
+          ).map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              onClick={() => setFincasFilter(chip.id)}
+              className={cn(
+                "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+                fincasFilter === chip.id
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80",
+              )}
+            >
+              {chip.label}
+              <span className="ml-1.5 opacity-80">{chip.count}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {isLoading ? (
@@ -404,9 +592,74 @@ export function OwnersManager() {
             Crear el primero
           </Button>
         </div>
+      ) : fincasFilter === "fincas_sin_propietario" ? (
+        visibleOrphanProperties.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-muted/20 py-16 text-center">
+            <Building2 className="text-muted-foreground/40 mx-auto mb-3 h-10 w-10" />
+            <p className="text-muted-foreground text-sm font-medium">
+              Todas las fincas tienen dueño en el directorio
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {visibleOrphanProperties.map((p) => (
+              <article
+                key={p.propertyId}
+                className="rounded-2xl border border-amber-500/30 bg-card p-5 shadow-sm"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/15 text-amber-700">
+                        <Building2 className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold tracking-tight">
+                          {p.title}
+                        </h2>
+                        <p className="text-muted-foreground text-xs">
+                          {p.code ? `Código ${p.code}` : "Sin código"}
+                          {p.location ? ` · ${p.location}` : ""}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-[10px]">
+                        Sin dueño
+                      </Badge>
+                    </div>
+                    <p className="text-muted-foreground text-sm">
+                      Esta finca existe en el catálogo pero no tiene propietario
+                      asignado en el directorio.
+                    </p>
+                  </div>
+                  <Button
+                    asChild
+                    variant="outline"
+                    className="shrink-0 rounded-xl"
+                  >
+                    <Link href={`/admin/properties/${p.propertyId}/owner`}>
+                      Asignar dueño
+                      <ExternalLink className="ml-2 h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )
+      ) : visibleOwners.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-muted/20 py-16 text-center">
+          <Home className="text-muted-foreground/40 mx-auto mb-3 h-10 w-10" />
+          <p className="text-muted-foreground text-sm font-medium">
+            {fincasFilter === "propietario_sin_finca"
+              ? "Ningún propietario sin fincas asociadas"
+              : fincasFilter === "con_fincas"
+                ? "Ningún propietario con fincas asociadas"
+                : "Sin resultados"}
+          </p>
+        </div>
       ) : (
         <div className="grid gap-4">
-          {owners.map((owner) => (
+          {visibleOwners.map((owner) => (
             <article
               key={owner.id}
               className="rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:shadow-md"

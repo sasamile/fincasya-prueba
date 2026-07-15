@@ -39,6 +39,7 @@ import { CatalogModal } from '@/features/inbox/components/CatalogModal';
 import { ContactInfo } from '@/features/inbox/components/ContactInfo';
 import { EmojiPicker } from '@/features/inbox/components/EmojiPicker';
 import { MessageMenu } from '@/features/inbox/components/MessageMenu';
+import { SwipeToReply } from '@/features/inbox/components/SwipeToReply';
 import { LabelPicker } from '@/features/inbox/components/LabelPicker';
 import { QuickReplyManager } from '@/features/inbox/components/QuickReplyManager';
 import { ASESOR_TOOLS, type AsesorTool } from '@/features/inbox/components/IconRail';
@@ -394,13 +395,18 @@ function MessageBubble({
         isUser ? 'justify-start' : 'justify-end',
       )}
     >
-      <div
-        className={cn(
-          'group relative w-fit max-w-[min(80%,26rem)]',
-          hasProduct || isMedia ? 'p-1.5' : 'px-2 py-1.5',
-          isUser ? 'bubble-in' : 'bubble-out',
-        )}
+      <SwipeToReply
+        direction={isUser ? 'right' : 'left'}
+        disabled={!onReply || !message.wamid}
+        onReply={() => onReply?.(message)}
       >
+        <div
+          className={cn(
+            'group relative w-fit max-w-[min(80%,26rem)]',
+            hasProduct || isMedia ? 'p-1.5' : 'px-2 py-1.5',
+            isUser ? 'bubble-in' : 'bubble-out',
+          )}
+        >
         {onReply && (
           <MessageMenu
             conversationId={conversationId}
@@ -528,7 +534,8 @@ function MessageBubble({
             {message.reaction}
           </span>
         )}
-      </div>
+        </div>
+      </SwipeToReply>
     </div>
   );
 }

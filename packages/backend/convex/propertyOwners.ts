@@ -272,6 +272,49 @@ export const listDirectory = query({
   },
 });
 
+/** Fincas del catálogo sin dueño en el directorio (sin ownerInfo ni nombre en la finca). */
+export const listPropertiesWithoutOwner = query({
+  args: { search: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const search = norm(args.search);
+    const [ownerInfos, properties] = await Promise.all([
+      ctx.db.query('propertyOwnerInfo').collect(),
+      ctx.db.query('properties').collect(),
+    ]);
+
+    const coveredPropertyIds = new Set(
+      ownerInfos.map((info) => String(info.propertyId)),
+    );
+
+    let orphans = properties
+      .filter((p) => {
+        const pid = String(p._id);
+        if (coveredPropertyIds.has(pid)) return false;
+        if (p.propietarioNombre?.trim()) return false;
+        return true;
+      })
+      .map((p) => ({
+        propertyId: String(p._id),
+        title: p.title ?? 'Sin título',
+        code: p.code,
+        location: p.location,
+        category: p.category,
+        active: p.active !== false,
+        updatedAt: p.updatedAt ?? 0,
+      }))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+
+    if (search.length >= 2) {
+      orphans = orphans.filter((p) => {
+        const blob = norm([p.title, p.code, p.location].join(' '));
+        return blob.includes(search);
+      });
+    }
+
+    return orphans;
+  },
+});
+
 export const saveProfile = mutation({
   args: {
     groupId: v.optional(v.string()),
