@@ -136,6 +136,8 @@ export default defineSchema(
       attended: v.optional(v.boolean()),
       /** Convex `user._id` del Experto asignado (inbox). */
       assignedUserId: v.optional(v.string()),
+      /** Nombre del Experto asignado (denormalizado para mostrar en la lista). */
+      assignedUserName: v.optional(v.string()),
       /**
        * Etiquetas de negocio (inbox): varias por conversación; strings libres
        * (predefinidas en UI + personalizadas).

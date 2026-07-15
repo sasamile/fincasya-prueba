@@ -1,6 +1,6 @@
 /** Fila de conversación en el sidebar (estilo WhatsApp). */
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { Bot, Image, Mic, Paperclip, Pin, Store, Video } from 'lucide-react';
+import { Bot, Check, Image, Mic, Paperclip, Pin, Store, User, Video } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatListTime } from '@/lib/format';
 import { Avatar, DeliveryTick } from '@/features/inbox/components/primitives';
@@ -11,11 +11,16 @@ export function ConversationItem({
   active,
   onClick,
   onContextMenu,
+  selectMode = false,
+  selected = false,
 }: {
   conv: ConversationRow;
   active: boolean;
   onClick: () => void;
   onContextMenu?: (e: ReactMouseEvent) => void;
+  /** Modo selección múltiple (menú ⋮ → asignar / marcar leídos). */
+  selectMode?: boolean;
+  selected?: boolean;
 }) {
   const p = conv.preview;
   const isProduct = p?.type === 'product';
@@ -54,8 +59,21 @@ export function ConversationItem({
         'flex w-full items-start gap-3 border-b border-border/40 px-4 py-3 text-left transition-colors hover:bg-muted',
         active && 'bg-accent',
         conv.pinned && 'bg-muted/30',
+        selectMode && selected && 'bg-primary/10',
       )}
     >
+      {selectMode && (
+        <span
+          className={cn(
+            'mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
+            selected
+              ? 'border-primary bg-primary text-white'
+              : 'border-muted-foreground/40',
+          )}
+        >
+          {selected && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+        </span>
+      )}
       <Avatar name={conv.name} size="md" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
@@ -79,6 +97,15 @@ export function ConversationItem({
               ))}
             </span>
           ) : null}
+          {conv.assignedUserName && (
+            <span
+              className="ml-auto flex shrink-0 items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              title={`Asignado a ${conv.assignedUserName}`}
+            >
+              <User className="h-2.5 w-2.5" />
+              {conv.assignedUserName.split(' ')[0]}
+            </span>
+          )}
         </div>
         <div className="mt-0.5 flex items-center gap-1 text-[12.5px] text-muted-foreground">
           {p?.outbound && <DeliveryTick status={p.whatsappStatus} />}

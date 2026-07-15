@@ -24,19 +24,40 @@ import { ConversationItem } from '@/features/inbox/components/ConversationItem';
 import { IconRail, type AsesorTool } from '@/features/inbox/components/IconRail';
 import { AsesorPanel } from '@/features/inbox/components/AsesorPanel';
 import { ChatPanel } from '@/features/inbox/components/ChatPanel';
+import {
+  InboxActionsModal,
+  type DateRange,
+  type Operator,
+} from '@/features/inbox/components/InboxActionsModal';
+import { authClient } from '@/lib/auth-client';
 import type { ConversationRow, Filter } from '@/features/inbox/types';
 
 export default function App() {
+  // Filtros del menú ⋮ (fecha + vendedor asignado) → se pasan a la query para
+  // que la paginación cargue el rango correcto (no filtramos solo lo ya cargado).
+  const [dateFilter, setDateFilter] = useState<DateRange | null>(null);
+  const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null);
+  const listArgs = useMemo(() => {
+    const a: { from?: number; to?: number; assignedUserId?: string } = {};
+    if (dateFilter?.from != null) a.from = dateFilter.from;
+    if (dateFilter?.to != null) a.to = dateFilter.to;
+    if (assigneeFilter) a.assignedUserId = assigneeFilter;
+    return a;
+  }, [dateFilter, assigneeFilter]);
+
   // Scroll infinito: se cargan tandas de 60 y se pide más al llegar al fondo.
   const {
     results: conversations,
     status: convStatus,
     loadMore,
-  } = usePaginatedQuery(api.inbox.listConversations, {}, { initialNumItems: 60 });
+  } = usePaginatedQuery(api.inbox.listConversations, listArgs, { initialNumItems: 60 });
   const agentSettings = useQuery(api.agentSettings.getAgentSettings);
   const setGlobalAi = useMutation(api.agentSettings.setGlobalAiEnabled);
   const markRead = useMutation(api.inbox.markConversationRead);
   const setArchived = useMutation(api.inbox.setConversationArchived);
+  const assignConversations = useMutation(api.inbox.assignConversations);
+  const assignByRange = useMutation(api.inbox.assignByRange);
+  const markReadByRange = useMutation(api.inbox.markReadByRange);
   const [selectedId, setSelectedId] = useState<ConversationRow['conversationId'] | null>(null);
   const [activeTool, setActiveTool] = useState<AsesorTool | null>(null);
   const [search, setSearch] = useState('');
@@ -45,10 +66,69 @@ export default function App() {
   const [ctxMenu, setCtxMenu] = useState<CtxTarget | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showActions, setShowActions] = useState(false);
+  // Modo selección múltiple (asignar / marcar leídos por selección manual).
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [barOpId, setBarOpId] = useState('');
   const [pendingTemplatePhone, setPendingTemplatePhone] = useState<string | null>(
     null,
   );
   const labels = useQuery(api.labels.listLabels);
+
+  // Operador logueado (para "míos") y lista de vendedores (para asignar).
+  const { data: session } = authClient.useSession();
+  const currentUser: Operator | null = session?.user
+    ? { id: String(session.user.id), name: session.user.name ?? 'Yo' }
+    : null;
+  const usersList = useQuery(api.users.list, {}) as
+    | Array<{ _id?: string; id?: string; name?: string; email?: string }>
+    | undefined;
+  const operators: Operator[] = useMemo(
+    () =>
+      (usersList ?? [])
+        .map((u) => ({
+          id: String(u._id ?? u.id ?? ''),
+          name: u.name ?? u.email ?? 'Usuario',
+        }))
+        .filter((o) => o.id),
+    [usersList],
+  );
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setBarOpId('');
+  }
+  async function assignSelected() {
+    const op =
+      operators.find((o) => o.id === barOpId) ??
+      (currentUser?.id === barOpId ? currentUser : null);
+    if (!op || selectedIds.size === 0) return;
+    const ids = [...selectedIds] as Array<Id<'conversations'>>;
+    const r = await assignConversations({
+      conversationIds: ids,
+      assignedUserId: op.id,
+      assignedUserName: op.name,
+    });
+    toast.success(`${r.done} chats asignados a ${op.name.split(' ')[0]}`);
+    exitSelectMode();
+  }
+  async function markReadSelected() {
+    if (selectedIds.size === 0) return;
+    const ids = [...selectedIds] as Array<Id<'conversations'>>;
+    await Promise.all(ids.map((id) => markRead({ conversationId: id })));
+    toast.success(`${ids.length} chats marcados como leídos`);
+    exitSelectMode();
+  }
 
   const archived = useMemo(
     () => conversations.filter((c) => c.archived),
@@ -215,8 +295,17 @@ export default function App() {
                 >
                   <Plus className="h-5 w-5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative h-9 w-9 rounded-full text-muted-foreground"
+                  title="Filtros y acciones"
+                  onClick={() => setShowActions(true)}
+                >
                   <MoreVertical className="h-5 w-5" />
+                  {(dateFilter || assigneeFilter) && (
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />
+                  )}
                 </Button>
               </div>
             </>
@@ -245,6 +334,36 @@ export default function App() {
             setLabelFilter={setLabelFilter}
             labels={labels}
           />
+        )}
+
+        {/* Filtros activos del menú ⋮ (fecha / vendedor) con botón para quitar */}
+        {!showArchived && (dateFilter || assigneeFilter) && (
+          <div className="flex flex-wrap items-center gap-2 px-3 pb-2">
+            {dateFilter && (
+              <button
+                type="button"
+                onClick={() => setDateFilter(null)}
+                className="flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-[11.5px] font-medium text-primary"
+              >
+                📅 {dateFilter.label}
+                <span className="text-primary/70">✕</span>
+              </button>
+            )}
+            {assigneeFilter && (
+              <button
+                type="button"
+                onClick={() => setAssigneeFilter(null)}
+                className="flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-[11.5px] font-medium text-primary"
+              >
+                👤{' '}
+                {currentUser?.id === assigneeFilter
+                  ? 'Míos'
+                  : operators.find((o) => o.id === assigneeFilter)?.name.split(' ')[0] ??
+                    'Asignado'}
+                <span className="text-primary/70">✕</span>
+              </button>
+            )}
+          </div>
         )}
 
         <div
@@ -290,7 +409,13 @@ export default function App() {
                     key={c.conversationId}
                     conv={c}
                     active={c.conversationId === selectedId}
-                    onClick={() => openConversation(c)}
+                    selectMode={selectMode}
+                    selected={selectedIds.has(String(c.conversationId))}
+                    onClick={() =>
+                      selectMode
+                        ? toggleSelect(String(c.conversationId))
+                        : openConversation(c)
+                    }
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setCtxMenu({
@@ -321,6 +446,55 @@ export default function App() {
             </>
           )}
         </div>
+
+        {/* Barra de acción del modo selección múltiple */}
+        {selectMode && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border bg-card px-3 py-2.5">
+            <span className="text-[12.5px] font-medium">
+              {selectedIds.size} seleccionados
+            </span>
+            <select
+              value={barOpId}
+              onChange={(e) => setBarOpId(e.target.value)}
+              className="ml-auto rounded-md border border-border bg-input px-2 py-1 text-[12px]"
+            >
+              <option value="">Asignar a…</option>
+              {currentUser && (
+                <option value={currentUser.id}>{currentUser.name} (yo)</option>
+              )}
+              {operators
+                .filter((o) => o.id !== currentUser?.id)
+                .map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+            </select>
+            <button
+              type="button"
+              disabled={!barOpId || selectedIds.size === 0}
+              onClick={() => void assignSelected()}
+              className="rounded-md bg-primary px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
+            >
+              Asignar
+            </button>
+            <button
+              type="button"
+              disabled={selectedIds.size === 0}
+              onClick={() => void markReadSelected()}
+              className="rounded-md border border-border px-3 py-1.5 text-[12px] disabled:opacity-50"
+            >
+              Leídos
+            </button>
+            <button
+              type="button"
+              onClick={exitSelectMode}
+              className="rounded-md px-2 py-1.5 text-[12px] text-muted-foreground hover:bg-muted"
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
       </aside>
       )}
 
@@ -365,6 +539,47 @@ export default function App() {
           onClose={() => setCtxMenu(null)}
           onDeleted={() => {
             if (selectedId === ctxMenu.conversationId) setSelectedId(null);
+          }}
+        />
+      )}
+
+      {/* Modal de filtros y acciones (botón ⋮ de la cabecera) */}
+      {showActions && (
+        <InboxActionsModal
+          onClose={() => setShowActions(false)}
+          operators={operators}
+          currentUser={currentUser}
+          dateFilter={dateFilter}
+          assigneeFilter={assigneeFilter}
+          onApplyDateFilter={(r) => {
+            setDateFilter(r);
+            setShowActions(false);
+          }}
+          onApplyAssigneeFilter={(id) => {
+            setAssigneeFilter(id);
+            setShowActions(false);
+          }}
+          onMarkReadRange={async (r) => {
+            const res = await markReadByRange({ from: r.from, to: r.to });
+            toast.success(
+              `${res.done} chats marcados como leídos${res.capped ? ' (tope por lote)' : ''}`,
+            );
+          }}
+          onAssignRange={async (r, op) => {
+            const res = await assignByRange({
+              from: r.from,
+              to: r.to,
+              assignedUserId: op.id,
+              assignedUserName: op.name,
+            });
+            toast.success(
+              `${res.done} chats asignados a ${op.name.split(' ')[0]}${res.capped ? ' (tope por lote)' : ''}`,
+            );
+          }}
+          onStartManualSelect={() => {
+            setShowActions(false);
+            setSelectMode(true);
+            setSelectedIds(new Set());
           }}
         />
       )}

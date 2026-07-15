@@ -19,7 +19,7 @@ import {
 } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
-import type { QueryCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
 import { sendWhatsappReaction, sendWhatsappText } from './lib/ycloud';
@@ -53,15 +53,34 @@ function previewSlice(text: string, max: number): string {
 
 export const listConversations = query({
   // Requerido por usePaginatedQuery (si es optional, el typecheck de Next falla).
-  args: { paginationOpts: paginationOptsValidator },
-  handler: async (ctx, { paginationOpts }) => {
+  args: {
+    paginationOpts: paginationOptsValidator,
+    // Filtro por fecha del último mensaje (ms). El cliente calcula los límites
+    // en hora local (Colombia) para "hoy/ayer/antier/rango".
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    // Filtro por Experto asignado (para "ver solo los míos / de X").
+    assignedUserId: v.optional(v.string()),
+  },
+  handler: async (ctx, { paginationOpts, from, to, assignedUserId }) => {
     // Paginado (scroll infinito en el panel): se cargan tandas por orden de
     // último mensaje; el cliente pide más al llegar al fondo de la lista.
-    const result = await ctx.db
-      .query('conversations')
-      .withIndex('by_last_message')
-      .order('desc')
-      .paginate(paginationOpts);
+    // Con rango de fechas se acota el índice (seek directo, sin escanear todo).
+    const useRange = from != null || to != null;
+    const indexed = useRange
+      ? ctx.db.query('conversations').withIndex('by_last_message', (ix) =>
+          ix
+            .gte('lastMessageAt', from ?? 0)
+            .lte('lastMessageAt', to ?? Number.MAX_SAFE_INTEGER),
+        )
+      : ctx.db.query('conversations').withIndex('by_last_message');
+    let ordered = indexed.order('desc');
+    if (assignedUserId != null) {
+      ordered = ordered.filter((f) =>
+        f.eq(f.field('assignedUserId'), assignedUserId),
+      );
+    }
+    const result = await ordered.paginate(paginationOpts);
     // Catálogo de listas/etiquetas (una vez) para resolver los ids por conversación.
     const allLabels = await ctx.db.query('labels').collect();
     const labelById = new Map(allLabels.map((l) => [String(l._id), l]));
@@ -70,11 +89,29 @@ export const listConversations = query({
     for (const c of result.page) {
       if (c.deletedAt) continue;
       const contact = await ctx.db.get(c.contactId);
-      const lastMsg = await ctx.db
+      // Traemos la cola reciente (desc) para: (a) preview del último mensaje y
+      // (b) contar "no leídos" REALES. No confiamos en `inboxUnreadCount`: ese
+      // contador solo se reseteaba al abrir el chat, así que quedaba inflado en
+      // chats que el bot ya respondió (badge fantasma).
+      const recent = await ctx.db
         .query('messages')
         .withIndex('by_conversation', (q) => q.eq('conversationId', c._id))
         .order('desc')
-        .first();
+        .take(50);
+      const visible = recent.filter((m) => !m.deletedAt);
+      const lastMsg = visible[0] ?? null;
+      // No leídos = mensajes del cliente al final de la conversación sin respuesta
+      // nuestra. Cortamos al primer mensaje 'assistant' (ya respondimos) o al
+      // primero ya leído (createdAt <= inboxLastReadAt). Las notas 'system' no
+      // cuentan ni cortan.
+      const lastReadAt = c.inboxLastReadAt ?? 0;
+      let unread = 0;
+      for (const m of visible) {
+        if (m.sender === 'assistant') break;
+        if (m.sender === 'system') continue;
+        if (m.createdAt <= lastReadAt) break;
+        unread++;
+      }
       const labels = (c.labelIds ?? [])
         .map((id) => labelById.get(String(id)))
         .filter((l): l is NonNullable<typeof l> => !!l)
@@ -88,6 +125,8 @@ export const listConversations = query({
         unread: c.inboxUnreadCount ?? 0,
         priority: c.priority ?? null,
         operationalState: c.operationalState ?? null,
+        assignedUserId: c.assignedUserId ?? null,
+        assignedUserName: c.assignedUserName ?? null,
         lastMessageAt: c.lastMessageAt ?? c.createdAt,
         aiEligible: isQuickEligibleForAi(c).eligible,
         aiManualOverride: c.aiManualOverride ?? false,
@@ -859,6 +898,105 @@ export const markConversationUnread = mutation({
       inboxUnreadCount: Math.max(1, conv?.inboxUnreadCount ?? 0),
       inboxLastReadAt: undefined,
     });
+  },
+});
+
+/* ─────────────────────────────────────────────────────────────
+ * Acciones en bloque del inbox (menú ⋮): filtros por fecha, asignar
+ * chats a un Experto y marcar como leídos por rango. Los límites de
+ * fecha los calcula el cliente en hora local (Colombia) y llegan en ms.
+ * ───────────────────────────────────────────────────────────── */
+
+const BULK_LIMIT = 2000;
+
+/** Junta las conversaciones activas (no borradas/archivadas) en un rango de
+ * último mensaje, opcionalmente filtradas por Experto asignado. */
+async function collectConversationsByRange(
+  ctx: MutationCtx,
+  from?: number,
+  to?: number,
+  assignedUserId?: string,
+) {
+  const useRange = from != null || to != null;
+  const indexed = useRange
+    ? ctx.db.query('conversations').withIndex('by_last_message', (ix) =>
+        ix
+          .gte('lastMessageAt', from ?? 0)
+          .lte('lastMessageAt', to ?? Number.MAX_SAFE_INTEGER),
+      )
+    : ctx.db.query('conversations').withIndex('by_last_message');
+  let q = indexed.order('desc');
+  if (assignedUserId != null) {
+    q = q.filter((f) => f.eq(f.field('assignedUserId'), assignedUserId));
+  }
+  const rows = await q.take(BULK_LIMIT);
+  return rows.filter((c) => !c.deletedAt && !c.archived);
+}
+
+/** Asigna (o desasigna con assignedUserId=null) una selección manual de chats. */
+export const assignConversations = mutation({
+  args: {
+    conversationIds: v.array(v.id('conversations')),
+    assignedUserId: v.union(v.string(), v.null()),
+    assignedUserName: v.optional(v.string()),
+  },
+  handler: async (ctx, { conversationIds, assignedUserId, assignedUserName }) => {
+    const patch: {
+      assignedUserId: string | undefined;
+      assignedUserName: string | undefined;
+    } = assignedUserId
+      ? { assignedUserId, assignedUserName: assignedUserName?.trim() || undefined }
+      : { assignedUserId: undefined, assignedUserName: undefined };
+    let done = 0;
+    for (const id of conversationIds) {
+      await ctx.db.patch(id, patch);
+      done++;
+    }
+    return { done };
+  },
+});
+
+/** Asigna en bloque todas las conversaciones de un rango de fechas a un Experto. */
+export const assignByRange = mutation({
+  args: {
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    assignedUserId: v.union(v.string(), v.null()),
+    assignedUserName: v.optional(v.string()),
+  },
+  handler: async (ctx, { from, to, assignedUserId, assignedUserName }) => {
+    const rows = await collectConversationsByRange(ctx, from, to);
+    const patch: {
+      assignedUserId: string | undefined;
+      assignedUserName: string | undefined;
+    } = assignedUserId
+      ? { assignedUserId, assignedUserName: assignedUserName?.trim() || undefined }
+      : { assignedUserId: undefined, assignedUserName: undefined };
+    let done = 0;
+    for (const c of rows) {
+      await ctx.db.patch(c._id, patch);
+      done++;
+    }
+    return { done, capped: rows.length >= BULK_LIMIT };
+  },
+});
+
+/** Marca como leídas en bloque todas las conversaciones de un rango de fechas. */
+export const markReadByRange = mutation({
+  args: {
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    assignedUserId: v.optional(v.string()),
+  },
+  handler: async (ctx, { from, to, assignedUserId }) => {
+    const now = Date.now();
+    const rows = await collectConversationsByRange(ctx, from, to, assignedUserId);
+    let done = 0;
+    for (const c of rows) {
+      await ctx.db.patch(c._id, { inboxUnreadCount: 0, inboxLastReadAt: now });
+      done++;
+    }
+    return { done, capped: rows.length >= BULK_LIMIT };
   },
 });
 
