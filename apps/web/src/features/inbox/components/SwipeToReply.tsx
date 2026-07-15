@@ -17,11 +17,13 @@ export function SwipeToReply({
   direction,
   onReply,
   disabled = false,
+  className,
 }: {
   children: ReactNode;
   direction: SwipeDirection;
   onReply: () => void;
   disabled?: boolean;
+  className?: string;
 }) {
   const isMobile = useIsMobile();
   const slideRef = useRef<HTMLDivElement>(null);
@@ -113,10 +115,17 @@ export function SwipeToReply({
     };
   }, [enabled, direction]);
 
-  if (!enabled) return <>{children}</>;
+  if (!enabled) {
+    return <div className={cn('w-fit max-w-full shrink-0', className)}>{children}</div>;
+  }
 
   return (
-    <div className="relative w-fit max-w-full touch-pan-y">
+    <div
+      className={cn(
+        'relative inline-flex max-w-full shrink-0 touch-pan-y',
+        className,
+      )}
+    >
       <div
         aria-hidden
         className={cn(
@@ -132,7 +141,10 @@ export function SwipeToReply({
       </div>
       <div
         ref={slideRef}
-        className={cn('relative z-1', animating && 'transition-transform duration-200 ease-out')}
+        className={cn(
+          'relative z-1 inline-flex w-fit max-w-full',
+          animating && 'transition-transform duration-200 ease-out',
+        )}
         style={{ transform: `translateX(${offset}px)` }}
       >
         {children}

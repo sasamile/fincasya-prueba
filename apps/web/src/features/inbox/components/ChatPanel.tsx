@@ -398,11 +398,12 @@ function MessageBubble({
       <SwipeToReply
         direction={isUser ? 'right' : 'left'}
         disabled={!onReply || !message.wamid}
+        className="max-w-[min(85%,26rem)]"
         onReply={() => onReply?.(message)}
       >
         <div
           className={cn(
-            'group relative w-fit max-w-[min(80%,26rem)]',
+            'group relative w-fit max-w-full',
             hasProduct || isMedia ? 'p-1.5' : 'px-2 py-1.5',
             isUser ? 'bubble-in' : 'bubble-out',
           )}
