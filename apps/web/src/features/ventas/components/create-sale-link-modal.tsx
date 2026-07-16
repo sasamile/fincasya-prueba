@@ -99,9 +99,7 @@ const schema = z
     advancePaymentAmount: z.number().min(0, "Ingresa el abono"),
     boldSurchargePercent: z.number().min(0).max(30),
     generateBoldLink: z.boolean(),
-    selectedBankAccountIds: z
-      .array(z.string())
-      .min(1, "Selecciona al menos una cuenta bancaria"),
+    selectedBankAccountIds: z.array(z.string()),
     notes: z.string(),
   })
   .superRefine((data, ctx) => {
@@ -131,6 +129,17 @@ const schema = z
         code: "custom",
         message: "El abono no puede superar el valor total",
         path: ["advancePaymentAmount"],
+      });
+    }
+    // Con Bold basta el link; sin Bold hace falta al menos una cuenta para transferencia.
+    if (
+      !data.generateBoldLink &&
+      data.selectedBankAccountIds.length === 0
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Selecciona al menos una cuenta bancaria (o activa Bold)",
+        path: ["selectedBankAccountIds"],
       });
     }
   });
@@ -1557,8 +1566,8 @@ export function CreateSaleLinkModal({
                       : ""}
                     . Requiere{" "}
                     <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
-                      BOLD_API_KEY
-                    </code>{" "}
+                      BOLD_IDENTIDAD_KEY
+                    </code>
                     en Convex.
                   </span>
                 </div>
@@ -1574,8 +1583,21 @@ export function CreateSaleLinkModal({
               render={() => (
                 <FormItem>
                   <FormLabel className="text-sm font-semibold">
-                    Cuentas bancarias para el pago *
+                    Cuentas bancarias para el pago
+                    {generateBoldLink ? (
+                      <span className="ml-1 font-normal text-muted-foreground">
+                        (opcional con Bold)
+                      </span>
+                    ) : (
+                      " *"
+                    )}
                   </FormLabel>
+                  {generateBoldLink ? (
+                    <p className="text-xs text-muted-foreground">
+                      Puedes crear el link solo con Bold, o sumar una o más
+                      cuentas para transferencia.
+                    </p>
+                  ) : null}
                   {!hasAnyBankHolders && !selectedPropertyId ? (
                     <p className="text-sm text-muted-foreground">
                       Selecciona una finca o agrega cuentas en{" "}

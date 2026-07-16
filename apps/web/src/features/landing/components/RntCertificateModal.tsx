@@ -61,8 +61,7 @@ export function RntCertificateModal({
           Math.min(window.innerWidth - 24, 920);
         const rendered = await renderPdfPagesFitWidth(pdfUrl, width);
         if (!cancelled) setPages(rendered);
-      } catch (err) {
-        console.error("[rnt-modal] render falló:", err);
+      } catch {
         if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);

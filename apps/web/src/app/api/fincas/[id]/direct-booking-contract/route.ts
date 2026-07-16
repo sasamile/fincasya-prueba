@@ -90,6 +90,7 @@ export async function POST(
       location: (property as { location?: string }).location,
       capacity: (property as { capacity?: number }).capacity,
       features: (property as { features?: unknown[] }).features,
+      zoneOrder: (property as { zoneOrder?: string[] }).zoneOrder,
     };
 
     const contractNumber = resolveContractNumber(dto, finca);

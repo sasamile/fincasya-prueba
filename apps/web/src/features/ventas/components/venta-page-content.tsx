@@ -7,8 +7,8 @@
  *
  * Pasos: Resumen · Mis datos · En revisión · Contrato · Confirmación · Check-in.
  */
-import { useState, useEffect } from "react";
-import { useQuery } from "convex/react";
+import { useState, useEffect, useRef } from "react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -66,6 +66,7 @@ export type SaleLinkPublicData = {
   boldPaymentUrl?: string;
   boldPaymentAmount?: number;
   boldSurchargePercent?: number;
+  boldPaymentStatus?: string;
   bankAccounts: Array<{
     id: string;
     bankName: string;
@@ -138,11 +139,17 @@ const STEPS = [
 interface Props {
   token: string;
   validatedParam?: string;
+  boldReturnParam?: string;
 }
 
-export function VentaPageContent({ token, validatedParam }: Props) {
+export function VentaPageContent({
+  token,
+  validatedParam,
+  boldReturnParam,
+}: Props) {
   const [mounted, setMounted] = useState(false);
   const raw = useQuery(api.saleLinks.getPublicByToken, { token });
+  const syncBold = useAction(api.saleLinks.syncBoldPaymentStatus);
   const data = (raw ?? null) as SaleLinkPublicData | null;
   const loading = raw === undefined;
 
@@ -210,6 +217,43 @@ export function VentaPageContent({ token, validatedParam }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validatedParam, data?.paymentValidated]);
+
+  // Al volver de Bold (?bold=return), consultamos el estado del link por API.
+  const boldSyncTried = useRef(false);
+  useEffect(() => {
+    if (boldSyncTried.current) return;
+    if (!data?.boldPaymentUrl || data.paymentValidated) return;
+    if (boldReturnParam !== "return" && boldReturnParam !== "1") return;
+    boldSyncTried.current = true;
+    void (async () => {
+      try {
+        const res = await syncBold({ token, checkedBy: "cliente-retorno" });
+        if (res.paid) {
+          if (res.awaitingClientData) {
+            toast.success(
+              "Pago Bold confirmado. Completa tus datos en el portal para continuar.",
+            );
+          } else {
+            toast.success("¡Pago Bold confirmado!");
+          }
+        } else if (res.ok) {
+          toast.message(
+            `Bold aún no confirma el pago (estado: ${res.status ?? "pendiente"}). Si ya pagaste, espera un momento y pulsa “Ya pagué”.`,
+          );
+        } else {
+          toast.error(res.error ?? "No se pudo consultar Bold");
+        }
+      } catch {
+        toast.error("No se pudo verificar el pago Bold");
+      }
+    })();
+  }, [
+    boldReturnParam,
+    data?.boldPaymentUrl,
+    data?.paymentValidated,
+    syncBold,
+    token,
+  ]);
 
   if (!mounted || loading) {
     return (

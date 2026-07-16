@@ -141,13 +141,92 @@ export function formatFeatureContractLine(name: string, count: number): string {
   return label;
 }
 
-export function formatFincaFeaturesPlain(features: unknown[]): string {
-  const items = aggregatePropertyFeatureCounts(features);
-  if (!items.length) return "";
-  return items
-    .map(({ name, count }) => formatFeatureContractLine(name, count))
-    .filter(Boolean)
-    .join("\n");
+/** Zona que representa una habitación / dormitorio (p. ej. "HABITACIÓN 1"). */
+export function isBedroomZoneName(zone: string): boolean {
+  const z = zone.trim();
+  if (!z) return false;
+  return /habitaci[oó]n/i.test(z) || /dormitorio/i.test(z);
+}
+
+/**
+ * Cuenta habitaciones a partir de las zonas de la finca (admin:
+ * HABITACIÓN 1, HABITACIÓN 2…). Usa `zoneOrder` si viene; si no, las zonas
+ * únicas presentes en `features[].zone`.
+ */
+export function countBedroomZones(
+  features: unknown[],
+  zoneOrder?: string[] | null,
+): number {
+  const zones = new Set<string>();
+  const add = (raw: string) => {
+    const t = raw.trim();
+    if (!t || !isBedroomZoneName(t)) return;
+    zones.add(t.toUpperCase().normalize("NFD").replace(/\p{M}/gu, ""));
+  };
+
+  if (zoneOrder?.length) {
+    for (const z of zoneOrder) add(String(z ?? ""));
+  } else if (features?.length) {
+    for (const f of features) {
+      if (!f || typeof f !== "object") continue;
+      const z = (f as { zone?: string }).zone;
+      if (typeof z === "string") add(z);
+    }
+  }
+  return zones.size;
+}
+
+export function formatHabitacionesContractLine(
+  count: number | string | null | undefined,
+): string {
+  const n =
+    typeof count === "number"
+      ? count
+      : parseInt(String(count ?? "").replace(/\D/g, ""), 10);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return `${String(Math.floor(n)).padStart(2, "0")} HABITACIONES`;
+}
+
+export type FormatFincaFeaturesOpts = {
+  /** Override manual del # de habitaciones (admin reservas). */
+  habitaciones?: number | string | null;
+  /** Orden de zonas de la propiedad (preferido para contar habitaciones). */
+  zoneOrder?: string[] | null;
+};
+
+/**
+ * Texto plano para {{caracteristicasDeFinca}}:
+ * 1) "NN HABITACIONES" (zonas Habitación N, o override manual)
+ * 2) resto de amenidades agregadas por nombre (PISCINA, BAÑO, …)
+ */
+export function formatFincaFeaturesPlain(
+  features: unknown[],
+  opts?: FormatFincaFeaturesOpts,
+): string {
+  const manualRooms = opts?.habitaciones;
+  let roomCount = 0;
+  if (manualRooms != null && String(manualRooms).trim() !== "") {
+    roomCount =
+      typeof manualRooms === "number"
+        ? manualRooms
+        : parseInt(String(manualRooms).replace(/\D/g, ""), 10) || 0;
+  }
+  if (roomCount <= 0) {
+    roomCount = countBedroomZones(features || [], opts?.zoneOrder);
+  }
+
+  const lines: string[] = [];
+  const roomsLine = formatHabitacionesContractLine(roomCount);
+  if (roomsLine) lines.push(roomsLine);
+
+  const items = aggregatePropertyFeatureCounts(features || []);
+  for (const { name, count } of items) {
+    // Evita duplicar "HABITACIONES" si alguien la cargó como amenidad suelta.
+    if (/^habitaciones?$/i.test(name.trim())) continue;
+    const line = formatFeatureContractLine(name, count);
+    if (line) lines.push(line);
+  }
+  return lines.join("\n");
 }
 
 export function formatCopLabel(amount: number): string {
@@ -320,6 +399,8 @@ export type ContractFinca = {
   location?: string;
   capacity?: number;
   features?: unknown[];
+  /** Orden de zonas (HABITACIÓN 1, GENERAL, …) desde admin. */
+  zoneOrder?: string[];
 };
 
 /** Payload del contrato (salida de buildContractPayload en el front). */
@@ -469,14 +550,22 @@ export function buildContractWordValues(
   const ownerOverride =
     ownerOverrides[propertyId] ?? ownerOverrides[String(propertyId)] ?? {};
 
-  // Si viene un override (ej. "09 HABITACIONES"), se usa tal cual y NO se
-  // detallan las camas. Si es cadena vacía explícita, tampoco se listan camas.
+  // caracteristicasOverride: texto completo custom (raro). Si viene vacío o no
+  // viene, armamos: NN HABITACIONES (zonas o campo habitaciones) + amenidades.
   const caracteristicasOverride = (dto as { caracteristicasOverride?: unknown })
     .caracteristicasOverride;
-  const caracteristicasPlain =
+  const overrideText =
     typeof caracteristicasOverride === "string"
       ? caracteristicasOverride.trim()
-      : formatFincaFeaturesPlain(finca.features || []);
+      : "";
+  const habitacionesHint = (dto as { habitaciones?: unknown }).habitaciones;
+  const caracteristicasPlain =
+    overrideText ||
+    formatFincaFeaturesPlain(finca.features || [], {
+      habitaciones:
+        habitacionesHint != null ? String(habitacionesHint) : undefined,
+      zoneOrder: finca.zoneOrder,
+    });
   const nombrePropietario =
     (dto.propertyOwnerName && String(dto.propertyOwnerName).trim()) ||
     ownerOverride.nombreCompleto?.trim() ||

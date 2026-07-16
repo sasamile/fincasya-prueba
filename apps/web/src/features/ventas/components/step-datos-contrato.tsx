@@ -345,6 +345,7 @@ export function StepDatosContrato({
   const verifyCedula = useAction(api.saleLinks.verifyCedula);
   const verifyPaymentReceipt = useAction(api.saleLinks.verifyPaymentReceipt);
   const revalidateCedulaTyped = useAction(api.saleLinks.revalidateCedulaTyped);
+  const syncBoldPayment = useAction(api.saleLinks.syncBoldPaymentStatus);
   const [phase, setPhase] = useState<VentaDraftPhase>("datos");
   /** Comprobantes ya validados por IA (solo estos se pueden enviar). */
   const [verifiedProofs, setVerifiedProofs] = useState<
@@ -357,6 +358,7 @@ export function StepDatosContrato({
   >([]);
   const [pendingCedulaFile, setPendingCedulaFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [syncingBold, setSyncingBold] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<{
     type: "error" | "success";
     text: string;
@@ -1282,6 +1284,43 @@ export function StepDatosContrato({
     }
   };
 
+  const handleSyncBold = async () => {
+    if (!data.boldPaymentUrl || syncingBold) return;
+    setSyncingBold(true);
+    try {
+      const res = await syncBoldPayment({
+        token: data.token,
+        checkedBy: "cliente",
+      });
+      if (res.paid) {
+        if (res.awaitingClientData) {
+          toast.success(
+            "Pago Bold confirmado. Completa y envía tus datos para continuar (sin comprobante).",
+          );
+        } else {
+          toast.success(
+            res.alreadyValidated
+              ? "El pago Bold ya estaba confirmado"
+              : "¡Pago Bold confirmado!",
+          );
+          onSubmitted();
+        }
+      } else if (res.ok) {
+        toast.message(
+          `Bold aún no marca el pago (estado: ${res.status ?? "pendiente"}). Si acabas de pagar, espera unos segundos y vuelve a intentar.`,
+        );
+      } else {
+        toast.error(res.error ?? res.reason ?? "No se pudo consultar Bold");
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Error al verificar Bold",
+      );
+    } finally {
+      setSyncingBold(false);
+    }
+  };
+
   const submitPago = async () => {
     setSubmitMessage(null);
 
@@ -1374,29 +1413,32 @@ export function StepDatosContrato({
 
   const onSubmit = async (values: PagoValues) => {
     const isAmending = data.paymentProofSubmitted && !readOnly;
+    const boldAlreadyPaid = data.boldPaymentStatus?.toUpperCase() === "PAID";
     const proofFiles = await resolveProofFiles();
 
     if (!proofFiles.length) {
-      if (isAmending) {
+      if (boldAlreadyPaid) {
+        // Continúa sin archivo: Bold ya confirmó el abono por API.
+      } else if (isAmending) {
         const msg =
           "Tus datos quedaron actualizados. Agrega un comprobante si necesitas enviar otro soporte.";
         setSubmitMessage({ type: "success", text: msg });
         toast.success(msg);
         onAmended?.();
         return;
+      } else {
+        showError(
+          "Debes adjuntar un comprobante de pago real y esperar a que la IA lo valide, o pagar con Bold y verificar.",
+        );
+        setVerifiedProofs([]);
+        setReceiptGate({ status: "idle" });
+        setFileStale(true);
+        void clearVentaProofFile(data.token);
+        return;
       }
-
-      showError(
-        "Debes adjuntar un comprobante de pago real y esperar a que la IA lo valide.",
-      );
-      setVerifiedProofs([]);
-      setReceiptGate({ status: "idle" });
-      setFileStale(true);
-      void clearVentaProofFile(data.token);
-      return;
     }
 
-    if (receiptGate.status !== "ok") {
+    if (proofFiles.length && receiptGate.status !== "ok" && !boldAlreadyPaid) {
       showError(
         "Espera a que la IA valide el comprobante antes de enviarlo.",
       );
@@ -1446,6 +1488,39 @@ export function StepDatosContrato({
         photoUrl: cedula.cedulaPhotoUrl,
         aiNumber: verdict.aiNumber,
       });
+
+      if (boldAlreadyPaid && !proofFiles.length) {
+        const result = await submitClientData({
+          token: data.token,
+          nombre: values.nombre.trim(),
+          cedula: values.cedula.trim(),
+          email: values.email.trim(),
+          telefono: values.telefono.trim(),
+          telefonoRespaldo: values.telefonoRespaldo?.trim() || undefined,
+          direccion: values.direccion.trim(),
+          ciudad: values.ciudad?.trim() || undefined,
+          fechaNacimiento: values.fechaNacimiento?.trim() || undefined,
+          paymentProofUrl:
+            data.boldPaymentUrl || `bold://${data.token}`,
+          paymentProofFileName: "Pago Bold (verificado por API)",
+          paymentProofAmount:
+            data.boldPaymentAmount ??
+            data.advancePaymentAmount ??
+            values.paymentAmount,
+          paymentValidationKey: crypto.randomUUID(),
+          cedulaPhotoUrl: cedula.cedulaPhotoUrl,
+          cedulaPhotoFileName: cedula.cedulaPhotoFileName,
+          cedulaPhotoMimeType: cedula.cedulaPhotoMimeType,
+        });
+        if (!result.ok) {
+          showError("No se pudo guardar. Intenta de nuevo.");
+          return;
+        }
+        await clearVentaDraftAll(data.token);
+        toast.success("¡Pago Bold y datos guardados!");
+        onSubmitted();
+        return;
+      }
 
       let appended = isAmending;
       for (const proof of proofFiles) {
@@ -2088,17 +2163,47 @@ export function StepDatosContrato({
       </VentaCallout>
 
       {data.boldPaymentUrl ? (
-        <a
-          href={data.boldPaymentUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-muted/50"
-        >
-          Pagar abono con Bold
-          {data.boldPaymentAmount
-            ? ` · ${formatCOP(data.boldPaymentAmount)}`
-            : ""}
-        </a>
+        <div className="space-y-2">
+          <a
+            href={data.boldPaymentUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-muted/50"
+          >
+            Pagar abono con Bold
+            {data.boldPaymentAmount
+              ? ` · ${formatCOP(data.boldPaymentAmount)}`
+              : ""}
+          </a>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            disabled={syncingBold}
+            onClick={() => void handleSyncBold()}
+          >
+            {syncingBold ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Verificando con Bold…
+              </>
+            ) : (
+              "Ya pagué — verificar con Bold"
+            )}
+          </Button>
+          <p className="text-center text-[11px] text-muted-foreground">
+            No hace falta subir comprobante si pagas con Bold: al volver o al
+            pulsar el botón consultamos el pago en Bold.
+          </p>
+          {data.boldPaymentStatus?.toUpperCase() === "PAID" ? (
+            <VentaCallout>
+              <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                Bold confirmó el pago.
+              </span>{" "}
+              Envía tus datos abajo para continuar (sin comprobante).
+            </VentaCallout>
+          ) : null}
+        </div>
       ) : null}
 
       <VentaBankAccounts accounts={data.bankAccounts} />
@@ -2355,11 +2460,14 @@ export function StepDatosContrato({
                 attachingFile ||
                 receiptGate.status === "uploading" ||
                 receiptGate.status === "checking" ||
-                (!isAmending &&
-                  (verifiedProofs.length === 0 || receiptGate.status !== "ok")) ||
-                (isAmending &&
-                  verifiedProofs.length > 0 &&
-                  receiptGate.status !== "ok")
+                (data.boldPaymentStatus?.toUpperCase() === "PAID"
+                  ? false
+                  : (!isAmending &&
+                      (verifiedProofs.length === 0 ||
+                        receiptGate.status !== "ok")) ||
+                    (isAmending &&
+                      verifiedProofs.length > 0 &&
+                      receiptGate.status !== "ok"))
               }
               className="flex-1 disabled:opacity-50"
               size="lg"
@@ -2376,6 +2484,12 @@ export function StepDatosContrato({
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Validando…
+                </>
+              ) : data.boldPaymentStatus?.toUpperCase() === "PAID" &&
+                verifiedProofs.length === 0 ? (
+                <>
+                  <Send className="w-4 h-4 mr-2" />
+                  Enviar datos (Bold ya pagado)
                 </>
               ) : isAmending ? (
                 <>

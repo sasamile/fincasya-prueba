@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ validated?: string }>;
+  searchParams: Promise<{ validated?: string; bold?: string }>;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -51,13 +51,17 @@ export default async function VentaPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ validated?: string }>;
+  searchParams: Promise<{ validated?: string; bold?: string }>;
 }) {
   const { token } = await params;
-  const { validated } = await searchParams;
+  const { validated, bold } = await searchParams;
   return (
     <Suspense fallback={null}>
-      <VentaPageContent token={token} validatedParam={validated} />
+      <VentaPageContent
+        token={token}
+        validatedParam={validated}
+        boldReturnParam={bold}
+      />
     </Suspense>
   );
 }

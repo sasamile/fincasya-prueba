@@ -637,6 +637,11 @@ export default defineSchema(
       /** Monto cobrado en Bold (puede incluir recargo %). */
       boldPaymentAmount: v.optional(v.number()),
       boldSurchargePercent: v.optional(v.number()),
+      /** Último status consultado a Bold (ACTIVE|PROCESSING|PAID|…). */
+      boldPaymentStatus: v.optional(v.string()),
+      boldPaidAt: v.optional(v.number()),
+      boldTransactionId: v.optional(v.string()),
+      boldStatusCheckedAt: v.optional(v.number()),
       selectedBankAccountIds: v.array(v.string()),
       notes: v.optional(v.string()),
       clientStep: v.number(),

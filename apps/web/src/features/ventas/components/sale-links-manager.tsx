@@ -52,6 +52,7 @@ import {
   setSaleLinkOwnerOffer,
   markSaleLinkOwnerOfferSent,
   validateSaleLinkPaymentAdmin,
+  syncSaleLinkBoldPayment,
   type SaleLink,
 } from "../api/sale-links.api";
 import {
@@ -191,6 +192,7 @@ export function SaleLinksManager() {
   const [ownerOfferDrafts, setOwnerOfferDrafts] = useState<Record<string, string>>({});
   const [savingOwnerOffer, setSavingOwnerOffer] = useState<string | null>(null);
   const [validatingPayment, setValidatingPayment] = useState<string | null>(null);
+  const [syncingBold, setSyncingBold] = useState<string | null>(null);
   const [editingOwnerOfferId, setEditingOwnerOfferId] = useState<string | null>(null);
   const [documentPreview, setDocumentPreview] = useState<DocumentPreview | null>(
     null,
@@ -293,6 +295,41 @@ export function SaleLinksManager() {
       toast.error("Error al validar el pago");
     } finally {
       setValidatingPayment(null);
+    }
+  };
+
+  const handleSyncBold = async (link: SaleLink) => {
+    setSyncingBold(link._id);
+    try {
+      const res = await syncSaleLinkBoldPayment(link.token);
+      if (res.paid) {
+        toast.success(
+          res.awaitingClientData
+            ? "Bold pagó — falta que el cliente envíe sus datos"
+            : res.alreadyValidated
+              ? "Bold ya estaba confirmado"
+              : "Pago Bold confirmado — generando contrato…",
+        );
+        qc.invalidateQueries({ queryKey: ["sale-links"] });
+        if (
+          !res.alreadyValidated &&
+          !res.awaitingClientData &&
+          !link.contractUrl
+        ) {
+          await handleGenerateContract(link);
+        }
+      } else if (res.ok) {
+        toast.message(
+          `Bold: ${res.status ?? "pendiente"} (aún no pagado)`,
+        );
+        qc.invalidateQueries({ queryKey: ["sale-links"] });
+      } else {
+        toast.error(res.error ?? res.reason ?? "No se pudo consultar Bold");
+      }
+    } catch {
+      toast.error("Error al consultar Bold");
+    } finally {
+      setSyncingBold(null);
     }
   };
 
@@ -644,6 +681,19 @@ export function SaleLinksManager() {
                             <CheckCircle2 className="mr-2 h-4 w-4 text-emerald-600" />
                           )}
                           Aprobar pago
+                        </DropdownMenuItem>
+                      ) : null}
+                      {link.boldPaymentUrl && !link.paymentValidated ? (
+                        <DropdownMenuItem
+                          onClick={() => void handleSyncBold(link)}
+                          disabled={syncingBold === link._id}
+                        >
+                          {syncingBold === link._id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                          )}
+                          Verificar pago Bold
                         </DropdownMenuItem>
                       ) : null}
                       {needsPaymentValidation(link) ? (

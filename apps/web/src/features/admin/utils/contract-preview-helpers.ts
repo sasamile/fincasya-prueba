@@ -1,5 +1,9 @@
 import type { FincaData } from "./contract-utils";
 import { numberToSpanishTextCO } from "./contract-number-words";
+import {
+  formatFincaFeaturesPlain,
+  formatHabitacionesContractLine,
+} from "@/lib/server/contract-values";
 
 const MONTHS_ES = [
   "Enero",
@@ -44,6 +48,7 @@ type PreviewProperty = {
   code?: string;
   capacity?: number;
   features?: unknown[];
+  zoneOrder?: string[];
 };
 
 type PreviewFormSlice = {
@@ -58,18 +63,16 @@ type PreviewFormSlice = {
   checkOutDate: string;
   checkInTime: string;
   checkOutTime: string;
-  /** Opcional: # de habitaciones entregadas; si viene, reemplaza el detalle de camas. */
+  /** Opcional: override del # de habitaciones; si vacío se cuentan zonas. */
   habitaciones?: string;
 };
 
 /**
  * Texto de habitaciones para {{caracteristicasDeFinca}} (ej. "09 HABITACIONES").
- * Si no se especifica un número, devuelve cadena vacía (no se detallan camas).
+ * @deprecated Preferir formatHabitacionesContractLine / formatFincaFeaturesPlain.
  */
 export function formatHabitacionesText(value: string | undefined | null): string {
-  const n = parseInt(String(value ?? "").replace(/\D/g, ""), 10);
-  if (!Number.isFinite(n) || n <= 0) return "";
-  return `${String(n).padStart(2, "0")} HABITACIONES`;
+  return formatHabitacionesContractLine(value);
 }
 
 /** Opcional: datos guardados en admin para {{nombrePropietario}} y cédula en el contrato. */
@@ -129,10 +132,20 @@ export function buildReservationPreviewFincaData(
   const n = Math.max(0, nights);
   const total = Math.max(0, Math.round(contractTotalCop));
 
-  // Ya no se listan las camas; solo, opcionalmente, el # de habitaciones.
-  const habitacionesText = formatHabitacionesText(form.habitaciones);
-  const caracteristicasHtml = habitacionesText
-    ? `<div style="margin: 0 0 4px 0; text-align: left !important;">${habitacionesText}</div>`
+  // Habitaciones (zonas o override) + amenidades de la finca.
+  const caracteristicasPlain = formatFincaFeaturesPlain(property?.features || [], {
+    habitaciones: form.habitaciones,
+    zoneOrder: property?.zoneOrder,
+  });
+  const caracteristicasHtml = caracteristicasPlain
+    ? caracteristicasPlain
+        .split("\n")
+        .filter(Boolean)
+        .map(
+          (line) =>
+            `<div style="margin: 0 0 4px 0; text-align: left !important;">${line}</div>`,
+        )
+        .join("")
     : "";
 
   const nombreManual = contractOwnerOverride?.nombreCompleto?.trim();

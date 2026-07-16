@@ -46,7 +46,6 @@ import {
 } from "@/features/admin/utils/contract-utils";
 import {
   buildReservationPreviewFincaData,
-  formatHabitacionesText,
 } from "@/features/admin/utils/contract-preview-helpers";
 import { ContractGlobalSetupSections } from "@/features/admin/components/contracts/contract-global-setup-sections";
 import { ContractWordEditor, type ContractWordEditorHandle } from "@/features/admin/components/contracts/contract-word-editor";
@@ -141,7 +140,7 @@ type FormState = {
   checkInTime: string;
   checkOutTime: string;
   guests: string;
-  /** Opcional: # de habitaciones entregadas (reemplaza el detalle de camas). */
+  /** Opcional: override del # de habitaciones; si vacío se cuentan zonas Habitación N. */
   habitaciones: string;
   temporada: string;
   groupType: string;
@@ -1185,8 +1184,9 @@ export function ContractsReservationSection({
     // aseo, mascotas y demás cargos se detallan aparte, no en este total.
     totalPrice: String(Number(draft.nightlyPrice || 0) * nights),
     conversationId: "direct-reservation",
-    // No se detallan camas; solo, opcionalmente, el # de habitaciones.
-    caracteristicasOverride: formatHabitacionesText(draft.habitaciones),
+    // # habitaciones manual (opcional). Si vacío, el servidor cuenta zonas
+    // "Habitación N" de la finca y las antepone a las características.
+    habitaciones: draft.habitaciones?.trim() || undefined,
     clientName: draft.clientName,
     clientId: draft.clientId,
     clientEmail: draft.clientEmail,
@@ -2868,16 +2868,17 @@ export function ContractsReservationSection({
                   <Input
                     type="number"
                     min="0"
-                    placeholder="Ej: 9"
+                    inputMode="numeric"
+                    placeholder="Vacío = zonas Habitación N de la finca"
                     value={form.habitaciones}
                     onChange={(event) =>
                       setField("habitaciones", event.target.value)
                     }
                     className={fieldClass("habitaciones")}
                   />
-                  <p className="ml-1 text-[11px] font-medium text-zinc-400">
-                    Reemplaza el detalle de camas en el contrato. Si lo dejas
-                    vacío, no se listan características.
+                  <p className="text-[11px] text-muted-foreground">
+                    Si lo dejas vacío, el contrato cuenta las zonas Habitación
+                    1, 2… de la finca y las suma a las demás características.
                   </p>
                 </div>
 

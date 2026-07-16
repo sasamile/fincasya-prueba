@@ -39,3 +39,6 @@ graphify-out/
 # Next.js
 .next/
 next-env.d.ts
+
+# Assets de runtime de pdfjs (generados por apps/web/scripts/copy-pdf-worker.mjs)
+apps/web/public/pdfjs/

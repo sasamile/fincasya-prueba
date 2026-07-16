@@ -26,6 +26,8 @@ export interface SaleLink {
   boldPaymentUrl?: string;
   boldPaymentAmount?: number;
   boldSurchargePercent?: number;
+  boldPaymentLinkId?: string;
+  boldPaymentStatus?: string;
   selectedBankAccountIds: string[];
   notes?: string;
   clientStep: number;
@@ -344,5 +346,29 @@ export async function validateSaleLinkPaymentAdmin(
   return convex.mutation(api.saleLinks.validatePaymentAdmin, {
     token,
     validatedBy: by,
+  });
+}
+
+/** Consulta Bold por API (sin webhook) y valida si status=PAID. */
+export async function syncSaleLinkBoldPayment(
+  token: string,
+  checkedBy?: string,
+): Promise<{
+  ok: boolean;
+  status?: string;
+  paid?: boolean;
+  alreadyValidated?: boolean;
+  awaitingClientData?: boolean;
+  reason?: string;
+  error?: string;
+}> {
+  let by = checkedBy?.trim();
+  if (!by && typeof window !== 'undefined') {
+    const { useAuthStore } = await import('@/features/auth/store/auth.store');
+    by = formatValidatedBy(useAuthStore.getState().user ?? undefined);
+  }
+  return convex.action(api.saleLinks.syncBoldPaymentStatus, {
+    token,
+    checkedBy: by || 'admin panel',
   });
 }

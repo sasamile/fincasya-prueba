@@ -1,8 +1,26 @@
 // @ts-nocheck — port de FincasYaWeb; tipos de pdfjs-dist v6 difieren del original v3.
 //
-// pdfjs v6 exige getDocument({ url }): a diferencia de v3 (el que usa FincasYaWeb),
-// ya no acepta la URL como string suelto — lanza "getDocument - expected either
-// `data`, `range`, or `url` parameter". No revertir a getDocument(url) al portar.
+// Diferencias de pdfjs v6 vs el v3 de FincasYaWeb — no revertir al portar de allá:
+//  1. getDocument exige un objeto: getDocument({ url }). Con un string suelto lanza
+//     "getDocument - expected either `data`, `range`, or `url` parameter".
+//  2. Los assets de runtime (worker, fuentes estándar, cmaps, wasm, iccs) se sirven
+//     desde public/pdfjs/ — los copia scripts/copy-pdf-worker.mjs en postinstall.
+//     Turbopack no emite el worker vía new URL(...) sobre un specifier de paquete.
+//  3. standardFontDataUrl es OBLIGATORIO para PDFs con fuentes NO incrustadas
+//     (ej. el certificado RNT): sin él, page.render() nunca resuelve — cuelga
+//     en silencio, sin lanzar error.
+
+/** Assets servidos desde public/pdfjs/ (ver scripts/copy-pdf-worker.mjs). */
+const PDFJS_ASSETS = "/pdfjs";
+
+/** Opciones que TODO getDocument debe pasar para que cualquier PDF renderice. */
+const PDF_DOC_OPTIONS = {
+  standardFontDataUrl: `${PDFJS_ASSETS}/standard_fonts/`,
+  cMapUrl: `${PDFJS_ASSETS}/cmaps/`,
+  cMapPacked: true,
+  wasmUrl: `${PDFJS_ASSETS}/wasm/`,
+  iccUrl: `${PDFJS_ASSETS}/iccs/`,
+};
 
 let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
 
@@ -13,10 +31,7 @@ async function loadPdfJs() {
 
   if (!pdfJsPromise) {
     pdfJsPromise = import("pdfjs-dist").then((pdfjs) => {
-      // Servido desde public/ por scripts/copy-pdf-worker.mjs (postinstall):
-      // Turbopack no emite el worker si se referencia con new URL(...) sobre un
-      // specifier de paquete — quedaba en 404 y pdfjs colgaba sin lanzar error.
-      pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+      pdfjs.GlobalWorkerOptions.workerSrc = `${PDFJS_ASSETS}/pdf.worker.min.mjs`;
       return pdfjs;
     });
   }
@@ -43,7 +58,7 @@ export async function generatePdfPreview(
   const fileUrl = URL.createObjectURL(file);
 
   try {
-    const loadingTask = getDocument({ url: fileUrl });
+    const loadingTask = getDocument({ url: fileUrl, ...PDF_DOC_OPTIONS });
     const pdf = await loadingTask.promise;
     const pageCount = pdf.numPages;
     const page = await pdf.getPage(1);
@@ -76,7 +91,7 @@ export async function generatePdfPreviewFromUrl(
     fetchUrl = `/api/cors-proxy?url=${encodeURIComponent(url)}`;
   }
 
-  const loadingTask = getDocument({ url: fetchUrl });
+  const loadingTask = getDocument({ url: fetchUrl, ...PDF_DOC_OPTIONS });
   const pdf = await loadingTask.promise;
   const pageCount = pdf.numPages;
   const page = await pdf.getPage(1);
@@ -107,7 +122,7 @@ export async function renderPdfPagesFitWidth(
     fetchUrl = `/api/cors-proxy?url=${encodeURIComponent(url)}`;
   }
 
-  const loadingTask = getDocument({ url: fetchUrl });
+  const loadingTask = getDocument({ url: fetchUrl, ...PDF_DOC_OPTIONS });
   const pdf = await loadingTask.promise;
   const safeWidth = Math.max(maxWidth, 280);
   const pages: string[] = [];

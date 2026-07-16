@@ -450,10 +450,21 @@ export const createWithBold = action({
 
     try {
       const { createBoldPaymentLink } = await import('./lib/bold');
+      const siteBase = (
+        process.env.SITE_URL?.trim() ||
+        process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+        process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+        'https://fincasya.com'
+      ).replace(/\/$/, '');
+      const callbackUrl = `${siteBase}/venta/${created.token}?bold=return`;
+
       const bold = await createBoldPaymentLink({
         amountCop: boldAmount,
         description: `Abono ${created.contractCode} · FincasYa`.slice(0, 100),
         reference: `SL-${created.token.slice(0, 10)}-${Date.now()}`.slice(0, 60),
+        callbackUrl: callbackUrl.startsWith('https://')
+          ? callbackUrl
+          : undefined,
       });
 
       await ctx.runMutation(internal.saleLinks._setBoldPaymentLink, {
@@ -683,6 +694,154 @@ export const validatePayment = internalMutation({
       { saleLinkId: link._id },
     );
     return { ok: true };
+  },
+});
+
+/**
+ * Aplica el resultado de una consulta Bold al saleLink.
+ * Si status=PAID, marca el pago como validado (sin comprobante manual).
+ */
+export const _applyBoldLinkStatus = internalMutation({
+  args: {
+    id: v.id('saleLinks'),
+    status: v.string(),
+    transactionId: v.optional(v.string()),
+    validatedBy: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const link = await ctx.db.get(args.id);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+
+    const status = args.status.trim().toUpperCase();
+    const now = Date.now();
+    const wasValidated = !!link.paymentValidated;
+    const canAutoValidate =
+      status === 'PAID' && !wasValidated && !!link.clientData;
+
+    if (canAutoValidate) {
+      await ctx.db.patch(link._id, {
+        boldPaymentStatus: status,
+        boldStatusCheckedAt: now,
+        boldTransactionId: args.transactionId,
+        paymentValidated: true,
+        paymentValidatedAt: now,
+        paymentValidatedBy: args.validatedBy,
+        boldPaidAt: now,
+        clientStep: Math.max(link.clientStep, 4),
+        paymentProofUrl:
+          link.paymentProofUrl?.trim() ||
+          link.boldPaymentUrl ||
+          `bold://${link.boldPaymentLinkId}`,
+        paymentProofFileName:
+          link.paymentProofFileName?.trim() ||
+          'Pago Bold (verificado por API)',
+        paymentProofAmount:
+          link.paymentProofAmount ??
+          link.boldPaymentAmount ??
+          link.advancePaymentAmount,
+        paymentProofSubmittedAt: link.paymentProofSubmittedAt ?? now,
+        updatedAt: now,
+      });
+      await provisionBookingOnPayment(ctx, link._id);
+      await ctx.scheduler.runAfter(0, internal.opportunities.markWon, {
+        saleLinkId: link._id,
+      });
+      await ctx.scheduler.runAfter(
+        0,
+        internal.notifications.emailClientPaymentValidated,
+        { saleLinkId: link._id },
+      );
+    } else {
+      await ctx.db.patch(link._id, {
+        boldPaymentStatus: status,
+        boldStatusCheckedAt: now,
+        ...(args.transactionId
+          ? { boldTransactionId: args.transactionId }
+          : {}),
+        ...(status === 'PAID' ? { boldPaidAt: link.boldPaidAt ?? now } : {}),
+        updatedAt: now,
+      });
+    }
+
+    return {
+      ok: true as const,
+      status,
+      paid: status === 'PAID',
+      alreadyValidated: wasValidated,
+      awaitingClientData: status === 'PAID' && !wasValidated && !link.clientData,
+    };
+  },
+});
+
+/**
+ * Consulta Bold (GET link status) y, si está PAID, valida el pago.
+ * No requiere webhook ni acceso al panel de Bold: usa BOLD_IDENTIDAD_KEY.
+ */
+export const syncBoldPaymentStatus = action({
+  args: {
+    token: v.string(),
+    /** Quién dispara la sync (cliente | admin email). */
+    checkedBy: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    ok: boolean;
+    status?: string;
+    paid?: boolean;
+    alreadyValidated?: boolean;
+    awaitingClientData?: boolean;
+    reason?: string;
+    error?: string;
+  }> => {
+    const token = args.token.trim();
+    if (!token) return { ok: false, reason: 'missing_token' };
+
+    const full = await ctx.runQuery(internal.saleLinks.getByToken, { token });
+    if (!full) return { ok: false, reason: 'not_found' };
+
+    if (full.paymentValidated) {
+      return {
+        ok: true,
+        status: full.boldPaymentStatus ?? 'PAID',
+        paid: true,
+        alreadyValidated: true,
+      };
+    }
+
+    const linkId = full.boldPaymentLinkId?.trim();
+    if (!linkId) {
+      return { ok: false, reason: 'no_bold_link' };
+    }
+
+    try {
+      const { getBoldPaymentLinkStatus } = await import('./lib/bold');
+      const result = await getBoldPaymentLinkStatus(linkId);
+      const by = String(args.checkedBy ?? '').trim() || 'cliente';
+
+      const applied = await ctx.runMutation(
+        internal.saleLinks._applyBoldLinkStatus,
+        {
+          id: full._id,
+          status: result.status,
+          transactionId: result.transactionId,
+          validatedBy: `Bold (${by})`,
+        },
+      );
+
+      return {
+        ok: true,
+        status: applied.status,
+        paid: applied.paid,
+        alreadyValidated: applied.alreadyValidated,
+        awaitingClientData: applied.awaitingClientData,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[saleLinks.syncBoldPaymentStatus]', msg);
+      return { ok: false, error: msg };
+    }
   },
 });
 
@@ -1112,7 +1271,7 @@ export const submitClientData = mutation({
     direccion: v.string(),
     ciudad: v.optional(v.string()),
     fechaNacimiento: v.optional(v.string()),
-    paymentProofUrl: v.string(),
+    paymentProofUrl: v.optional(v.string()),
     paymentProofFileName: v.optional(v.string()),
     paymentProofMimeType: v.optional(v.string()),
     paymentProofAmount: v.optional(v.number()),
@@ -1151,25 +1310,45 @@ export const submitClientData = mutation({
       return { ok: false, reason: check.reason || 'cedula_rejected' };
     }
 
-    // El comprobante debió pasar por verifyPaymentReceipt (misma URL).
-    const receiptCheck = link.paymentReceiptCheck;
-    if (!receiptCheck || receiptCheck.photoUrl !== args.paymentProofUrl) {
-      return { ok: false, reason: 'receipt_not_verified' };
+    // El comprobante debió pasar por verifyPaymentReceipt (misma URL),
+    // salvo si Bold ya confirmó el pago por API (sin webhook).
+    const boldAlreadyPaid = link.boldPaymentStatus?.toUpperCase() === 'PAID';
+    const proofUrl =
+      args.paymentProofUrl?.trim() ||
+      (boldAlreadyPaid
+        ? link.boldPaymentUrl || `bold://${link.boldPaymentLinkId}`
+        : '');
+    if (!boldAlreadyPaid) {
+      if (!proofUrl) return { ok: false, reason: 'missing_proof' };
+      const receiptCheck = link.paymentReceiptCheck;
+      if (!receiptCheck || receiptCheck.photoUrl !== proofUrl) {
+        return { ok: false, reason: 'receipt_not_verified' };
+      }
+      if (!receiptCheck.allow) {
+        return { ok: false, reason: receiptCheck.reason || 'receipt_rejected' };
+      }
     }
-    if (!receiptCheck.allow) {
-      return { ok: false, reason: receiptCheck.reason || 'receipt_rejected' };
-    }
+    if (!proofUrl) return { ok: false, reason: 'missing_proof' };
 
     const now = Date.now();
     const fechaNacimiento = normalizeBirthdate(args.fechaNacimiento);
     const newProof: PaymentProofRecord = {
-      url: args.paymentProofUrl,
-      fileName: args.paymentProofFileName,
+      url: proofUrl,
+      fileName:
+        args.paymentProofFileName ||
+        (boldAlreadyPaid ? 'Pago Bold (verificado por API)' : undefined),
       mimeType: args.paymentProofMimeType,
-      amount: args.paymentProofAmount,
+      amount:
+        args.paymentProofAmount ??
+        (boldAlreadyPaid
+          ? link.boldPaymentAmount ?? link.advancePaymentAmount
+          : undefined),
       submittedAt: now,
     };
-    const paymentProofs = [...resolvePaymentProofs(link), newProof];
+    const paymentProofs =
+      boldAlreadyPaid && !link.paymentProofUrl
+        ? [newProof]
+        : [...resolvePaymentProofs(link), newProof];
     const isFirstSubmission = link.clientStep < 3;
 
     const patch: Record<string, unknown> = {
@@ -1191,10 +1370,10 @@ export const submitClientData = mutation({
           : args.cedulaPhotoMimeType,
         filledAt: link.clientData?.filledAt ?? now,
       },
-      paymentProofUrl: args.paymentProofUrl,
-      paymentProofFileName: args.paymentProofFileName,
-      paymentProofMimeType: args.paymentProofMimeType,
-      paymentProofAmount: args.paymentProofAmount,
+      paymentProofUrl: proofUrl,
+      paymentProofFileName: newProof.fileName,
+      paymentProofMimeType: newProof.mimeType,
+      paymentProofAmount: newProof.amount,
       paymentProofSubmittedAt: now,
       paymentProofs,
       paymentValidationKey:
@@ -1204,7 +1383,16 @@ export const submitClientData = mutation({
       updatedAt: now,
     };
 
-    if (isFirstSubmission) {
+    if (boldAlreadyPaid) {
+      patch.paymentValidated = true;
+      patch.paymentValidatedAt = now;
+      patch.paymentValidatedBy = 'Bold (al enviar datos)';
+      patch.boldPaidAt = link.boldPaidAt ?? now;
+      patch.clientStep = 4;
+      patch.clientPortalUiStep = undefined;
+      patch.clientDraftPhase = undefined;
+      patch.clientDraftPaymentAmount = undefined;
+    } else if (isFirstSubmission) {
       patch.clientStep = 3;
       patch.clientPortalUiStep = undefined;
       patch.clientDraftPhase = undefined;
@@ -1223,14 +1411,26 @@ export const submitClientData = mutation({
       fechaNacimiento,
     });
 
-    // Notifica al admin que hay un soporte de pago por revisar.
-    await ctx.scheduler.runAfter(
-      0,
-      internal.notifications.notifyAdminSaleLinkPayment,
-      { saleLinkId: link._id },
-    );
+    if (boldAlreadyPaid) {
+      await provisionBookingOnPayment(ctx, link._id);
+      await ctx.scheduler.runAfter(0, internal.opportunities.markWon, {
+        saleLinkId: link._id,
+      });
+      await ctx.scheduler.runAfter(
+        0,
+        internal.notifications.emailClientPaymentValidated,
+        { saleLinkId: link._id },
+      );
+    } else {
+      // Notifica al admin que hay un soporte de pago por revisar.
+      await ctx.scheduler.runAfter(
+        0,
+        internal.notifications.notifyAdminSaleLinkPayment,
+        { saleLinkId: link._id },
+      );
+    }
 
-    return { ok: true, appended: !isFirstSubmission };
+    return { ok: true, appended: !isFirstSubmission, boldPaid: boldAlreadyPaid };
   },
 });
 
@@ -1934,6 +2134,7 @@ export const getPublicByToken = query({
       boldPaymentUrl: link.boldPaymentUrl,
       boldPaymentAmount: link.boldPaymentAmount,
       boldSurchargePercent: link.boldSurchargePercent,
+      boldPaymentStatus: link.boldPaymentStatus,
       bankAccounts,
       selectedBankAccountIds: link.selectedBankAccountIds,
       clientDataFilled: !!link.clientData,
@@ -2173,6 +2374,7 @@ export const getForPortal = internalQuery({
       boldPaymentUrl: link.boldPaymentUrl,
       boldPaymentAmount: link.boldPaymentAmount,
       boldSurchargePercent: link.boldSurchargePercent,
+      boldPaymentStatus: link.boldPaymentStatus,
       bankAccounts,
       selectedBankAccountIds: link.selectedBankAccountIds,
       clientDataFilled: !!link.clientData,
