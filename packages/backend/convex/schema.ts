@@ -82,7 +82,9 @@ export default defineSchema(
       updatedAt: v.optional(v.number()),
     })
       .index('by_phone', ['phone'])
-      .index('by_cedula', ['cedula']),
+      .index('by_cedula', ['cedula'])
+      .searchIndex('search_name', { searchField: 'name' })
+      .searchIndex('search_phone', { searchField: 'phone' }),
 
     /**
      * Directorio telefónico importado del .vcf del equipo (26k+ contactos del

@@ -82,6 +82,22 @@ export default function App() {
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<CtxTarget | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+
+  const searchTrim = search.trim();
+  const searchDigits = searchTrim.replace(/\D/g, '');
+  const isGlobalSearch = searchTrim.length >= 2 || searchDigits.length >= 2;
+  const searchResults = useQuery(
+    api.inbox.searchConversations,
+    isGlobalSearch
+      ? {
+          search: searchTrim,
+          from: listArgs.from,
+          to: listArgs.to,
+          assignedUserId: listArgs.assignedUserId,
+          includeArchived: showArchived,
+        }
+      : 'skip',
+  );
   const [showTemplates, setShowTemplates] = useState(false);
   const [showActions, setShowActions] = useState(false);
   // Modo selección múltiple (asignar / marcar leídos por selección manual).
@@ -176,23 +192,28 @@ export default function App() {
   );
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const source: ConversationRow[] = isGlobalSearch
+      ? (searchResults ?? [])
+      : showArchived
+        ? archived
+        : conversations;
 
-    if (showArchived) {
-      return archived.filter((c) => {
-        if (q && !c.name.toLowerCase().includes(q) && !c.phone.includes(q)) return false;
+    const list = source.filter((c) => {
+      if (isGlobalSearch) {
+        if (showArchived) {
+          if (!c.archived) return false;
+        } else if (c.archived) {
+          return false;
+        }
+      } else if (showArchived) {
         return true;
-      });
-    }
+      } else if (c.archived) {
+        return false;
+      }
 
-    const list = conversations.filter((c) => {
-      // Las archivadas no aparecen en el listado principal.
-      if (c.archived) return false;
-      if (q && !c.name.toLowerCase().includes(q) && !c.phone.includes(q)) return false;
       if (labelFilter && !c.labels.some((l) => String(l.id) === labelFilter)) return false;
       if (filter === 'ai') return c.status === 'ai';
       if (filter === 'human') return c.status === 'human';
-      // Escalados por el bot (toolEscalar / emergencia / propietario → urgent).
       if (filter === 'escalated') {
         return c.status === 'human' && c.priority === 'urgent';
       }
@@ -202,13 +223,21 @@ export default function App() {
       if (filter === 'web') return c.channel === 'web';
       return true;
     });
-    // Fijadas primero; dentro de cada grupo se respeta el orden por último
-    // mensaje (que ya trae el servidor). Con paginación este orden se aplica
-    // sobre lo cargado.
     return [...list].sort((a, b) => Number(b.pinned) - Number(a.pinned));
-  }, [conversations, search, filter, labelFilter, showArchived, archived]);
+  }, [
+    conversations,
+    archived,
+    searchResults,
+    isGlobalSearch,
+    filter,
+    labelFilter,
+    showArchived,
+  ]);
 
-  const selected = conversations.find((c) => c.conversationId === selectedId) ?? null;
+  const selected =
+    conversations.find((c) => c.conversationId === selectedId) ??
+    searchResults?.find((c) => c.conversationId === selectedId) ??
+    null;
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -445,6 +474,7 @@ export default function App() {
         <div
           className="flex-1 overflow-y-auto border-t border-border"
           onScroll={(e) => {
+            if (isGlobalSearch) return;
             if (convStatus !== 'CanLoadMore' || loadingMoreRef.current) return;
             const el = e.currentTarget;
             // Si el contenido no llena el panel, no hay "fondo" real: no auto-cargar
@@ -458,12 +488,13 @@ export default function App() {
             }
           }}
         >
-          {convStatus === 'LoadingFirstPage' ? (
+          {convStatus === 'LoadingFirstPage' ||
+          (isGlobalSearch && searchResults === undefined) ? (
             <LoadingArea className="py-16" />
           ) : (
             <>
               {/* Banner archivados (estilo WhatsApp) — solo en vista principal */}
-              {!showArchived && archived.length > 0 && (
+              {!showArchived && !isGlobalSearch && archived.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setShowArchived(true)}
@@ -484,7 +515,11 @@ export default function App() {
 
               {filtered.length === 0 ? (
                 <p className="p-4 text-center text-xs text-muted-foreground">
-                  {showArchived ? 'No hay chats archivados' : 'Sin chats'}
+                  {isGlobalSearch
+                    ? `Sin resultados para “${searchTrim}”`
+                    : showArchived
+                      ? 'No hay chats archivados'
+                      : 'Sin chats'}
                 </p>
               ) : (
                 filtered.map((c) => (
@@ -514,10 +549,10 @@ export default function App() {
                 ))
               )}
 
-              {/* Pie del scroll infinito */}
-              {convStatus === 'LoadingMore' ? (
+              {/* Pie del scroll infinito (no aplica en búsqueda global) */}
+              {!isGlobalSearch && convStatus === 'LoadingMore' ? (
                 <LoadingArea className="py-4" />
-              ) : convStatus === 'CanLoadMore' ? (
+              ) : !isGlobalSearch && convStatus === 'CanLoadMore' ? (
                 <button
                   type="button"
                   onClick={() => {

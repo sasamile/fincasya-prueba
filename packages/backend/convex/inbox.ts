@@ -138,6 +138,94 @@ async function buildProductCard(
   };
 }
 
+/** Fila del listado del inbox (misma forma que `listConversations.page[]`). */
+async function toInboxRows(ctx: QueryCtx, conversations: Doc<'conversations'>[]) {
+  const allLabels = await ctx.db.query('labels').collect();
+  const labelById = new Map(allLabels.map((l) => [String(l._id), l]));
+  const catalogMaps = await ctx.db.query('propertyWhatsAppCatalog').collect();
+  const retailerToProp = new Map(
+    catalogMaps.map((mp) => [mp.productRetailerId, mp.propertyId] as const),
+  );
+
+  const out = [];
+  for (const c of conversations) {
+    if (c.deletedAt) continue;
+    const contact = await ctx.db.get(c.contactId);
+    const recent = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation', (q) => q.eq('conversationId', c._id))
+      .order('desc')
+      .take(50);
+    const visible = recent.filter((m) => !m.deletedAt);
+    const lastMsg = visible[0] ?? null;
+    const lastReadAt = c.inboxLastReadAt ?? 0;
+    let unread = 0;
+    for (const m of visible) {
+      if (m.sender === 'assistant') {
+        if (AUTO_AWAY_SOURCES.has(m.metadata?.source)) continue;
+        break;
+      }
+      if (m.sender === 'system') continue;
+      if (m.createdAt <= lastReadAt) break;
+      unread++;
+    }
+    const labels = (c.labelIds ?? [])
+      .map((id) => labelById.get(String(id)))
+      .filter((l): l is NonNullable<typeof l> => !!l)
+      .map((l) => ({ id: l._id, name: l.name, color: l.color, emoji: l.emoji ?? null }));
+
+    let preview: {
+      content: string;
+      sender: string;
+      type: string;
+      whatsappStatus: string | null;
+      outbound: boolean;
+    } | null = null;
+    if (lastMsg) {
+      const rid = extractProductRetailerId(lastMsg);
+      let content = previewSlice(lastMsg.content, 90);
+      let type = lastMsg.type ?? 'text';
+      if (rid) {
+        type = 'product';
+        const card = await buildProductCard(ctx, rid, retailerToProp);
+        content = card?.title
+          ? `🏡 ${card.title}`
+          : '🏡 Seleccionó una finca del catálogo';
+      }
+      preview = {
+        content,
+        sender: lastMsg.sender,
+        type,
+        whatsappStatus:
+          lastMsg.sender === 'assistant' ? lastMsg.whatsappStatus ?? null : null,
+        outbound: lastMsg.sender === 'assistant',
+      };
+    }
+
+    out.push({
+      conversationId: c._id,
+      name: contact?.name ?? 'Sin nombre',
+      phone: contact?.phone ?? '',
+      status: c.status,
+      channel: c.channel,
+      unread,
+      priority: c.priority ?? null,
+      operationalState: c.operationalState ?? null,
+      assignedUserId: c.assignedUserId ?? null,
+      assignedUserName: c.assignedUserName ?? null,
+      lastMessageAt: c.lastMessageAt ?? c.createdAt,
+      aiEligible: isQuickEligibleForAi(c).eligible,
+      aiManualOverride: c.aiManualOverride ?? false,
+      pinned: c.pinned ?? false,
+      archived: c.archived ?? false,
+      isOwner: c.isOwner ?? false,
+      labels,
+      preview,
+    });
+  }
+  return out;
+}
+
 export const listConversations = query({
   // Requerido por usePaginatedQuery (si es optional, el typecheck de Next falla).
   args: {
@@ -168,107 +256,93 @@ export const listConversations = query({
       );
     }
     const result = await ordered.paginate(paginationOpts);
-    // Catálogo de listas/etiquetas (una vez) para resolver los ids por conversación.
-    const allLabels = await ctx.db.query('labels').collect();
-    const labelById = new Map(allLabels.map((l) => [String(l._id), l]));
-    // Mapa retailer → property para picks de catálogo en preview.
-    const catalogMaps = await ctx.db.query('propertyWhatsAppCatalog').collect();
-    const retailerToProp = new Map(
-      catalogMaps.map((mp) => [mp.productRetailerId, mp.propertyId] as const),
-    );
-
-    const out = [];
-    for (const c of result.page) {
-      if (c.deletedAt) continue;
-      const contact = await ctx.db.get(c.contactId);
-      // Traemos la cola reciente (desc) para: (a) preview del último mensaje y
-      // (b) contar "no leídos" REALES. No confiamos en `inboxUnreadCount`: ese
-      // contador solo se reseteaba al abrir el chat, así que quedaba inflado en
-      // chats que el bot ya respondió (badge fantasma).
-      const recent = await ctx.db
-        .query('messages')
-        .withIndex('by_conversation', (q) => q.eq('conversationId', c._id))
-        .order('desc')
-        .take(50);
-      const visible = recent.filter((m) => !m.deletedAt);
-      const lastMsg = visible[0] ?? null;
-      // No leídos = mensajes del cliente al final de la conversación sin respuesta
-      // nuestra. Cortamos al primer mensaje 'assistant' (ya respondimos) o al
-      // primero ya leído (createdAt <= inboxLastReadAt). Las notas 'system' no
-      // cuentan ni cortan.
-      const lastReadAt = c.inboxLastReadAt ?? 0;
-      let unread = 0;
-      for (const m of visible) {
-        if (m.sender === 'assistant') {
-          // Un mensaje AUTOMÁTICO de ausencia / fuera de horario NO cuenta como
-          // "atendido": el cliente escribió algo real y solo recibió una
-          // plantilla. Lo saltamos para que el chat siga como NO LEÍDO y un
-          // Experto lo tome. Una respuesta de verdad (bot o humano) sí corta.
-          if (AUTO_AWAY_SOURCES.has(m.metadata?.source)) continue;
-          break;
-        }
-        if (m.sender === 'system') continue;
-        if (m.createdAt <= lastReadAt) break;
-        unread++;
-      }
-      const labels = (c.labelIds ?? [])
-        .map((id) => labelById.get(String(id)))
-        .filter((l): l is NonNullable<typeof l> => !!l)
-        .map((l) => ({ id: l._id, name: l.name, color: l.color, emoji: l.emoji ?? null }));
-
-      // Preview: si el último mensaje es pick de catálogo, mostrar nombre de finca.
-      let preview: {
-        content: string;
-        sender: string;
-        type: string;
-        whatsappStatus: string | null;
-        outbound: boolean;
-      } | null = null;
-      if (lastMsg) {
-        const rid = extractProductRetailerId(lastMsg);
-        let content = previewSlice(lastMsg.content, 90);
-        let type = lastMsg.type ?? 'text';
-        if (rid) {
-          type = 'product';
-          const card = await buildProductCard(ctx, rid, retailerToProp);
-          content = card?.title
-            ? `🏡 ${card.title}`
-            : '🏡 Seleccionó una finca del catálogo';
-        }
-        preview = {
-          content,
-          sender: lastMsg.sender,
-          type,
-          whatsappStatus:
-            lastMsg.sender === 'assistant' ? lastMsg.whatsappStatus ?? null : null,
-          outbound: lastMsg.sender === 'assistant',
-        };
-      }
-
-      out.push({
-        conversationId: c._id,
-        name: contact?.name ?? 'Sin nombre',
-        phone: contact?.phone ?? '',
-        status: c.status,
-        channel: c.channel,
-        unread,
-        priority: c.priority ?? null,
-        operationalState: c.operationalState ?? null,
-        assignedUserId: c.assignedUserId ?? null,
-        assignedUserName: c.assignedUserName ?? null,
-        lastMessageAt: c.lastMessageAt ?? c.createdAt,
-        aiEligible: isQuickEligibleForAi(c).eligible,
-        aiManualOverride: c.aiManualOverride ?? false,
-        pinned: c.pinned ?? false,
-        archived: c.archived ?? false,
-        isOwner: c.isOwner ?? false,
-        labels,
-        preview,
-      });
-    }
+    const out = await toInboxRows(ctx, result.page);
     // OJO: el orden "fijadas primero" se aplica en el cliente sobre lo ya
     // cargado — con paginación el servidor entrega por último mensaje.
     return { ...result, page: out };
+  },
+});
+
+/**
+ * Búsqueda GLOBAL de chats por nombre o teléfono (no solo la página cargada).
+ * Usa search indexes de contacts; mínimo 2 caracteres.
+ */
+export const searchConversations = query({
+  args: {
+    search: v.string(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    assignedUserId: v.optional(v.string()),
+    includeArchived: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const raw = args.search.trim();
+    const digits = raw.replace(/\D/g, '');
+    if (raw.length < 2 && digits.length < 2) return [];
+
+    const limit = Math.min(Math.max(args.limit ?? 40, 1), 60);
+    const contactIds = new Set<Id<'contacts'>>();
+
+    if (raw.length >= 2) {
+      const byName = await ctx.db
+        .query('contacts')
+        .withSearchIndex('search_name', (q) => q.search('name', raw))
+        .take(40);
+      for (const c of byName) contactIds.add(c._id);
+    }
+
+    if (digits.length >= 2) {
+      const byPhone = await ctx.db
+        .query('contacts')
+        .withSearchIndex('search_phone', (q) => q.search('phone', digits))
+        .take(40);
+      for (const c of byPhone) contactIds.add(c._id);
+
+      // Coincidencia exacta / sufijo común (últimos 10 dígitos) vía índice.
+      if (digits.length >= 7) {
+        const suffix = digits.slice(-10);
+        const candidates = [
+          digits,
+          suffix,
+          `57${suffix}`,
+          `+57${suffix}`,
+        ];
+        for (const phone of candidates) {
+          const hit = await ctx.db
+            .query('contacts')
+            .withIndex('by_phone', (q) => q.eq('phone', phone))
+            .first();
+          if (hit) contactIds.add(hit._id);
+        }
+      }
+    }
+
+    if (contactIds.size === 0) return [];
+
+    const convs: Doc<'conversations'>[] = [];
+    for (const contactId of contactIds) {
+      const rows = await ctx.db
+        .query('conversations')
+        .withIndex('by_contact', (q) => q.eq('contactId', contactId))
+        .collect();
+      for (const c of rows) {
+        if (c.deletedAt) continue;
+        if (!args.includeArchived && c.archived) continue;
+        if (args.assignedUserId != null && c.assignedUserId !== args.assignedUserId) {
+          continue;
+        }
+        const at = c.lastMessageAt ?? c.createdAt;
+        if (args.from != null && at < args.from) continue;
+        if (args.to != null && at > args.to) continue;
+        convs.push(c);
+      }
+    }
+
+    convs.sort(
+      (a, b) => (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt),
+    );
+    return await toInboxRows(ctx, convs.slice(0, limit));
   },
 });
 
