@@ -466,28 +466,6 @@ export default function ReservationsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // Show status toasts based on query params
-  useEffect(() => {
-    const success = searchParams.get("success");
-    const error = searchParams.get("error");
-    const migrate = searchParams.get("migrate");
-    if (success) {
-      if (migrate === "1") {
-        toast.success(
-          "Calendario conectado. Usa «Migrar reservas» para copiarlas al nuevo calendario.",
-          { duration: 9000 },
-        );
-      } else {
-        toast.success("¡Google Calendar conectado correctamente!");
-      }
-      router.replace("/admin/reservations");
-    }
-    if (error) {
-      toast.error(`Error de conexión: ${error}`);
-      router.replace("/admin/reservations");
-    }
-  }, [searchParams, router]);
-
   useEffect(() => {
     if (dayFilter) {
       const day = new Date(
@@ -545,6 +523,34 @@ export default function ReservationsPage() {
     isLoading: isLoadingStatus,
     refetch: refetchStatus,
   } = useCalendarStatus();
+
+  // Toast de resultado del OAuth (?success/?error del callback). Se valida
+  // contra el ESTADO REAL de la conexión: si al volver (o con el botón atrás
+  // del navegador) el calendario ya no está conectado, no se muestra el
+  // "conectado" fantasma. La URL se limpia siempre para no re-disparar.
+  useEffect(() => {
+    const success = searchParams.get("success");
+    const error = searchParams.get("error");
+    const migrate = searchParams.get("migrate");
+    if (success) {
+      if (isLoadingStatus) return; // espera el estado real antes de decidir
+      if (calendarStatus?.connected) {
+        if (migrate === "1") {
+          toast.success(
+            "Calendario conectado. Usa «Migrar reservas» para copiarlas al nuevo calendario.",
+            { duration: 9000 },
+          );
+        } else {
+          toast.success("¡Google Calendar conectado correctamente!");
+        }
+      }
+      router.replace("/admin/reservations");
+    }
+    if (error) {
+      toast.error(`Error de conexión: ${error}`);
+      router.replace("/admin/reservations");
+    }
+  }, [searchParams, router, isLoadingStatus, calendarStatus?.connected]);
 
   // Desglose de precio de la reserva seleccionada — Convex directo, reactivo.
   const {
