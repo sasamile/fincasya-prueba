@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import {
   buildStopWords,
+  parseClientNameFromTitle,
   suggestPropertyForEvent,
   type PropertyForMatch,
 } from './calendarEventMatch';
@@ -69,4 +70,26 @@ test('evento que no es una reserva → sin sugerencia', () => {
 test('solo el municipio, sin nombre de finca → sin sugerencia', () => {
   // "TOCAIMA OCUPADA": el municipio no identifica CUÁL finca es.
   expect(suggest('TOCAIMA OCUPADA').propertyId).toBeNull();
+});
+
+test('nombre del cliente: quita el código de reserva y corta en la coma', () => {
+  expect(parseClientNameFromTitle('2666 JAIME ANDRES CASTILLO, MONTEBELLO 04 NOCHES')).toBe(
+    'Jaime Andres Castillo',
+  );
+  expect(parseClientNameFromTitle('A0525 CATHERIN LOPEZ -MELGAR NATURAL DOS NOCHES')).toBe(
+    'Catherin Lopez',
+  );
+  // Guion inicial + código: "-A0542 CAROL VANESA ROJAS, TOCAIMA UNA NOCHE"
+  expect(parseClientNameFromTitle('-A0542 CAROL VANESA ROJAS, TOCAIMA UNA NOCHE')).toBe(
+    'Carol Vanesa Rojas',
+  );
+  expect(parseClientNameFromTitle('V-A0475 ANDRES FABIAN GOMEZ, NAPOLES DOS NOCHES')).toBe(
+    'Andres Fabian Gomez',
+  );
+});
+
+test('nombre del cliente: títulos sin cliente → null (lo escribe el operador)', () => {
+  expect(parseClientNameFromTitle('CHIMBI OCUPADA')).toBeNull();
+  expect(parseClientNameFromTitle('TOCAIMA OCUPADA')).toBeNull();
+  expect(parseClientNameFromTitle('Cita laboratorios 8 AM')).toBeNull();
 });

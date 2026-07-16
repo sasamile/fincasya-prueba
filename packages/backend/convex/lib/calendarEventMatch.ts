@@ -105,6 +105,36 @@ function containsToken(text: string, token: string): boolean {
   return text.includes(token);
 }
 
+/** "jaime andres castillo" → "Jaime Andres Castillo". */
+function titleCase(s: string): string {
+  return s
+    .toLocaleLowerCase('es-CO')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toLocaleUpperCase('es-CO') + w.slice(1))
+    .join(' ');
+}
+
+/**
+ * Saca el NOMBRE DEL CLIENTE del título para precargar la reserva:
+ *   "2666 JAIME ANDRES CASTILLO, MONTEBELLO 04 NOCHES" → "Jaime Andres Castillo"
+ * Vive en la zona del cliente (antes de la coma/guion), después del código de
+ * reserva ("2666", "A0525", "V-A0475"). Si el título no tiene esa forma
+ * (ej. "CHIMBI OCUPADA"), devuelve null y el operador lo escribe.
+ */
+export function parseClientNameFromTitle(summary: string): string | null {
+  const raw = (summary ?? '').replace(/^[^\p{L}\p{N}]+/u, '');
+  const comma = raw.indexOf(',');
+  const idx = comma >= 0 ? comma : raw.search(/[\-–—]/);
+  if (idx <= 0) return null;
+  const words = raw.slice(0, idx).trim().split(/\s+/).filter(Boolean);
+  // Descarta los códigos del inicio (cualquier palabra que traiga dígitos).
+  while (words.length > 0 && /\d/.test(words[0])) words.shift();
+  const name = words.join(' ').trim();
+  if (name.length < 4 || words.length < 2) return null; // "OCUPADA", basura
+  return titleCase(name);
+}
+
 /**
  * Sugiere la finca de un evento. Devuelve confianza y alternativas; el operador
  * siempre puede corregir en la pantalla de revisión.

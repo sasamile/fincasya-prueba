@@ -3,6 +3,7 @@ import { action, internalAction, internalQuery, mutation, query } from "./_gener
 import { api, internal } from "./_generated/api";
 import {
   buildStopWords,
+  parseClientNameFromTitle,
   suggestPropertyForEvent,
 } from "./lib/calendarEventMatch";
 
@@ -461,6 +462,8 @@ export const getImportContext = internalQuery({
 
 export type ImportCandidate = ExternalCalendarEvent & {
   suggestedPropertyId: string | null;
+  /** Nombre del cliente sacado del título (para precargar la reserva). */
+  suggestedClientName: string | null;
   confidence: "alta" | "media" | "baja" | "ninguna";
   alternatives: string[];
   matchedOn: string | null;
@@ -491,6 +494,7 @@ export const listImportCandidates = action({
       return {
         ...e,
         suggestedPropertyId: s.propertyId,
+        suggestedClientName: parseClientNameFromTitle(e.summary),
         confidence: s.confidence,
         alternatives: s.alternatives,
         matchedOn: s.matchedOn,

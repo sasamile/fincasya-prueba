@@ -582,6 +582,8 @@ export default function ReservationsPage() {
           fechaSalida: e.endMs,
           isExternal: true as const,
           htmlLink: e.htmlLink,
+          suggestedPropertyId: e.suggestedPropertyId,
+          suggestedClientName: e.suggestedClientName,
         })),
       ] as unknown as CalendarBooking[],
     [reservations, externalEvents],
@@ -2209,10 +2211,22 @@ export default function ReservationsPage() {
                   onNavigate={setDate}
                   onViewChange={setCalendarView}
                   onSelectBooking={(b) => {
-                    // Evento del Google Calendar (no es una reserva de FincasYa):
-                    // no hay ficha que abrir — se abre en Google.
+                    // Evento del Google Calendar: aún NO es una reserva, así que
+                    // no hay ficha que abrir. Se abre "Nueva Reserva" precargada
+                    // con lo que se puede sacar del título (cliente, finca,
+                    // fechas); el resto (cédula, celular, precio) lo completa el
+                    // operador — el evento de Google no trae esos datos.
                     if (b.isExternal) {
-                      if (b.htmlLink) window.open(b.htmlLink, "_blank");
+                      setEditingBooking({
+                        nombreCompleto: b.suggestedClientName ?? "",
+                        ...(b.suggestedPropertyId
+                          ? { propertyId: b.suggestedPropertyId }
+                          : {}),
+                        fechaEntrada: b.fechaEntrada,
+                        fechaSalida: b.fechaSalida,
+                        calendarLabel: "",
+                      });
+                      setIsEditModalOpen(true);
                       return;
                     }
                     setSelectedBooking(b);

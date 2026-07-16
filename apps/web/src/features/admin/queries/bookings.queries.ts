@@ -21,6 +21,12 @@ export type ExternalCalendarEvent = {
   allDay: boolean;
   htmlLink: string | null;
   location: string | null;
+  /** Finca sugerida por el título (para precargar la reserva al hacer clic). */
+  suggestedPropertyId: string | null;
+  /** Nombre del cliente sacado del título. */
+  suggestedClientName: string | null;
+  /** Ya se cargó como bloqueo desde la pantalla de revisión. */
+  alreadyImported: boolean;
 };
 
 /**
@@ -28,13 +34,15 @@ export type ExternalCalendarEvent = {
  * visible. SOLO LECTURA: se pintan junto a las reservas de FincasYa para que el
  * equipo vea su calendario completo. Excluye los eventos creados por FincasYa
  * (esos ya vienen de la base). Si no hay calendario conectado, devuelve [].
+ * Trae además la finca/cliente sugeridos para poder convertir el evento en
+ * reserva de un clic.
  */
 export function useExternalCalendarEvents(
   rangeStartMs: number,
   rangeEndMs: number,
   enabled: boolean,
 ) {
-  const listEvents = useAction(api.googleCalendar.listExternalEvents);
+  const listEvents = useAction(api.googleCalendar.listImportCandidates);
   const [data, setData] = useState<ExternalCalendarEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
