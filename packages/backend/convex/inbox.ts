@@ -1380,15 +1380,23 @@ export const listCatalogProperties = query({
       const slug = p.slug?.trim() || null;
       const inWhatsAppCatalog = p.visibleInWhatsAppCatalog !== false;
 
+      // `sendable` = ¿se puede enviar TÉCNICAMENTE la ficha Meta? Solo depende
+      // de que la finca tenga producto registrado en el catálogo Meta.
+      // OJO: NO se mira `inWhatsAppCatalog` aquí. Ese toggle es una regla para
+      // el BOT ("no la ofrezcas sola"); el Experto sí puede enviarla a mano
+      // cuando el cliente la pide. El modal muestra el aviso "el bot no la
+      // envía" pero la deja seleccionable.
       let sendable = false;
-      if (catalog && inWhatsAppCatalog) {
+      if (catalog) {
         const mapping = await ctx.db
           .query('propertyWhatsAppCatalog')
           .withIndex('by_property_and_catalog', (q) =>
             q.eq('propertyId', p._id).eq('catalogId', catalog._id),
           )
           .first();
-        sendable = Boolean(mapping) && !isInvalidCatalogMapping(mapping!.productRetailerId, String(p._id));
+        sendable =
+          Boolean(mapping) &&
+          !isInvalidCatalogMapping(mapping!.productRetailerId, String(p._id));
       }
 
       const img = await ctx.db
@@ -1633,6 +1641,9 @@ export const _autoCatalogContact = internalQuery({
  * favoritas + cupo + zona), en un clic. Lo dispara el operador desde el chat
  * cuando esta ocupado. Envia el intro oficial + las fichas y toma la
  * conversacion (queda en modo humano).
+ *
+ * Si `propertyIds` viene, se respetan (el Experto desmarcó algunas del preview);
+ * si no, se usa el pick automático del bot.
  */
 export const sendAutoCatalog = action({
   args: {
@@ -1643,6 +1654,8 @@ export const sendAutoCatalog = action({
     /** YYYY-MM-DD (para filtrar por disponibilidad). */
     fechaEntrada: v.optional(v.string()),
     fechaSalida: v.optional(v.string()),
+    /** Subconjunto elegido en el preview (opcional). */
+    propertyIds: v.optional(v.array(v.id('properties'))),
   },
   handler: async (
     ctx,
@@ -1655,29 +1668,58 @@ export const sendAutoCatalog = action({
   }> => {
     const feMs = args.fechaEntrada ? Date.parse(args.fechaEntrada) : NaN;
     const fsMs = args.fechaSalida ? Date.parse(args.fechaSalida) : NaN;
-    const pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
-      conversationId: args.conversationId,
-      personas: args.personas,
-      zona: args.zona,
-      mascotas: args.mascotas,
-      fechaEntradaMs: Number.isFinite(feMs) ? feMs : undefined,
-      fechaSalidaMs: Number.isFinite(fsMs) ? fsMs : undefined,
-    });
-    if (!pick.ok) return { ok: false, motivo: pick.motivo };
-    if (pick.items.length === 0) {
-      return {
-        ok: false,
-        motivo:
-          'No hay fincas disponibles con esos filtros (fechas / cupo / zona). Ajusta el filtro o busca en otra zona.',
-      };
+    const feOk = Number.isFinite(feMs) ? feMs : undefined;
+    const fsOk = Number.isFinite(fsMs) ? fsMs : undefined;
+
+    let propertyIds: Id<'properties'>[];
+    let enviadasTitles: string[] | undefined;
+
+    if (args.propertyIds && args.propertyIds.length > 0) {
+      propertyIds = args.propertyIds;
+    } else {
+      const pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
+        conversationId: args.conversationId,
+        personas: args.personas,
+        zona: args.zona,
+        mascotas: args.mascotas,
+        fechaEntradaMs: feOk,
+        fechaSalidaMs: fsOk,
+      });
+      if (!pick.ok) return { ok: false, motivo: pick.motivo };
+      if (pick.items.length === 0) {
+        return {
+          ok: false,
+          motivo:
+            'No hay fincas disponibles con esos filtros (fechas / cupo / zona). Ajusta el filtro o busca en otra zona.',
+        };
+      }
+      propertyIds = pick.items
+        .slice(0, MAX_CATALOG_CARDS)
+        .map((i) => i.propertyId as Id<'properties'>);
+      enviadasTitles = pick.items.map((i) => i.title);
     }
-    const propertyIds = pick.items.map((i) => i.propertyId as Id<'properties'>);
 
     const built = await ctx.runQuery(
       internal.inbox.buildCatalogCardsForSelection,
       { conversationId: args.conversationId, propertyIds },
     );
     if (!built.ok) return { ok: false, motivo: built.motivo };
+    if (built.cards.length === 0) {
+      return {
+        ok: false,
+        motivo: 'Ninguna de las fincas seleccionadas tiene ficha Meta lista para enviar.',
+      };
+    }
+
+    // Persiste filtros para el próximo prefill del modal.
+    await ctx.runMutation(internal.agent.saveCatalogSearch, {
+      conversationId: args.conversationId,
+      location: args.zona,
+      fechaEntradaMs: feOk,
+      fechaSalidaMs: fsOk,
+      minCapacity: args.personas,
+      hasPets: args.mascotas,
+    });
 
     await ctx.runMutation(internal.inbox.takeOverConversation, {
       conversationId: args.conversationId,
@@ -1715,8 +1757,93 @@ export const sendAutoCatalog = action({
     return {
       ok: true,
       queued: built.cards.length,
-      enviadas: pick.items.map((i) => i.title),
+      enviadas: enviadasTitles,
     };
+  },
+});
+
+/**
+ * Preview de lo que mandaría el bot con esos filtros — el Experto puede
+ * desmarcar fincas antes de enviar.
+ */
+export const previewAutoCatalog = action({
+  args: {
+    conversationId: v.id('conversations'),
+    personas: v.optional(v.number()),
+    zona: v.optional(v.string()),
+    mascotas: v.optional(v.boolean()),
+    fechaEntrada: v.optional(v.string()),
+    fechaSalida: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    ok: boolean;
+    motivo?: string;
+    items: Array<{
+      propertyId: Id<'properties'>;
+      title: string;
+      location: string;
+      capacity: number;
+      priceFrom: number;
+      image: string | null;
+      isFavorite: boolean;
+    }>;
+  }> => {
+    const feMs = args.fechaEntrada ? Date.parse(args.fechaEntrada) : NaN;
+    const fsMs = args.fechaSalida ? Date.parse(args.fechaSalida) : NaN;
+    const pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
+      conversationId: args.conversationId,
+      personas: args.personas,
+      zona: args.zona,
+      mascotas: args.mascotas,
+      fechaEntradaMs: Number.isFinite(feMs) ? feMs : undefined,
+      fechaSalidaMs: Number.isFinite(fsMs) ? fsMs : undefined,
+    });
+    if (!pick.ok) return { ok: false, motivo: pick.motivo, items: [] };
+    const slice = pick.items.slice(0, MAX_CATALOG_CARDS);
+    const items = await ctx.runQuery(internal.inbox._enrichCatalogPreviewItems, {
+      propertyIds: slice.map((i) => i.propertyId as Id<'properties'>),
+    });
+    return { ok: true, items };
+  },
+});
+
+/** Datos de UI para el preview del catálogo automático. */
+export const _enrichCatalogPreviewItems = internalQuery({
+  args: { propertyIds: v.array(v.id('properties')) },
+  handler: async (ctx, { propertyIds }) => {
+    const out: Array<{
+      propertyId: Id<'properties'>;
+      title: string;
+      location: string;
+      capacity: number;
+      priceFrom: number;
+      image: string | null;
+      isFavorite: boolean;
+    }> = [];
+    for (const propertyId of propertyIds) {
+      const p = await ctx.db.get(propertyId);
+      if (!p) continue;
+      const img = await ctx.db
+        .query('propertyImages')
+        .withIndex('by_property', (q) => q.eq('propertyId', p._id))
+        .first();
+      const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
+        (n): n is number => typeof n === 'number' && n > 0,
+      );
+      out.push({
+        propertyId: p._id,
+        title: p.title,
+        location: p.location ?? '',
+        capacity: p.capacity ?? 0,
+        priceFrom: prices.length > 0 ? Math.min(...prices) : 0,
+        image: img?.url ?? null,
+        isFavorite: p.isFavorite === true,
+      });
+    }
+    return out;
   },
 });
 
@@ -1757,6 +1884,99 @@ Devuelve UNICAMENTE el mensaje reescrito, sin comillas ni explicaciones.`;
   },
 });
 
+/**
+ * Asistente del Experto: lee el chat y sugiere un mensaje para el borrador.
+ * NO envía por WhatsApp ni escribe en la base — solo recomienda texto.
+ */
+export const suggestAdvisorReply = action({
+  args: {
+    conversationId: v.id('conversations'),
+    /** Instrucción opcional del asesor ("pídele la cédula", "cierra con calidez"…). */
+    note: v.optional(v.string()),
+  },
+  returns: v.object({
+    ok: v.boolean(),
+    suggestion: v.string(),
+    error: v.optional(v.string()),
+  }),
+  handler: async (
+    ctx,
+    { conversationId, note },
+  ): Promise<{ ok: boolean; suggestion: string; error?: string }> => {
+    const context = await ctx.runQuery(internal.agent.getAgentContext, {
+      conversationId,
+    });
+    if (!context) {
+      return { ok: false, suggestion: '', error: 'Conversación no existe' };
+    }
+    const history = context.history.slice(-18);
+    if (history.length === 0) {
+      return {
+        ok: false,
+        suggestion: '',
+        error: 'Aún no hay mensajes para sugerir una respuesta',
+      };
+    }
+
+    const transcript = history
+      .map((m) => {
+        const who =
+          m.sender === 'user'
+            ? 'Cliente'
+            : 'Equipo';
+        return `${who}: ${m.content}`;
+      })
+      .join('\n');
+
+    const contact = context.contactName?.trim() || 'el cliente';
+    const noteTrim = (note ?? '').trim();
+    const system = `Eres el asistente interno de un Experto de FincasYa.com (alquiler de fincas, atencion por WhatsApp).
+Tu trabajo: redactar UN mensaje listo para que el Experto lo revise y envie al cliente.
+REGLAS:
+- Espanol colombiano, tuteo ("tu", "te"). Calido, breve, profesional (WhatsApp, no correo).
+- Si conoces el nombre del cliente, puedes usar "Sr."/"Sra." + nombre; si no, no inventes titulo ni nombre.
+- 1 a 3 emojis naturales al FINAL (🏡 🤝 ✨ 📅 😊 🙌), nunca a media frase.
+- PROHIBIDO "pet friendly": di "fincas que aceptan mascotas".
+- NO inventes precios, disponibilidad, numeros de cuenta, fechas ni promesas que no esten en el historial.
+- Si falta un dato critico, pide ese dato con naturalidad.
+- Si el Experto te dejo una nota/instruccion, priorizala sin inventar datos.
+- NO digas que eres una IA ni "como asistente". Escribe como el Experto humano.
+Devuelve UNICAMENTE el mensaje sugerido, sin comillas ni explicaciones.`;
+
+    const userPrompt =
+      `Cliente: ${contact}\n\nHistorial reciente:\n${transcript}` +
+      (noteTrim
+        ? `\n\nInstruccion del Experto: ${noteTrim}`
+        : '\n\nInstruccion del Experto: sugiere la mejor siguiente respuesta segun el hilo.');
+
+    try {
+      const { content } = await chatCompletion({
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.5,
+      });
+      const suggestion = (content ?? '').trim();
+      if (!suggestion) {
+        return {
+          ok: false,
+          suggestion: '',
+          error: 'La IA no devolvió texto. Intenta de nuevo.',
+        };
+      }
+      return { ok: true, suggestion };
+    } catch (err) {
+      console.error('[suggestAdvisorReply] fallo IA', err);
+      return {
+        ok: false,
+        suggestion: '',
+        error: err instanceof Error ? err.message : 'No se pudo sugerir',
+      };
+    }
+  },
+});
+
 /** Prefill del formulario de catálogo automático con lo último que pidió el cliente. */
 export const getCatalogPrefill = query({
   args: { conversationId: v.id('conversations') },
@@ -1764,19 +1984,137 @@ export const getCatalogPrefill = query({
     const conv = await ctx.db.get(conversationId);
     if (!conv) return null;
     const s = conv.lastCatalogSearch;
-    const toIso = (ms?: number) =>
-      typeof ms === 'number' && ms > 0
-        ? new Date(ms).toISOString().slice(0, 10)
-        : '';
+    const toIso = (ms?: number) => {
+      if (typeof ms !== 'number' || ms <= 0) return '';
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Bogota',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(ms));
+    };
+
+    let fechaEntrada = toIso(s?.fechaEntrada);
+    let fechaSalida = toIso(s?.fechaSalida);
+    let personas: number | null =
+      typeof s?.minCapacity === 'number' ? s.minCapacity : null;
+    let zona = (conv.lastRequestedZone ?? s?.location ?? '').trim();
+    let mascotas = s?.hasPets === true;
+
+    // Si faltan datos, intenta leerlos de mensajes recientes del cliente.
+    if (!fechaEntrada || !fechaSalida || personas == null || !zona) {
+      const recent = await ctx.db
+        .query('messages')
+        .withIndex('by_conversation', (q) => q.eq('conversationId', conversationId))
+        .order('desc')
+        .take(40);
+      const userText = recent
+        .filter((m) => m.sender === 'user' && !m.deletedAt)
+        .map((m) => m.content)
+        .join('\n');
+      const hints = extractCatalogHintsFromChat(userText);
+      if (!fechaEntrada && hints.fechaEntrada) fechaEntrada = hints.fechaEntrada;
+      if (!fechaSalida && hints.fechaSalida) fechaSalida = hints.fechaSalida;
+      if (personas == null && hints.personas != null) personas = hints.personas;
+      if (!zona && hints.zona) zona = hints.zona;
+      if (!mascotas && hints.mascotas) mascotas = true;
+    }
+
     return {
-      zona: (conv.lastRequestedZone ?? s?.location ?? '').trim(),
-      personas: typeof s?.minCapacity === 'number' ? s.minCapacity : null,
-      mascotas: s?.hasPets === true,
-      fechaEntrada: toIso(s?.fechaEntrada),
-      fechaSalida: toIso(s?.fechaSalida),
+      zona,
+      personas,
+      mascotas,
+      fechaEntrada,
+      fechaSalida,
     };
   },
 });
+
+/** Extrae fechas / cupo / zona aproximados del texto del cliente. */
+function extractCatalogHintsFromChat(text: string): {
+  fechaEntrada?: string;
+  fechaSalida?: string;
+  personas?: number;
+  zona?: string;
+  mascotas?: boolean;
+} {
+  const out: {
+    fechaEntrada?: string;
+    fechaSalida?: string;
+    personas?: number;
+    zona?: string;
+    mascotas?: boolean;
+  } = {};
+
+  const isos = [...text.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)].map((m) => m[1]!);
+  if (isos.length >= 2) {
+    out.fechaEntrada = isos[0];
+    out.fechaSalida = isos[1];
+  } else {
+    const dmys = [
+      ...text.matchAll(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](20\d{2})\b/g),
+    ];
+    if (dmys.length >= 2) {
+      const toIso = (m: RegExpMatchArray) => {
+        const d = m[1]!.padStart(2, '0');
+        const mo = m[2]!.padStart(2, '0');
+        return `${m[3]}-${mo}-${d}`;
+      };
+      out.fechaEntrada = toIso(dmys[0]!);
+      out.fechaSalida = toIso(dmys[1]!);
+    }
+  }
+
+  const pers =
+    text.match(/\b(\d{1,3})\s*(?:personas?|pax|gente)\b/i) ||
+    text.match(/\bsomos\s+(?:unas?\s+)?(\d{1,3})\b/i) ||
+    text.match(/\bpara\s+(\d{1,3})\b/i) ||
+    text.match(/\bgrupo\s+de\s+(\d{1,3})\b/i);
+  if (pers?.[1]) {
+    const n = Number(pers[1]);
+    if (n >= 1 && n <= 200) out.personas = n;
+  }
+
+  const zones = [
+    'Melgar',
+    'Girardot',
+    'Anapoima',
+    'Apulo',
+    'Tocaima',
+    'Ricaurte',
+    'Carmen de Apicalá',
+    'Nilo',
+    'Villeta',
+    'Guaduas',
+    'Honda',
+    'Mariquita',
+    'Ibagué',
+    'Bogotá',
+    'Cundinamarca',
+    'Tolima',
+    'Cartagena',
+    'Santa Marta',
+    'Barú',
+    'Coveñas',
+    'Tolú',
+  ];
+  const lower = text.toLowerCase();
+  for (const z of zones) {
+    if (lower.includes(z.toLowerCase())) {
+      out.zona = z;
+      break;
+    }
+  }
+  if (!out.zona && /\bcerca\s+(?:a|de)\s+bogot/i.test(text)) {
+    out.zona = 'cerca a Bogotá';
+  }
+
+  if (/\bmascotas?\b|\bperr[oa]s?\b|\bgat[oa]s?\b/i.test(text)) {
+    out.mascotas = true;
+  }
+
+  return out;
+}
 
 /** Arma las fichas web (imagen + caption + enlace) para las fincas seleccionadas. */
 export const buildWebFichasForSelection = internalQuery({

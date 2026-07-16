@@ -1,6 +1,7 @@
 /**
  * Modal "Compartir fincas" — el Experto elige fincas y las envía manualmente
  * por WhatsApp: fichas Meta (catálogo) o fichas web (foto + enlace fincasya.com).
+ * El envío automático (como el bot) vive en AutoCatalogModal.
  */
 import { useMemo, useState } from 'react';
 import { useAction, useQuery } from 'convex/react';
@@ -12,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { catalogCache } from '@/lib/queryCache';
 import { LoadingArea } from '@/components/ui/spinner';
+import { AutoCatalogModal } from '@/features/inbox/components/AutoCatalogModal';
 
 type CatalogRow = FunctionReturnType<typeof api.inbox.listCatalogProperties>[number];
 type ShareMode = 'meta' | 'web';
@@ -57,18 +59,31 @@ function CatalogListRow({
       <span
         className={cn(
           'flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition-colors',
-          selected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/50',
+          selected
+            ? 'border-primary bg-primary text-primary-foreground'
+            : 'border-muted-foreground/50',
         )}
       >
         {selected && (
-          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="3">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+          >
             <path d="M5 12l5 5L20 6" />
           </svg>
         )}
       </span>
       <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-muted">
         {p.image ? (
-          <img src={p.image} alt="" className="h-full w-full object-cover object-center" loading="lazy" />
+          <img
+            src={p.image}
+            alt=""
+            className="h-full w-full object-cover object-center"
+            loading="lazy"
+          />
         ) : null}
       </div>
       <div className="min-w-0 flex-1">
@@ -77,6 +92,11 @@ function CatalogListRow({
           👥 Hasta {p.capacity} · {p.location}
           {mode === 'meta' && !p.sendable && ' · sin ficha Meta'}
           {mode === 'web' && !p.webSendable && ' · sin slug o foto'}
+          {/* El toggle de catálogo apagado NO impide enviarla a mano: solo
+              avisa que el bot no la ofrece sola. */}
+          {p.sendable && !p.inWhatsAppCatalog && (
+            <span className="text-amber-600"> · el bot no la envía</span>
+          )}
         </p>
         <p className="text-[13px]">
           <span className="font-medium text-foreground">{formatCop(p.priceFrom)}</span>
@@ -99,7 +119,6 @@ export function CatalogModal({
   onClose: () => void;
 }) {
   const liveProperties = useQuery(api.inbox.listCatalogProperties);
-  // Caché en memoria: el catálogo abre al instante con lo último visto.
   const properties = liveProperties ?? (catalogCache.value as typeof liveProperties);
   if (liveProperties !== undefined) catalogCache.value = liveProperties;
   const sendCatalog = useAction(api.inbox.sendCatalogSelection);
@@ -110,48 +129,7 @@ export function CatalogModal({
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [dept, setDept] = useState<string>('Todos');
-
-  // --- Envío automático (misma lógica del bot) ---
-  const sendAuto = useAction(api.inbox.sendAutoCatalog);
-  const prefill = useQuery(api.inbox.getCatalogPrefill, { conversationId });
-  const [autoFe, setAutoFe] = useState('');
-  const [autoFs, setAutoFs] = useState('');
-  const [autoPersonas, setAutoPersonas] = useState('');
-  const [autoZona, setAutoZona] = useState('');
-  const [autoInit, setAutoInit] = useState(false);
-  const [autoSending, setAutoSending] = useState(false);
-  if (prefill && !autoInit) {
-    setAutoFe(prefill.fechaEntrada || '');
-    setAutoFs(prefill.fechaSalida || '');
-    setAutoPersonas(prefill.personas != null ? String(prefill.personas) : '');
-    setAutoZona(prefill.zona || '');
-    setAutoInit(true);
-  }
-
-  async function handleAutoSend() {
-    if (autoSending) return;
-    setAutoSending(true);
-    setResult(null);
-    try {
-      const res = await sendAuto({
-        conversationId,
-        personas: autoPersonas ? Number(autoPersonas) : undefined,
-        zona: autoZona.trim() || undefined,
-        fechaEntrada: autoFe || undefined,
-        fechaSalida: autoFs || undefined,
-      });
-      if (res.ok) {
-        setResult(`✓ Enviando ${res.queued ?? 0} finca(s) disponibles…`);
-        setTimeout(onClose, 500);
-      } else {
-        setResult(res.motivo ?? 'No se pudo enviar');
-      }
-    } catch (err) {
-      setResult(err instanceof Error ? err.message : 'Error al enviar');
-    } finally {
-      setAutoSending(false);
-    }
-  }
+  const [showAuto, setShowAuto] = useState(false);
 
   const departments = useMemo(() => {
     const counts = new Map<string, number>();
@@ -166,7 +144,9 @@ export function CatalogModal({
     if (!properties) return [];
     const q = search.trim().toLowerCase();
     return properties.filter((p) => {
-      if (mode === 'meta' && !p.inWhatsAppCatalog) return false;
+      // OJO: NO se filtra por `inWhatsAppCatalog`. Ese toggle solo le dice al
+      // BOT que no la ofrezca sola; el Experto sí puede enviarla a mano si el
+      // cliente la pide (la ficha lleva el aviso "el bot no la envía").
       if (dept !== 'Todos' && p.departamento !== dept) return false;
       return matchesSearch(p, q);
     });
@@ -240,68 +220,28 @@ export function CatalogModal({
         </button>
       </header>
 
-      {/* Envío automático: misma lógica del bot (disponibilidad + favoritas) en un clic */}
-      <div className="mx-4 mb-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
-        <p className="flex items-center gap-1.5 text-[13px] font-semibold">
-          <Zap className="h-4 w-4 text-primary" /> Enviar catálogo automático (como el bot)
-        </p>
-        <p className="mb-2 text-[11px] text-muted-foreground">
-          Manda las fincas <b>disponibles</b> para el filtro, con las favoritas de primeras.
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="text-[11px] font-medium text-muted-foreground">
-            Entrada
-            <input
-              type="date"
-              value={autoFe}
-              onChange={(e) => setAutoFe(e.target.value)}
-              className="mt-0.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground"
-            />
-          </label>
-          <label className="text-[11px] font-medium text-muted-foreground">
-            Salida
-            <input
-              type="date"
-              value={autoFs}
-              onChange={(e) => setAutoFs(e.target.value)}
-              className="mt-0.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground"
-            />
-          </label>
-          <label className="text-[11px] font-medium text-muted-foreground">
-            Personas
-            <input
-              type="number"
-              min={1}
-              value={autoPersonas}
-              onChange={(e) => setAutoPersonas(e.target.value)}
-              placeholder="Ej: 10"
-              className="mt-0.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground"
-            />
-          </label>
-          <label className="text-[11px] font-medium text-muted-foreground">
-            Zona (opcional)
-            <input
-              type="text"
-              value={autoZona}
-              onChange={(e) => setAutoZona(e.target.value)}
-              placeholder="Ej: Melgar"
-              className="mt-0.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground"
-            />
-          </label>
-        </div>
+      <div className="px-4 pb-3">
         <button
           type="button"
-          onClick={() => void handleAutoSend()}
-          disabled={autoSending}
-          className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-[13px] font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+          onClick={() => setShowAuto(true)}
+          className="flex w-full items-center gap-3 rounded-xl border border-primary/30 bg-primary/10 px-3.5 py-3 text-left transition hover:bg-primary/15"
         >
-          <Zap className="h-4 w-4" />
-          {autoSending ? 'Enviando…' : 'Enviar catálogo automático'}
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
+            <Zap className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] font-semibold">
+              Catálogo automático (como el bot)
+            </span>
+            <span className="block text-[12px] text-muted-foreground">
+              Fechas, personas y zona → preview y envío
+            </span>
+          </span>
         </button>
       </div>
 
       <div className="px-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        …o elige fincas manualmente
+        O elige fincas manualmente
       </div>
 
       <div className="flex gap-2 px-4 pb-2">
@@ -406,6 +346,14 @@ export function CatalogModal({
           {sending ? 'Enviando…' : mode === 'web' ? 'Enviar fichas' : 'Enviar'}
         </button>
       </footer>
+
+      {showAuto && (
+        <AutoCatalogModal
+          conversationId={conversationId}
+          onClose={() => setShowAuto(false)}
+          onSent={onClose}
+        />
+      )}
     </div>
   );
 }
