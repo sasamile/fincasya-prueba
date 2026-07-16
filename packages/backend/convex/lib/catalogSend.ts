@@ -14,10 +14,11 @@ const SEND_DIRECTLY = 'https://api.ycloud.com/v2/whatsapp/messages/sendDirectly'
 /** Pausa entre fichas — evita que Meta las agrupe en "Catalogo enviado". */
 export const BETWEEN_CATALOG_SENDS_MS = 1000;
 /**
- * Maximo de fichas EXITOSAS por envio (regla del equipo: se mandan hartas,
- * 16-20 fincas por lote; WhatsApp permite hasta 30).
+ * Maximo de fichas EXITOSAS por envio (regla del equipo 2026-07: hasta 12
+ * por lote; si el cliente pide MAS opciones se envia el siguiente lote —
+ * enviar_catalogo excluye las ya enviadas, asi que sale "el resto").
  */
-export const MAX_CATALOG_CARDS = 20;
+export const MAX_CATALOG_CARDS = 12;
 /**
  * Candidatos a intentar por envio: mas que el maximo de fichas porque
  * algunos productos pueden no estar registrados en el catalogo Meta
