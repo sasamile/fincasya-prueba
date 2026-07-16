@@ -363,12 +363,17 @@ function MessageBubble({
   contactName,
   conversationId,
   onReply,
+  onJumpToReply,
+  flash,
 }: {
   message: Message;
   highlight?: string;
   contactName: string;
   conversationId: Id<'conversations'>;
   onReply?: (m: Message) => void;
+  onJumpToReply?: (messageId: string) => void;
+  /** Resalte breve al saltar desde una cita (estilo WhatsApp). */
+  flash?: boolean;
 }) {
   const isUser = message.sender === 'user';
   const isBot = !isUser && !message.byAdvisor;
@@ -389,10 +394,13 @@ function MessageBubble({
 
   return (
     <div
+      id={`msg-${message.id}`}
+      data-msgid={message.id}
       className={cn(
-        'flex w-full',
+        'flex w-full scroll-mt-16',
         message.reaction ? 'mb-5' : 'mb-1',
         isUser ? 'justify-start' : 'justify-end',
+        flash && 'wa-msg-flash',
       )}
     >
       <SwipeToReply
@@ -435,9 +443,16 @@ function MessageBubble({
           </div>
         )}
 
-        {/* Respuesta citada */}
+        {/* Respuesta citada — clic salta al mensaje original (WhatsApp). */}
         {message.replyTo && (
-          <div className="mb-1 overflow-hidden rounded border-l-[3px] border-primary/70 bg-black/25 px-2 py-1">
+          <button
+            type="button"
+            className="mb-1 w-full overflow-hidden rounded border-l-[3px] border-primary/70 bg-black/25 px-2 py-1 text-left transition-colors hover:bg-black/35"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (message.replyTo?.id) onJumpToReply?.(message.replyTo.id);
+            }}
+          >
             <div className="text-[12px] font-medium text-primary">
               {message.replyTo.sender === 'user'
                 ? 'Cliente'
@@ -446,7 +461,7 @@ function MessageBubble({
                   : 'Bot'}
             </div>
             <div className="truncate text-[12px] text-muted-foreground">{message.replyTo.content}</div>
-          </div>
+          </button>
         )}
 
         {/* Contenido */}
@@ -605,8 +620,10 @@ export function ChatPanel({
   const [linkPreview, setLinkPreview] = useState<LinkPreviewData | null>(null);
   const [linkPreviewLoading, setLinkPreviewLoading] = useState(false);
   const [linkPreviewDismissed, setLinkPreviewDismissed] = useState<string | null>(null);
+  const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
+  const flashTimerRef = useRef<number | null>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const fileDocRef = useRef<HTMLInputElement>(null);
   const filePhotoRef = useRef<HTMLInputElement>(null);
@@ -741,6 +758,21 @@ export function ChatPanel({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'instant' as ScrollBehavior });
   }, [messages?.length, conv.conversationId]);
+
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current != null) window.clearTimeout(flashTimerRef.current);
+    };
+  }, []);
+
+  function jumpToRepliedMessage(messageId: string) {
+    const el = document.getElementById(`msg-${messageId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlashMessageId(messageId);
+    if (flashTimerRef.current != null) window.clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = window.setTimeout(() => setFlashMessageId(null), 1600);
+  }
 
   // El compositor crece con el contenido (como WhatsApp), hasta ~45% del alto.
   useEffect(() => {
@@ -1032,6 +1064,8 @@ export function ChatPanel({
                       contactName={conv.name}
                       conversationId={conv.conversationId}
                       onReply={startReply}
+                      onJumpToReply={jumpToRepliedMessage}
+                      flash={flashMessageId === m.id}
                     />
                   ))}
                 </div>
@@ -1258,9 +1292,18 @@ export function ChatPanel({
               ) : (
                 <button
                   type="button"
-                  className="wa-composer-icon"
+                  className="wa-composer-icon select-none touch-manipulation"
                   title="Grabar audio"
                   aria-label="Grabar audio"
+                  // En móvil el long-press dispara selección de texto; arrancamos
+                  // al toque y bloqueamos el menú nativo.
+                  onContextMenu={(e) => e.preventDefault()}
+                  onPointerDown={(e) => {
+                    if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setRecording(true);
+                  }}
                   onClick={() => setRecording(true)}
                 >
                   <Mic className="h-6 w-6" strokeWidth={1.5} />

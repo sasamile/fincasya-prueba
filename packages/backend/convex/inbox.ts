@@ -169,6 +169,10 @@ async function toInboxRows(ctx: QueryCtx, conversations: Doc<'conversations'>[])
       if (m.createdAt <= lastReadAt) break;
       unread++;
     }
+    // "Marcar como no leído" manual: inboxUnreadCount ≥ 1 aunque el último
+    // mensaje sea del Experto (si no, el badge nunca aparece).
+    const forced = c.inboxUnreadCount ?? 0;
+    if (forced > unread) unread = forced;
     const labels = (c.labelIds ?? [])
       .map((id) => labelById.get(String(id)))
       .filter((l): l is NonNullable<typeof l> => !!l)
@@ -396,8 +400,13 @@ export const getMessages = query({
       // Respuesta citada -> preview del mensaje al que responde. Si el mensaje
       // citado está en la ventana cargada, sale del mapa; si es más viejo (fuera
       // de la ventana), se resuelve por el índice by_wamid para que la cita
-      // igual aparezca.
-      let replyTo: { content: string; sender: string; fromAdvisor: boolean } | null = null;
+      // igual aparezca. Incluye `id` para que la UI pueda saltar al original.
+      let replyTo: {
+        id: Id<'messages'>;
+        content: string;
+        sender: string;
+        fromAdvisor: boolean;
+      } | null = null;
       if (m.replyToWamid) {
         let q = byWamid.get(m.replyToWamid) ?? null;
         if (!q) {
@@ -420,6 +429,7 @@ export const getMessages = query({
                       ? '🏡 Ficha de catálogo'
                       : previewSlice(q.content, 120);
           replyTo = {
+            id: q._id,
             content: label,
             sender: q.sender,
             fromAdvisor: Boolean(q.sentByUserId),
@@ -1156,8 +1166,10 @@ export const markConversationUnread = mutation({
   args: { conversationId: v.id('conversations') },
   handler: async (ctx, { conversationId }) => {
     const conv = await ctx.db.get(conversationId);
+    if (!conv) return;
+    // Fuerza badge ≥ 1 y “olvida” la lectura previa (WhatsApp-like).
     await ctx.db.patch(conversationId, {
-      inboxUnreadCount: Math.max(1, conv?.inboxUnreadCount ?? 0),
+      inboxUnreadCount: Math.max(1, conv.inboxUnreadCount ?? 0),
       inboxLastReadAt: undefined,
     });
   },

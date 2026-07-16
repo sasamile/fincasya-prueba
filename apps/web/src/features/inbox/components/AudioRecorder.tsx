@@ -134,7 +134,7 @@ export function AudioRecorder({
   }
 
   return (
-    <div className="flex flex-1 items-center gap-3">
+    <div className="flex flex-1 select-none items-center gap-3 [-webkit-touch-callout:none]">
       <button
         type="button"
         onClick={handleCancel}

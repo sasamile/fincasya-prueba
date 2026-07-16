@@ -1,10 +1,12 @@
 /** Fila de conversación en el sidebar (estilo WhatsApp). */
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { Bot, Check, Image, Mic, Paperclip, Pin, Store, User, Video } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatListTime } from '@/lib/format';
 import { Avatar, DeliveryTick } from '@/features/inbox/components/primitives';
 import type { ConversationRow } from '@/features/inbox/types';
+
+const LONG_PRESS_MS = 480;
 
 export function ConversationItem({
   conv,
@@ -17,13 +19,30 @@ export function ConversationItem({
   conv: ConversationRow;
   active: boolean;
   onClick: () => void;
-  onContextMenu?: (e: ReactMouseEvent) => void;
+  onContextMenu?: (e: ReactMouseEvent | { clientX: number; clientY: number; preventDefault: () => void }) => void;
   /** Modo selección múltiple (menú ⋮ → asignar / marcar leídos). */
   selectMode?: boolean;
   selected?: boolean;
 }) {
   const p = conv.preview;
   const isProduct = p?.type === 'product';
+  const longPressTimer = useRef<number | null>(null);
+  const longPressFired = useRef(false);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current != null) window.clearTimeout(longPressTimer.current);
+    };
+  }, []);
+
+  function clearLongPress() {
+    if (longPressTimer.current != null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }
+
   // Ícono + etiqueta corta para media (estilo WhatsApp), en vez del placeholder.
   const PreviewIcon =
     p?.type === 'audio'
@@ -51,14 +70,63 @@ export function ConversationItem({
               : p.content
     : 'Sin mensajes';
 
+  // Mismo criterio que el filtro "Escalados": humano + prioridad urgente.
+  const isEscalated = conv.status === 'human' && conv.priority === 'urgent';
+
   return (
     <button
-      onClick={onClick}
-      onContextMenu={onContextMenu}
+      type="button"
+      onClick={() => {
+        if (longPressFired.current) {
+          longPressFired.current = false;
+          return;
+        }
+        onClick();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu?.(e);
+      }}
+      onTouchStart={(e) => {
+        if (selectMode || !onContextMenu) return;
+        const t = e.touches[0];
+        if (!t) return;
+        longPressFired.current = false;
+        touchStart.current = { x: t.clientX, y: t.clientY };
+        clearLongPress();
+        longPressTimer.current = window.setTimeout(() => {
+          longPressFired.current = true;
+          onContextMenu({
+            clientX: t.clientX,
+            clientY: t.clientY,
+            preventDefault: () => {},
+          });
+          // Vibración suave si el dispositivo lo soporta.
+          try {
+            navigator.vibrate?.(12);
+          } catch {
+            /* ignore */
+          }
+        }, LONG_PRESS_MS);
+      }}
+      onTouchMove={(e) => {
+        const start = touchStart.current;
+        const t = e.touches[0];
+        if (!start || !t) return;
+        if (Math.abs(t.clientX - start.x) > 10 || Math.abs(t.clientY - start.y) > 10) {
+          clearLongPress();
+        }
+      }}
+      onTouchEnd={clearLongPress}
+      onTouchCancel={clearLongPress}
       className={cn(
-        'flex w-full items-start gap-3 border-b border-border/40 px-4 py-3 text-left transition-colors hover:bg-muted',
-        active && 'bg-accent',
-        conv.pinned && 'bg-muted/30',
+        'flex w-full select-none items-start gap-3 border-b border-border/40 px-4 py-3 text-left transition-colors',
+        '[-webkit-touch-callout:none] [-webkit-user-select:none]',
+        isEscalated
+          ? 'bg-[#504437] hover:bg-[#5c4e40]'
+          : 'hover:bg-muted',
+        !isEscalated && conv.pinned && 'bg-muted/30',
+        active && (isEscalated ? 'bg-[#5c4e40]' : 'bg-accent'),
         selectMode && selected && 'bg-primary/10',
       )}
     >

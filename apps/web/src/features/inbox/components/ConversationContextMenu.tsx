@@ -41,14 +41,16 @@ export function ConversationContextMenu({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const close = (e: MouseEvent) => {
+    const close = (e: Event) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     document.addEventListener('mousedown', close);
+    document.addEventListener('touchstart', close, { passive: true });
     document.addEventListener('keydown', esc);
     return () => {
       document.removeEventListener('mousedown', close);
+      document.removeEventListener('touchstart', close);
       document.removeEventListener('keydown', esc);
     };
   }, [onClose]);
