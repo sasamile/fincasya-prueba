@@ -654,6 +654,28 @@ export default defineSchema(
           filledAt: v.number(),
         }),
       ),
+      /**
+       * Veredicto de lib/cedulaAi sobre la foto de cédula, escrito por
+       * saleLinks.verifyCedula. Vive fuera de clientData porque se verifica
+       * antes de que el cliente envíe el formulario. `photoUrl` ata el
+       * veredicto a una foto concreta: si sube otra, este queda obsoleto.
+       */
+      cedulaCheck: v.optional(
+        v.object({
+          photoUrl: v.string(),
+          /** false = el cliente no puede continuar. */
+          allow: v.boolean(),
+          /** true = pasa, pero el asesor debe revisarla. */
+          needsReview: v.boolean(),
+          reason: v.optional(v.string()),
+          isCedula: v.optional(v.boolean()),
+          number: v.optional(v.string()),
+          name: v.optional(v.string()),
+          confidence: v.optional(v.number()),
+          note: v.optional(v.string()),
+          checkedAt: v.number(),
+        }),
+      ),
       paymentProofUrl: v.optional(v.string()),
       paymentProofFileName: v.optional(v.string()),
       paymentProofMimeType: v.optional(v.string()),
@@ -799,7 +821,10 @@ export default defineSchema(
     })
       .index('by_property', ['propertyId'])
       .index('by_dates', ['fechaEntrada', 'fechaSalida'])
-      .index('by_booking', ['bookingId']),
+      .index('by_booking', ['bookingId'])
+      // Bloqueos creados desde un evento del Google Calendar conectado: evita
+      // importar dos veces el mismo evento.
+      .index('by_google_event', ['googleEventId']),
 
 
     globalPricing: defineTable({

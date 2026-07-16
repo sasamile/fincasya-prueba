@@ -1,6 +1,10 @@
 import { v } from "convex/values";
 import { action, internalAction, internalQuery, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
+import {
+  buildStopWords,
+  suggestPropertyForEvent,
+} from "./lib/calendarEventMatch";
 
 /** Fecha calendario en Colombia (YYYY-MM-DD) a partir de un timestamp ms. */
 function calendarDateColombiaISO(ms: number): string {
@@ -425,6 +429,129 @@ export const listExternalEvents = action({
       });
     }
     return out;
+  },
+});
+
+/** Fincas + eventos ya importados, para armar las sugerencias de la revisión. */
+export const getImportContext = internalQuery({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{
+    props: Array<{ id: string; title: string; code: string | null; location: string }>;
+    importedEventIds: string[];
+  }> => {
+    const props = await ctx.db.query("properties").collect();
+    const blocks = await ctx.db.query("propertyAvailability").collect();
+    return {
+      props: props
+        .filter((p) => p.active !== false)
+        .map((p) => ({
+          id: String(p._id),
+          title: p.title,
+          code: p.code ?? null,
+          location: p.location,
+        })),
+      importedEventIds: blocks
+        .map((b) => b.googleEventId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    };
+  },
+});
+
+export type ImportCandidate = ExternalCalendarEvent & {
+  suggestedPropertyId: string | null;
+  confidence: "alta" | "media" | "baja" | "ninguna";
+  alternatives: string[];
+  matchedOn: string | null;
+  alreadyImported: boolean;
+};
+
+/**
+ * Eventos del Google Calendar con la finca SUGERIDA para la pantalla de
+ * revisión. No escribe nada: el operador confirma/corrige y luego llama
+ * `importEventsAsBlocks`.
+ */
+export const listImportCandidates = action({
+  args: { timeMinMs: v.number(), timeMaxMs: v.number() },
+  handler: async (ctx, args): Promise<ImportCandidate[]> => {
+    const events: ExternalCalendarEvent[] = await ctx.runAction(
+      api.googleCalendar.listExternalEvents,
+      { timeMinMs: args.timeMinMs, timeMaxMs: args.timeMaxMs },
+    );
+    const { props, importedEventIds } = await ctx.runQuery(
+      internal.googleCalendar.getImportContext,
+      {},
+    );
+    const stop = buildStopWords(props);
+    const imported = new Set(importedEventIds);
+
+    return events.map((e) => {
+      const s = suggestPropertyForEvent(e.summary, props, stop);
+      return {
+        ...e,
+        suggestedPropertyId: s.propertyId,
+        confidence: s.confidence,
+        alternatives: s.alternatives,
+        matchedOn: s.matchedOn,
+        alreadyImported: imported.has(e.id),
+      };
+    });
+  },
+});
+
+/**
+ * Crea los BLOQUEOS a partir de los eventos que el operador confirmó (finca +
+ * fechas). Así el bot deja de ofrecer esas fincas esos días. Idempotente: un
+ * evento ya importado se omite (index by_google_event).
+ */
+export const importEventsAsBlocks = mutation({
+  args: {
+    items: v.array(
+      v.object({
+        eventId: v.string(),
+        propertyId: v.id("properties"),
+        fechaEntrada: v.number(),
+        fechaSalida: v.number(),
+        summary: v.string(),
+      }),
+    ),
+  },
+  handler: async (ctx, { items }) => {
+    let creados = 0;
+    let omitidos = 0;
+
+    for (const item of items) {
+      const existing = await ctx.db
+        .query("propertyAvailability")
+        .withIndex("by_google_event", (q) => q.eq("googleEventId", item.eventId))
+        .first();
+      if (existing) {
+        omitidos++;
+        continue;
+      }
+      const prop = await ctx.db.get(item.propertyId);
+      if (!prop) {
+        omitidos++;
+        continue;
+      }
+      // Bloqueo de al menos 1 día aunque el evento sea de 30 min (nuestros
+      // propios eventos van en bloques cortos dentro del día de entrada).
+      const fechaSalida = Math.max(
+        item.fechaSalida,
+        item.fechaEntrada + 24 * 60 * 60 * 1000,
+      );
+      await ctx.db.insert("propertyAvailability", {
+        propertyId: item.propertyId,
+        fechaEntrada: item.fechaEntrada,
+        fechaSalida,
+        blocked: true,
+        reason: `Google Calendar: ${item.summary.slice(0, 120)}`,
+        googleEventId: item.eventId,
+      });
+      creados++;
+    }
+    return { creados, omitidos };
   },
 });
 

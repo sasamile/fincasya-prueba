@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { DetailSection } from "@/features/admin/components/reservations/booking-detail-section";
 import { BlockFincasModal } from "@/features/admin/components/reservations/block-fincas-modal";
+import { CalendarImportModal } from "@/features/admin/components/reservations/calendar-import-modal";
 import { downloadCheckinGuestsPdf } from "@/features/admin/utils/download-checkin-guests-pdf";
 import {
   downloadDailyReservationsExcel,
@@ -567,6 +568,7 @@ export default function ReservationsPage() {
     externalRange.endMs,
     Boolean(calendarStatus?.connected),
   );
+  const [importModalOpen, setImportModalOpen] = useState(false);
 
   /** Reservas de FincasYa + eventos del Google Calendar conectado (externos). */
   const calendarBookings = useMemo(
@@ -1883,6 +1885,13 @@ export default function ReservationsPage() {
                           : "Migrar reservas al calendario"}
                       </DropdownMenuItem>
                       <DropdownMenuItem
+                        onClick={() => setImportModalOpen(true)}
+                        className="cursor-pointer gap-2 py-2 text-xs font-medium text-primary focus:text-primary"
+                      >
+                        <CalendarIcon className="h-3.5 w-3.5" />
+                        Cargar reservas del calendario
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
                         onClick={handleDisconnect}
                         className="cursor-pointer gap-2 py-2 text-xs font-medium text-red-600 focus:text-red-700"
                       >
@@ -2433,6 +2442,17 @@ export default function ReservationsPage() {
 
       {blockModalOpen && (
         <BlockFincasModal onClose={() => setBlockModalOpen(false)} />
+      )}
+
+      {importModalOpen && (
+        <CalendarImportModal
+          rangeStartMs={externalRange.startMs}
+          rangeEndMs={externalRange.endMs}
+          periodLabel={format(date, groupBy === "months" ? "yyyy" : "MMMM yyyy", {
+            locale: es,
+          })}
+          onClose={() => setImportModalOpen(false)}
+        />
       )}
 
       <ManualReservationModal
