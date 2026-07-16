@@ -83,6 +83,12 @@ type AgentContext = {
    * (evita que el bot hable encima del asesor, aunque el toggle esté encendido).
    */
   humanHandling: boolean;
+  /**
+   * El equipo ACTIVÓ el bot A PROPÓSITO con el toggle del panel (handoff
+   * humano → bot). Si es true, el candado humanHandling NO aplica: el Experto
+   * ya atendió y ahora quiere que el bot continúe la conversación.
+   */
+  aiManualOverride: boolean;
 };
 
 type FincaResult = {
@@ -199,6 +205,7 @@ export const getAgentContext = internalQuery({
       returning,
       lastRequestedZone: conversation.lastRequestedZone ?? null,
       humanHandling,
+      aiManualOverride: conversation.aiManualOverride === true,
     };
   },
 });
@@ -1051,9 +1058,11 @@ export const runAgentTurn = internalAction({
 
     // CANDADO ANTI-COLISIÓN: si el último mensaje del equipo lo escribió un
     // HUMANO (Experto), un asesor está atendiendo → el bot NO responde (aunque
-    // el toggle esté encendido o haya carrera de debounce). Además apaga el bot
-    // en esta conversación para que quede en manos del humano.
-    if (context.humanHandling) {
+    // haya carrera de debounce). Además apaga el bot en esta conversación para
+    // que quede en manos del humano. EXCEPCIÓN: si el equipo activó el bot A
+    // PROPÓSITO con el toggle (aiManualOverride), es un handoff humano → bot y
+    // el bot SÍ continúa la conversación.
+    if (context.humanHandling && !context.aiManualOverride) {
       await ctx.runMutation(internal.agent.markConversationHuman, {
         conversationId,
       });
