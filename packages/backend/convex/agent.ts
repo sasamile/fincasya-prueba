@@ -836,7 +836,7 @@ const TOOL_DEFS: ToolDef[] = [
     function: {
       name: 'enviar_politica_mascotas',
       description:
-        'Envia al cliente el mensaje OFICIAL de mascotas del equipo (deposito, tarifas desde la 3ra, recomendaciones) TAL CUAL, como mensaje aparte. Usala la PRIMERA vez que el cliente pregunte por mascotas o confirme que lleva. NO reemplaza el catalogo: si ya tienes fechas + personas, llama TAMBIEN enviar_catalogo (con mascotas:true) EN ESTE MISMO TURNO — las mascotas NUNCA frenan el envio de opciones. No la repitas si ya se envio en esta conversacion.',
+        'Envia al cliente el mensaje OFICIAL de mascotas del equipo (deposito de la primera, tarifas desde la 2da, recomendaciones) TAL CUAL, como mensaje aparte. Usala la PRIMERA vez que el cliente pregunte por mascotas o confirme que lleva. NO reemplaza el catalogo: si ya tienes fechas + personas, llama TAMBIEN enviar_catalogo (con mascotas:true) EN ESTE MISMO TURNO — las mascotas NUNCA frenan el envio de opciones. No la repitas si ya se envio en esta conversacion.',
       parameters: { type: 'object', properties: {} },
     },
   },

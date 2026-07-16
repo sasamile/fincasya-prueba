@@ -137,10 +137,13 @@ export const calculateStayPrice = query({
       current.setDate(current.getDate() + 1);
     }
 
+    // Regla de mascotas (2026-07): la PRIMERA paga solo el depósito normal
+    // ($100.000 reembolsable); desde la SEGUNDA se cobra ingreso de $30.000
+    // por cada una + un cargo único de aseo de $70.000.
     const numeroMascotas = args.numeroMascotas ?? 0;
-    const petRefundable = Math.min(numeroMascotas, 2) * 100000;
-    const petServiceFee = Math.max(0, numeroMascotas - 2) * 30000;
-    const petCleaningFee = numeroMascotas >= 3 ? 70000 : 0;
+    const petRefundable = Math.min(numeroMascotas, 1) * 100000;
+    const petServiceFee = Math.max(0, numeroMascotas - 1) * 30000;
+    const petCleaningFee = numeroMascotas >= 2 ? 70000 : 0;
     const petTotal = petRefundable + petServiceFee + petCleaningFee;
     const serviceStaffFee = args.incluirServicio
       ? (property.serviceStaffPrice || 0) * Math.max(1, nights.length)

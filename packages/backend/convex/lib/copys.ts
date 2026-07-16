@@ -288,11 +288,11 @@ Quedo muy atento a tu respuesta para continuar ayudándote.`;
  */
 export const MASCOTAS_POLITICA = `✨🐶 Tus mascotas son bienvenidas en la mayoría de nuestras propiedades. Para garantizar una excelente estancia, ten en cuenta las siguientes condiciones: 🐾
 
-💰 Depósito: Se requiere un depósito reembolsable de $100.000 por cada mascota 🐕
+💰 Depósito: Se requiere un depósito reembolsable de $100.000 por tu primera mascota 🐕
 
-✅️ Tarifas adicionales: A partir de la tercera (3ra) mascota, se cobrará una tarifa de ingreso de $30.000 por cada una
+✅️ Tarifas adicionales: A partir de la segunda (2da) mascota, se cobrará una tarifa de ingreso de $30.000 por cada una
 
-🧹 Limpieza adicional: Si viajas con 3 o más mascotas, aplica un cargo único de aseo de $70.000.
+🧹 Limpieza adicional: Si viajas con 2 o más mascotas, aplica un cargo único de aseo de $70.000.
 
 📌 Recomendaciones importantes:
 🚫 No ingresar las mascotas a la piscina.
