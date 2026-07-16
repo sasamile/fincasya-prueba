@@ -1116,6 +1116,41 @@ export const runAgentTurn = internalAction({
       return;
     }
 
+    // RESERVA / CONTRATO EXISTENTE (candado determinista): si el cliente menciona
+    // un código de contrato ("Contrato: A0552"), ya tiene booking confirmado → NO
+    // correr el flujo de venta. Escalar DURO a un Experto (post-venta / consulta).
+    const isExistingBookingRef =
+      /contrato\s*:?\s*[A-Z0-9]{3,}/i.test(last.content) ||
+      /\bc[oó]digo\s+de\s+reserva\b/i.test(last.content) ||
+      /\btengo\s+(mi\s+|una\s+)?reserva\s+(confirmada|lista|hecha|activa)\b/i.test(last.content);
+    if (isExistingBookingRef) {
+      const reservaHandoff = `Un Experto de nuestro equipo revisará tu reserva y te atenderá de inmediato. ⏳🙏`;
+      let reservaWamid: string | undefined;
+      if (context.contactPhone) {
+        try {
+          const sent = await sendWhatsappText({
+            to: context.contactPhone,
+            text: reservaHandoff,
+          });
+          reservaWamid = sent.wamid;
+        } catch (err) {
+          console.error('[agent] fallo handoff reserva existente', err);
+        }
+      }
+      await ctx.runMutation(internal.agent.saveAssistantMessage, {
+        conversationId,
+        content: reservaHandoff,
+        wamid: reservaWamid,
+      });
+      await ctx.runMutation(internal.agent.toolEscalar, {
+        conversationId,
+        motivo:
+          'cliente con reserva/contrato existente — consulta post-venta o confirmación de booking',
+      });
+      console.log('[agent] escalado por reserva existente', { conversationId });
+      return;
+    }
+
     // Primer turno + rafaga solo saludos → welcome oficial determinista.
     if (!botHasSpoken && userBurst.length > 0 && burstHasOnlyGreeting(userBurst)) {
       const welcome = buildWelcomeMessage(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useQuery as useConvexQuery,
   useMutation as useConvexMutation,
@@ -43,12 +43,15 @@ export default function HorariosPage() {
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [saving, setSaving] = useState(false);
 
-  if (current && enabled === null) {
-    setEnabled(current.enabled);
-    setReturningMsg(current.returningMsg);
-    setNewClosingMsg(current.newClosingMsg);
-    setSchedule(current.schedule);
-  }
+  useEffect(() => {
+    if (current && enabled === null) {
+      setEnabled(current.enabled);
+      setReturningMsg(current.returningMsg);
+      setNewClosingMsg(current.newClosingMsg);
+      setSchedule(current.schedule);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
 
   const isLoading = current === undefined;
 
@@ -135,14 +138,14 @@ export default function HorariosPage() {
                     type="time"
                     value={schedule[key].open}
                     onChange={(e) => setDay(key, "open", e.target.value)}
-                    className="h-9 rounded-lg border border-border bg-background px-2 text-sm"
+                    className="h-9 w-32 rounded-lg border border-border bg-white px-2 text-sm text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100 [color-scheme:light] dark:[color-scheme:dark]"
                   />
                   <span className="text-muted-foreground text-sm">a</span>
                   <input
                     type="time"
                     value={schedule[key].close}
                     onChange={(e) => setDay(key, "close", e.target.value)}
-                    className="h-9 rounded-lg border border-border bg-background px-2 text-sm"
+                    className="h-9 w-32 rounded-lg border border-border bg-white px-2 text-sm text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100 [color-scheme:light] dark:[color-scheme:dark]"
                   />
                 </div>
               ))}
