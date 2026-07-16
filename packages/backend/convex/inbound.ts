@@ -3,6 +3,7 @@
  * con dedup por evento YCloud, y agenda el turno del agente.
  */
 import { internalMutation, internalQuery } from './_generated/server';
+import type { MutationCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import {
@@ -33,6 +34,27 @@ const EMERGENCY_HANDOFF_TEXT =
  *  (celular colombiano), ignorando indicativo/país y separadores. */
 function ownerPhoneKey(raw?: string | null): string {
   return (raw ?? '').replace(/\D+/g, '').slice(-10);
+}
+
+/** Nombre del directorio telefónico (.vcf importado) para un teléfono, si existe. */
+async function phonebookName(
+  ctx: MutationCtx,
+  phone: string,
+): Promise<string | null> {
+  const key = ownerPhoneKey(phone);
+  if (key.length !== 10) return null;
+  const row = await ctx.db
+    .query('phonebook')
+    .withIndex('by_phone_key', (q) => q.eq('phoneKey', key))
+    .first();
+  const name = row?.name?.trim();
+  return name && name.length > 0 ? name : null;
+}
+
+/** ¿El nombre del contacto es solo el número (placeholder sin nombre real)? */
+function isPhonePlaceholderName(name: string, phone: string): boolean {
+  const n = (name ?? '').trim();
+  return n === phone || /^\+?\d[\d\s-]*$/.test(n);
 }
 
 /** "ALBA LUCIA HERRERA" -> "Alba Lucia Herrera". */
@@ -204,9 +226,13 @@ export const ingestAdvisorAppMessage = internalMutation({
       .withIndex('by_phone', (q) => q.eq('phone', args.phone))
       .first();
     if (!contact) {
+      // El directorio del .vcf manda: si el equipo tiene guardado este número,
+      // el contacto nace con ese nombre (y no con el número pelado).
+      const dirName = await phonebookName(ctx, args.phone);
       const contactId = await ctx.db.insert('contacts', {
         phone: args.phone,
-        name: args.phone,
+        name: dirName ?? args.phone,
+        ...(dirName ? { baseName: dirName } : {}),
         createdAt: now,
       });
       contact = await ctx.db.get(contactId);
@@ -345,12 +371,31 @@ export const ingestInboundMessage = internalMutation({
       .withIndex('by_phone', (q) => q.eq('phone', args.phone))
       .first();
     if (!contact) {
+      // El directorio del .vcf manda sobre el nombre del perfil de WhatsApp:
+      // si el equipo tiene guardado este número, el contacto nace con SU nombre.
+      const dirName = await phonebookName(ctx, args.phone);
       const contactId = await ctx.db.insert('contacts', {
         phone: args.phone,
-        name: args.customerName || args.phone,
+        name: dirName || args.customerName || args.phone,
+        ...(dirName ? { baseName: dirName } : {}),
         createdAt: now,
       });
       contact = await ctx.db.get(contactId);
+    } else if (
+      isPhonePlaceholderName(contact.name, contact.phone) &&
+      !contact.dealLabel
+    ) {
+      // Contacto viejo que quedó con el número como nombre: si el directorio
+      // lo tiene, se mejora de una vez.
+      const dirName = await phonebookName(ctx, args.phone);
+      if (dirName) {
+        await ctx.db.patch(contact._id, {
+          name: dirName,
+          baseName: dirName,
+          updatedAt: now,
+        });
+        contact = { ...contact, name: dirName, baseName: dirName };
+      }
     }
     if (!contact) return { duplicate: false };
 

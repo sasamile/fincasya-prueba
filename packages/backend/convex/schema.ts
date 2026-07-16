@@ -84,6 +84,17 @@ export default defineSchema(
       .index('by_phone', ['phone'])
       .index('by_cedula', ['cedula']),
 
+    /**
+     * Directorio telefónico importado del .vcf del equipo (26k+ contactos del
+     * celular). Vive APARTE de `contacts` para no inundar el CRM: cuando un
+     * número escribe por primera vez, el contacto nace con este nombre en vez
+     * del nombre del perfil de WhatsApp. Clave = últimos 10 dígitos.
+     */
+    phonebook: defineTable({
+      phoneKey: v.string(),
+      name: v.string(),
+      updatedAt: v.number(),
+    }).index('by_phone_key', ['phoneKey']),
 
     conversations: defineTable({
       contactId: v.id('contacts'),

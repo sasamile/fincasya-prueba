@@ -116,12 +116,16 @@ export function parseVcf(text: string): VcfItem[] {
   return items;
 }
 
-const BATCH_SIZE = 400;
+const BATCH_SIZE = 1000;
+const TOAST_ID = "vcf-import";
 
 export function ImportVcfButton({ onDone }: { onDone?: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
-  const applyNames = useConvexMutation(api.contactsImport.applyVcfNames);
+  const upsertPhonebook = useConvexMutation(api.contactsImport.upsertPhonebook);
+  const applyToContacts = useConvexMutation(
+    api.contactsImport.applyPhonebookToContacts,
+  );
 
   const handleFile = async (file: File) => {
     setImporting(true);
@@ -133,30 +137,54 @@ export function ImportVcfButton({ onDone }: { onDone?: () => void }) {
         return;
       }
       const ok = window.confirm(
-        `Se encontraron ${items.length} números con nombre en "${file.name}".\n\n` +
-          "Se actualizará el nombre de los que YA existen en la base " +
-          "(no se crean contactos nuevos). ¿Continuar?",
+        `Se encontraron ${items.length.toLocaleString("es-CO")} números con nombre en "${file.name}".\n\n` +
+          "• Los contactos que YA existen en la base quedan con tu nombre.\n" +
+          "• Los demás quedan en el directorio: cuando esa persona escriba, " +
+          "su contacto nace con el nombre que tú le tienes guardado.\n\n¿Continuar?",
       );
       if (!ok) return;
 
-      let actualizados = 0;
-      let sinCambio = 0;
-      let noEncontrados = 0;
+      // Fase 1: subir el directorio por lotes (con progreso).
+      let nuevos = 0;
+      let renombrados = 0;
+      const totalBatches = Math.ceil(items.length / BATCH_SIZE);
       for (let i = 0; i < items.length; i += BATCH_SIZE) {
-        const res = await applyNames({ items: items.slice(i, i + BATCH_SIZE) });
-        actualizados += res.actualizados;
-        sinCambio += res.sinCambio;
-        noEncontrados += res.noEncontrados;
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        toast.loading(
+          `Subiendo directorio… lote ${batchNum} de ${totalBatches} (${Math.round((100 * i) / items.length)}%)`,
+          { id: TOAST_ID },
+        );
+        const res = await upsertPhonebook({
+          items: items.slice(i, i + BATCH_SIZE),
+        });
+        nuevos += res.nuevos;
+        renombrados += res.actualizados;
       }
+
+      // Fase 2: aplicar los nombres a los contactos que ya existen en la base.
+      toast.loading("Aplicando nombres a los contactos existentes…", {
+        id: TOAST_ID,
+      });
+      let actualizados = 0;
+      let cursor: string | null = null;
+      for (;;) {
+        const res: { actualizados: number; isDone: boolean; cursor: string } =
+          await applyToContacts({ cursor });
+        actualizados += res.actualizados;
+        if (res.isDone) break;
+        cursor = res.cursor;
+      }
+
       toast.success(
-        `Nombres actualizados: ${actualizados} · ya estaban igual: ${sinCambio} · no están en la base: ${noEncontrados}`,
-        { duration: 8000 },
+        `Directorio: ${(nuevos + renombrados).toLocaleString("es-CO")} nombres guardados · contactos de la base actualizados: ${actualizados}`,
+        { id: TOAST_ID, duration: 10000 },
       );
       onDone?.();
     } catch (err) {
       console.error(err);
       toast.error(
         err instanceof Error ? err.message : "No se pudo importar el .vcf.",
+        { id: TOAST_ID },
       );
     } finally {
       setImporting(false);
