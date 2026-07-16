@@ -106,7 +106,7 @@ type FincaResult = {
 
 type DisponibilidadResult =
   | { encontrada: false }
-  | { encontrada: true; finca: string; disponible: boolean };
+  | { encontrada: true; finca: string; disponible: boolean; nota?: string };
 
 type CatalogPickResult =
   | { ok: false; motivo: string }
@@ -304,10 +304,30 @@ export const toolDisponibilidad = internalQuery({
     const overlap = blocks.some(
       (b) => b.fechaEntrada < fechaSalida && b.fechaSalida > fechaEntrada,
     );
+    // Evento del calendario del equipo SIN finca confirmada que podría ser
+    // esta ("TOCAIMA OCUPADA" y la finca es de Tocaima): se trata como ocupada
+    // hasta que el operador lo resuelva en la pantalla de revisión.
+    let pendienteRevision = false;
+    if (!overlap) {
+      const pendientes = await ctx.db
+        .query('googleCalendarPendingEvents')
+        .collect();
+      pendienteRevision = pendientes.some(
+        (e) =>
+          e.startMs < fechaSalida &&
+          e.endMs > fechaEntrada &&
+          e.candidatePropertyIds.includes(String(property._id)),
+      );
+    }
     return {
       encontrada: true as const,
       finca: property.title,
-      disponible: !overlap,
+      disponible: !overlap && !pendienteRevision,
+      ...(pendienteRevision
+        ? {
+            nota: 'En el calendario del equipo hay una reserva SIN confirmar que puede ser de esta finca en esas fechas. Trátala como ocupada: dile al cliente que un experto confirma la disponibilidad y ofrece otras opciones.',
+          }
+        : {}),
     };
   },
 });
@@ -468,6 +488,25 @@ export const toolCatalogPick = internalQuery({
       typeof fechaSalidaMs === 'number' &&
       fechaSalidaMs > fechaEntradaMs;
 
+    // Fincas retenidas por eventos del calendario del equipo SIN finca
+    // confirmada ("TOCAIMA OCUPADA" → las fincas de Tocaima): mientras el
+    // operador no los resuelva en la revisión, no se ofrecen esas fechas.
+    let retenidasPorPendientes: Set<string> | null = null;
+    if (checkAvailability) {
+      const pendientes = await ctx.db
+        .query('googleCalendarPendingEvents')
+        .collect();
+      retenidasPorPendientes = new Set(
+        pendientes
+          .filter(
+            (e) =>
+              e.startMs < (fechaSalidaMs as number) &&
+              e.endMs > (fechaEntradaMs as number),
+          )
+          .flatMap((e) => e.candidatePropertyIds),
+      );
+    }
+
     const items: Extract<CatalogPickResult, { ok: true }>['items'] = [];
     for (const p of matches) {
       if (items.length >= MAX_CATALOG_CANDIDATES) break;
@@ -484,6 +523,7 @@ export const toolCatalogPick = internalQuery({
             b.fechaSalida > (fechaEntradaMs as number),
         );
         if (ocupada) continue; // ocupada esas fechas → no se ofrece
+        if (retenidasPorPendientes?.has(String(p._id))) continue; // posible ocupada sin confirmar
       }
       const mapping = await ctx.db
         .query('propertyWhatsAppCatalog')

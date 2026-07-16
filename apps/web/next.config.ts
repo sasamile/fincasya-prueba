@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
     "puppeteer-core",
     "@ilovepdf/ilovepdf-nodejs",
     "@ilovepdf/ilovepdf-js-core",
+    "heic-convert",
   ],
   images: {
     formats: ['image/webp'],

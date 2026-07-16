@@ -7,14 +7,15 @@ import {
   query,
 } from './_generated/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import { internal } from './_generated/api';
+import { api, internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import {
   normalizeContractCode,
   resolveSaleLinkReference,
 } from './lib/saleLinkReference';
 import { checkinGuestValidator } from './lib/checkinGuest';
-import { verifyCedulaPhoto } from './lib/cedulaAi';
+import { verifyCedulaPhoto, decideCedulaVerdict } from './lib/cedulaAi';
+import { verifyPaymentReceiptPhoto } from './lib/receiptAi';
 
 type ProvisionFromSaleLinkResult =
   | { ok: true; bookingId: Id<'bookings'>; reference: string }
@@ -318,6 +319,11 @@ export const create = mutation({
     petDeposit: v.optional(v.number()),
     petSurcharge: v.optional(v.number()),
     petCount: v.optional(v.number()),
+    advancePaymentAmount: v.optional(v.number()),
+    boldPaymentUrl: v.optional(v.string()),
+    boldPaymentLinkId: v.optional(v.string()),
+    boldPaymentAmount: v.optional(v.number()),
+    boldSurchargePercent: v.optional(v.number()),
     selectedBankAccountIds: v.array(v.string()),
     notes: v.optional(v.string()),
   },
@@ -326,10 +332,16 @@ export const create = mutation({
     const contractCode = await assertContractCodeAvailable(ctx, rawContractCode);
     const token = generateToken();
     const now = Date.now();
+    const advance =
+      typeof args.advancePaymentAmount === 'number' &&
+      args.advancePaymentAmount > 0
+        ? Math.floor(args.advancePaymentAmount)
+        : Math.round(args.totalValue / 2);
     const id = await ctx.db.insert('saleLinks', {
       token,
       contractCode,
       ...rest,
+      advancePaymentAmount: advance,
       clientStep: 1,
       status: 'active',
       createdAt: now,
@@ -350,6 +362,125 @@ export const create = mutation({
     });
 
     return { id, token, contractCode };
+  },
+});
+
+export const _setBoldPaymentLink = internalMutation({
+  args: {
+    id: v.id('saleLinks'),
+    boldPaymentUrl: v.string(),
+    boldPaymentLinkId: v.string(),
+    boldPaymentAmount: v.number(),
+    boldSurchargePercent: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      boldPaymentUrl: args.boldPaymentUrl,
+      boldPaymentLinkId: args.boldPaymentLinkId,
+      boldPaymentAmount: args.boldPaymentAmount,
+      boldSurchargePercent: args.boldSurchargePercent,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/**
+ * Crea el link de venta y, si se pide, genera automáticamente el link Bold
+ * por el monto de abono (con recargo opcional).
+ */
+export const createWithBold = action({
+  args: {
+    propertyId: v.id('properties'),
+    contractCode: v.string(),
+    createdBy: v.string(),
+    createdByName: v.optional(v.string()),
+    checkIn: v.number(),
+    checkOut: v.number(),
+    nights: v.number(),
+    guests: v.number(),
+    checkInTime: v.optional(v.string()),
+    checkOutTime: v.optional(v.string()),
+    totalValue: v.number(),
+    rentalValue: v.number(),
+    depositAmount: v.number(),
+    cleaningFee: v.number(),
+    petDeposit: v.optional(v.number()),
+    petSurcharge: v.optional(v.number()),
+    petCount: v.optional(v.number()),
+    advancePaymentAmount: v.number(),
+    boldSurchargePercent: v.optional(v.number()),
+    generateBoldLink: v.boolean(),
+    selectedBankAccountIds: v.array(v.string()),
+    notes: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    id: string;
+    token: string;
+    contractCode: string;
+    boldPaymentUrl?: string;
+    boldPaymentAmount?: number;
+    boldError?: string;
+  }> => {
+    const { generateBoldLink, boldSurchargePercent, ...createArgs } = args;
+    const created = await ctx.runMutation(api.saleLinks.create, createArgs);
+
+    if (!generateBoldLink) {
+      return {
+        id: String(created.id),
+        token: created.token,
+        contractCode: created.contractCode,
+      };
+    }
+
+    const advance = Math.max(0, Math.floor(args.advancePaymentAmount || 0));
+    if (advance < 1000) {
+      return {
+        id: String(created.id),
+        token: created.token,
+        contractCode: created.contractCode,
+        boldError: 'El abono debe ser al menos $1.000 para generar Bold.',
+      };
+    }
+
+    const surcharge = Math.max(0, Number(boldSurchargePercent) || 0);
+    const boldAmount = Math.round(advance * (1 + surcharge / 100));
+
+    try {
+      const { createBoldPaymentLink } = await import('./lib/bold');
+      const bold = await createBoldPaymentLink({
+        amountCop: boldAmount,
+        description: `Abono ${created.contractCode} · FincasYa`.slice(0, 100),
+        reference: `SL-${created.token.slice(0, 10)}-${Date.now()}`.slice(0, 60),
+      });
+
+      await ctx.runMutation(internal.saleLinks._setBoldPaymentLink, {
+        id: created.id,
+        boldPaymentUrl: bold.url,
+        boldPaymentLinkId: bold.paymentLinkId,
+        boldPaymentAmount: boldAmount,
+        boldSurchargePercent: surcharge || undefined,
+      });
+
+      return {
+        id: String(created.id),
+        token: created.token,
+        contractCode: created.contractCode,
+        boldPaymentUrl: bold.url,
+        boldPaymentAmount: boldAmount,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[saleLinks.createWithBold] Bold falló', msg);
+      return {
+        id: String(created.id),
+        token: created.token,
+        contractCode: created.contractCode,
+        boldError: msg,
+      };
+    }
   },
 });
 
@@ -669,6 +800,35 @@ export const _saveCedulaCheck = internalMutation({
   },
 });
 
+export const _savePaymentReceiptCheck = internalMutation({
+  args: {
+    token: v.string(),
+    check: v.object({
+      photoUrl: v.string(),
+      allow: v.boolean(),
+      needsReview: v.boolean(),
+      reason: v.optional(v.string()),
+      isReceipt: v.optional(v.boolean()),
+      amount: v.optional(v.number()),
+      bankName: v.optional(v.string()),
+      confidence: v.optional(v.number()),
+      note: v.optional(v.string()),
+      checkedAt: v.number(),
+    }),
+  },
+  handler: async (ctx, { token, check }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return;
+    await ctx.db.patch(link._id, {
+      paymentReceiptCheck: check,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 /**
  * Verifica la foto de cédula recién subida. La llama el portal antes de dejar
  * pasar al cliente al paso de pago. El veredicto queda guardado en el link para
@@ -679,15 +839,17 @@ export const verifyCedula = action({
     token: v.string(),
     photoUrl: v.string(),
     typedCedula: v.string(),
+    typedName: v.optional(v.string()),
   },
   handler: async (
     ctx,
-    { token, photoUrl, typedCedula },
+    { token, photoUrl, typedCedula, typedName },
   ): Promise<{
     allow: boolean;
     needsReview: boolean;
     reason?: string;
     aiNumber?: string;
+    aiName?: string;
   }> => {
     const link = await ctx.runQuery(internal.saleLinks.getByToken, { token });
     if (!link) return { allow: false, needsReview: true, reason: 'not_found' };
@@ -695,7 +857,7 @@ export const verifyCedula = action({
       return { allow: false, needsReview: true, reason: 'inactive' };
     }
 
-    const verdict = await verifyCedulaPhoto(photoUrl, typedCedula);
+    const verdict = await verifyCedulaPhoto(photoUrl, typedCedula, typedName);
 
     await ctx.runMutation(internal.saleLinks._saveCedulaCheck, {
       token,
@@ -705,7 +867,7 @@ export const verifyCedula = action({
         needsReview: verdict.needsReview,
         reason: verdict.reason,
         isCedula:
-          verdict.check && verdict.check.cedulaProbability >= 0.5
+          verdict.check && verdict.check.cedulaProbability >= 0.8
             ? true
             : verdict.check
               ? false
@@ -723,6 +885,130 @@ export const verifyCedula = action({
       needsReview: verdict.needsReview,
       reason: verdict.reason,
       aiNumber: verdict.check?.number,
+      aiName: verdict.check?.name,
+    };
+  },
+});
+
+/**
+ * Verifica que el archivo subido sea un comprobante de pago real (banco /
+ * transferencia). El portal solo habilita «Enviar» si allow=true; el veredicto
+ * se guarda para que submitClientData lo exija.
+ */
+export const verifyPaymentReceipt = action({
+  args: {
+    token: v.string(),
+    photoUrl: v.string(),
+  },
+  handler: async (
+    ctx,
+    { token, photoUrl },
+  ): Promise<{
+    allow: boolean;
+    needsReview: boolean;
+    reason?: string;
+    amount?: number;
+    bankName?: string;
+  }> => {
+    const link = await ctx.runQuery(internal.saleLinks.getByToken, { token });
+    if (!link) return { allow: false, needsReview: true, reason: 'not_found' };
+    if (link.status !== 'active') {
+      return { allow: false, needsReview: true, reason: 'inactive' };
+    }
+
+    const verdict = await verifyPaymentReceiptPhoto(photoUrl);
+
+    await ctx.runMutation(internal.saleLinks._savePaymentReceiptCheck, {
+      token,
+      check: {
+        photoUrl,
+        allow: verdict.allow,
+        needsReview: verdict.needsReview,
+        reason: verdict.reason,
+        isReceipt: verdict.check?.isReceipt,
+        amount: verdict.check?.amount,
+        bankName: verdict.check?.bankName,
+        confidence: verdict.check?.receiptProbability,
+        note: verdict.check?.note,
+        checkedAt: Date.now(),
+      },
+    });
+
+    return {
+      allow: verdict.allow,
+      needsReview: verdict.needsReview,
+      reason: verdict.reason,
+      amount: verdict.check?.amount,
+      bankName: verdict.check?.bankName,
+    };
+  },
+});
+
+/**
+ * Revalida número/nombre tipados contra la última lectura de IA (sin volver a
+ * llamar a OpenAI). Se usa cuando el cliente corrige la cédula después de subir
+ * la foto.
+ */
+export const revalidateCedulaTyped = action({
+  args: {
+    token: v.string(),
+    typedCedula: v.string(),
+    typedName: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    { token, typedCedula, typedName },
+  ): Promise<{
+    allow: boolean;
+    needsReview: boolean;
+    reason?: string;
+    aiNumber?: string;
+    aiName?: string;
+  }> => {
+    const link = await ctx.runQuery(internal.saleLinks.getByToken, { token });
+    if (!link) return { allow: false, needsReview: true, reason: 'not_found' };
+    if (link.status !== 'active') {
+      return { allow: false, needsReview: true, reason: 'inactive' };
+    }
+
+    const prev = link.cedulaCheck;
+    if (!prev?.photoUrl || !prev.number) {
+      return { allow: false, needsReview: true, reason: 'unreadable' };
+    }
+
+    const verdict = decideCedulaVerdict(
+      {
+        cedulaProbability:
+          typeof prev.confidence === 'number' ? prev.confidence : 0.9,
+        number: prev.number,
+        name: prev.name,
+        note: prev.note,
+      },
+      { typedCedula, typedName },
+    );
+
+    await ctx.runMutation(internal.saleLinks._saveCedulaCheck, {
+      token,
+      check: {
+        photoUrl: prev.photoUrl,
+        allow: verdict.allow,
+        needsReview: verdict.needsReview,
+        reason: verdict.reason,
+        isCedula: prev.isCedula,
+        number: prev.number,
+        name: prev.name,
+        confidence: prev.confidence,
+        note: prev.note,
+        checkedAt: Date.now(),
+      },
+    });
+
+    return {
+      allow: verdict.allow,
+      needsReview: verdict.needsReview,
+      reason: verdict.reason,
+      aiNumber: prev.number,
+      aiName: prev.name,
     };
   },
 });
@@ -737,12 +1023,13 @@ export const saveClientPortalDraft = internalMutation({
     token: v.string(),
     clientPortalUiStep: v.optional(v.number()),
     clientDraftPhase: v.optional(
-      v.union(v.literal('datos'), v.literal('pago')),
+      v.union(v.literal('datos'), v.literal('preview'), v.literal('pago')),
     ),
     nombre: v.optional(v.string()),
     cedula: v.optional(v.string()),
     email: v.optional(v.string()),
     telefono: v.optional(v.string()),
+    telefonoRespaldo: v.optional(v.string()),
     direccion: v.optional(v.string()),
     ciudad: v.optional(v.string()),
     fechaNacimiento: v.optional(v.string()),
@@ -775,6 +1062,7 @@ export const saveClientPortalDraft = internalMutation({
     const cedula = args.cedula?.trim();
     const email = args.email?.trim();
     const telefono = args.telefono?.trim();
+    const telefonoRespaldo = args.telefonoRespaldo?.trim();
     const direccion = args.direccion?.trim();
     const ciudad = args.ciudad?.trim();
     const fechaNacimiento = normalizeBirthdate(args.fechaNacimiento);
@@ -783,6 +1071,7 @@ export const saveClientPortalDraft = internalMutation({
       cedula ||
       email ||
       telefono ||
+      telefonoRespaldo ||
       direccion ||
       ciudad ||
       fechaNacimiento
@@ -795,9 +1084,13 @@ export const saveClientPortalDraft = internalMutation({
         cedula: cedula || prev?.cedula || '',
         email: email || prev?.email || '',
         telefono: telefono || prev?.telefono || '',
+        telefonoRespaldo: telefonoRespaldo || prev?.telefonoRespaldo,
         direccion: direccion || prev?.direccion || '',
         ciudad: ciudad || prev?.ciudad,
         fechaNacimiento: fechaNacimiento ?? prev?.fechaNacimiento,
+        cedulaPhotoUrl: prev?.cedulaPhotoUrl,
+        cedulaPhotoFileName: prev?.cedulaPhotoFileName,
+        cedulaPhotoMimeType: prev?.cedulaPhotoMimeType,
         filledAt: prev?.filledAt ?? now,
       };
     }
@@ -815,6 +1108,7 @@ export const submitClientData = mutation({
     cedula: v.string(),
     email: v.string(),
     telefono: v.string(),
+    telefonoRespaldo: v.optional(v.string()),
     direccion: v.string(),
     ciudad: v.optional(v.string()),
     fechaNacimiento: v.optional(v.string()),
@@ -842,12 +1136,28 @@ export const submitClientData = mutation({
     const cedulaPhotoUrl =
       args.cedulaPhotoUrl?.trim() || link.clientData?.cedulaPhotoUrl?.trim();
     if (!cedulaPhotoUrl) return { ok: false, reason: 'missing_cedula' };
+    const ciudad = args.ciudad?.trim();
+    if (!ciudad) return { ok: false, reason: 'missing_ciudad' };
     const reusedStoredPhoto = !args.cedulaPhotoUrl?.trim();
+    const telefonoRespaldo = args.telefonoRespaldo?.trim() || undefined;
 
-    // Si la IA ya juzgó ESTA foto y la rechazó, no se pasa por encima.
+    // Obligatorio: la foto debió pasar por verifyCedula. Sin veredicto (o con
+    // rechazo) no se acepta el envío aunque el portal se salte el chequeo.
     const check = link.cedulaCheck;
-    if (check && check.photoUrl === cedulaPhotoUrl && !check.allow) {
+    if (!check || check.photoUrl !== cedulaPhotoUrl) {
+      return { ok: false, reason: 'cedula_not_verified' };
+    }
+    if (!check.allow) {
       return { ok: false, reason: check.reason || 'cedula_rejected' };
+    }
+
+    // El comprobante debió pasar por verifyPaymentReceipt (misma URL).
+    const receiptCheck = link.paymentReceiptCheck;
+    if (!receiptCheck || receiptCheck.photoUrl !== args.paymentProofUrl) {
+      return { ok: false, reason: 'receipt_not_verified' };
+    }
+    if (!receiptCheck.allow) {
+      return { ok: false, reason: receiptCheck.reason || 'receipt_rejected' };
     }
 
     const now = Date.now();
@@ -868,8 +1178,9 @@ export const submitClientData = mutation({
         cedula: args.cedula,
         email: args.email,
         telefono: args.telefono,
+        telefonoRespaldo,
         direccion: args.direccion,
-        ciudad: args.ciudad,
+        ciudad,
         fechaNacimiento,
         cedulaPhotoUrl,
         cedulaPhotoFileName: reusedStoredPhoto
@@ -1618,6 +1929,11 @@ export const getPublicByToken = query({
       petDeposit: link.petDeposit,
       petSurcharge: link.petSurcharge,
       petCount: link.petCount,
+      advancePaymentAmount:
+        link.advancePaymentAmount ?? Math.round(link.totalValue / 2),
+      boldPaymentUrl: link.boldPaymentUrl,
+      boldPaymentAmount: link.boldPaymentAmount,
+      boldSurchargePercent: link.boldSurchargePercent,
       bankAccounts,
       selectedBankAccountIds: link.selectedBankAccountIds,
       clientDataFilled: !!link.clientData,
@@ -1628,11 +1944,21 @@ export const getPublicByToken = query({
             cedula: link.clientData.cedula,
             email: link.clientData.email,
             telefono: link.clientData.telefono,
+            telefonoRespaldo: link.clientData.telefonoRespaldo,
             direccion: link.clientData.direccion,
             ciudad: link.clientData.ciudad,
             fechaNacimiento: link.clientData.fechaNacimiento,
             cedulaPhotoUrl: link.clientData.cedulaPhotoUrl,
             cedulaPhotoFileName: link.clientData.cedulaPhotoFileName,
+          }
+        : undefined,
+      // Veredicto de cédula para que el portal no vuelva a pedir foto/IA si ya pasó.
+      cedulaCheck: link.cedulaCheck
+        ? {
+            allow: link.cedulaCheck.allow,
+            photoUrl: link.cedulaCheck.photoUrl,
+            number: link.cedulaCheck.number,
+            reason: link.cedulaCheck.reason,
           }
         : undefined,
       paymentProofSubmitted: !!link.paymentProofUrl,
@@ -1842,6 +2168,11 @@ export const getForPortal = internalQuery({
       petDeposit: link.petDeposit,
       petSurcharge: link.petSurcharge,
       petCount: link.petCount,
+      advancePaymentAmount:
+        link.advancePaymentAmount ?? Math.round(link.totalValue / 2),
+      boldPaymentUrl: link.boldPaymentUrl,
+      boldPaymentAmount: link.boldPaymentAmount,
+      boldSurchargePercent: link.boldSurchargePercent,
       bankAccounts,
       selectedBankAccountIds: link.selectedBankAccountIds,
       clientDataFilled: !!link.clientData,
@@ -1852,11 +2183,20 @@ export const getForPortal = internalQuery({
             cedula: link.clientData.cedula,
             email: link.clientData.email,
             telefono: link.clientData.telefono,
+            telefonoRespaldo: link.clientData.telefonoRespaldo,
             direccion: link.clientData.direccion,
             ciudad: link.clientData.ciudad,
             fechaNacimiento: link.clientData.fechaNacimiento,
             cedulaPhotoUrl: link.clientData.cedulaPhotoUrl,
             cedulaPhotoFileName: link.clientData.cedulaPhotoFileName,
+          }
+        : undefined,
+      cedulaCheck: link.cedulaCheck
+        ? {
+            allow: link.cedulaCheck.allow,
+            photoUrl: link.cedulaCheck.photoUrl,
+            number: link.cedulaCheck.number,
+            reason: link.cedulaCheck.reason,
           }
         : undefined,
       paymentProofSubmitted: !!link.paymentProofUrl,

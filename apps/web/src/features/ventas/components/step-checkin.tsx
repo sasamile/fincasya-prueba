@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { GUEST_DOCUMENT_TYPES } from "@/features/checkin/utils/guest-document";
 import type { SaleLinkPublicData } from "./venta-page-content";
+import { StepHeader, VentaPanel } from "./venta-ui";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   data: SaleLinkPublicData;
@@ -145,48 +147,38 @@ export function StepCheckin({ data, onSubmitted }: Props) {
   // Ya completado → estado de éxito.
   if (data.checkinCompleted) {
     return (
-      <div className="space-y-4">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-primary">
-            Paso 6
-          </p>
-          <h1 className="text-2xl font-bold">Check-in</h1>
-        </div>
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
-            <CheckCircle2 className="h-7 w-7 text-emerald-600" />
+      <div className="space-y-6">
+        <StepHeader step={6} title="Check-in" />
+        <VentaPanel className="space-y-3 text-center">
+          <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-muted">
+            <CheckCircle2 className="h-6 w-6 text-foreground" />
           </div>
-          <h2 className="text-lg font-bold text-emerald-900">
-            Check-in completado — ¡nos vemos en la finca!
+          <h2 className="text-lg font-semibold tracking-tight">
+            Check-in completado
           </h2>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-emerald-800/80">
+          <p className="mx-auto max-w-sm text-sm leading-relaxed text-muted-foreground">
             Registramos {data.checkinGuests?.length ?? 0} huésped
             {(data.checkinGuests?.length ?? 0) === 1 ? "" : "es"}. Tu asesor te
             compartirá los detalles de ingreso.
           </p>
-        </div>
+        </VentaPanel>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-xs font-bold uppercase tracking-widest text-primary">
-          Paso 6
-        </p>
-        <h1 className="text-2xl font-bold">Check-in</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Registra a las personas que ingresan a la finca.
-          {maxGuests ? ` Capacidad: ${maxGuests} personas.` : ""}
-        </p>
-      </div>
+    <div className="space-y-6">
+      <StepHeader
+        step={6}
+        title="Check-in"
+        description={`Registra a las personas que ingresan a la finca.${maxGuests ? ` Capacidad: ${maxGuests}.` : ""}`}
+      />
 
       <div className="space-y-3">
         {guests.map((g, i) => (
           <div
             key={i}
-            className="rounded-2xl border border-border bg-white p-4 shadow-sm"
+            className="rounded-2xl border border-border bg-card p-4 shadow-sm"
           >
             <div className="mb-2 flex items-center justify-between">
               <p className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
@@ -261,7 +253,7 @@ export function StepCheckin({ data, onSubmitted }: Props) {
         </button>
       </div>
 
-      <div className="rounded-2xl border border-border bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
         <div className="grid gap-3">
           <div>
             <label className={labelClass}>Placas de vehículos (opcional)</label>
@@ -284,19 +276,20 @@ export function StepCheckin({ data, onSubmitted }: Props) {
         </div>
       </div>
 
-      <button
+      <Button
         type="button"
         onClick={() => void handleSubmit()}
         disabled={sending}
-        className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-white shadow-md disabled:opacity-60"
+        className="h-11 w-full"
+        size="lg"
       >
         {sending ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
         ) : (
-          <DoorOpen className="h-4 w-4" />
+          <DoorOpen className="mr-2 h-4 w-4" />
         )}
         Completar check-in
-      </button>
+      </Button>
     </div>
   );
 }

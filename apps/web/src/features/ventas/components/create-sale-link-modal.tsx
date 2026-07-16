@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format, differenceInCalendarDays, addDays, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Home, Loader2, Plus } from "lucide-react";
+import { CalendarIcon, Home, Loader2, Plus, Link2, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -95,6 +95,10 @@ const schema = z
     petDeposit: z.number().min(0),
     petSurcharge: z.number().min(0),
     petCount: z.number().min(0),
+    /** Abono que el cliente debe pagar (editable). */
+    advancePaymentAmount: z.number().min(0, "Ingresa el abono"),
+    boldSurchargePercent: z.number().min(0).max(30),
+    generateBoldLink: z.boolean(),
     selectedBankAccountIds: z
       .array(z.string())
       .min(1, "Selecciona al menos una cuenta bancaria"),
@@ -113,6 +117,20 @@ const schema = z
         code: "custom",
         message: "Selecciona fecha de salida",
         path: ["checkOut"],
+      });
+    }
+    if (data.totalValue > 0 && data.advancePaymentAmount < 1000) {
+      ctx.addIssue({
+        code: "custom",
+        message: "El abono mínimo es $1.000",
+        path: ["advancePaymentAmount"],
+      });
+    }
+    if (data.advancePaymentAmount > data.totalValue && data.totalValue > 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "El abono no puede superar el valor total",
+        path: ["advancePaymentAmount"],
       });
     }
   });
@@ -134,6 +152,9 @@ const DEFAULT_VALUES: FormValues = {
   petDeposit: 0,
   petSurcharge: 0,
   petCount: 0,
+  advancePaymentAmount: 0,
+  boldSurchargePercent: 0,
+  generateBoldLink: true,
   selectedBankAccountIds: [],
   notes: "",
 };
@@ -466,6 +487,7 @@ export function CreateSaleLinkModal({
   const adminSettings = useContractSettingsStore((s) => s.adminSettings);
   const updateOwnerInfo = useUpdatePropertyOwnerInfo();
   const lastPropertyIdRef = useRef<string>("");
+  const [advanceManual, setAdvanceManual] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -483,10 +505,15 @@ export function CreateSaleLinkModal({
   const guests = form.watch("guests");
   const selectedPropertyId = form.watch("propertyId");
   const selectedBankIds = form.watch("selectedBankAccountIds");
+  const totalValue = form.watch("totalValue");
+  const advancePaymentAmount = form.watch("advancePaymentAmount");
+  const boldSurchargePercent = form.watch("boldSurchargePercent");
+  const generateBoldLink = form.watch("generateBoldLink");
 
   useEffect(() => {
     if (open) {
       lastPropertyIdRef.current = "";
+      setAdvanceManual(false);
       form.reset(DEFAULT_VALUES);
       setPropertySearch("");
     }
@@ -667,17 +694,35 @@ export function CreateSaleLinkModal({
     form.setValue("totalValue", total);
   }, [rentalValue, depositAmount, cleaningFee, petSurcharge, petDeposit, form]);
 
+  // Abono por defecto = 50% del total, hasta que el asesor lo edite a mano.
+  useEffect(() => {
+    if (advanceManual) return;
+    const half = Math.round((totalValue || 0) / 2);
+    form.setValue("advancePaymentAmount", half > 0 ? half : 0);
+  }, [totalValue, advanceManual, form]);
+
+  const boldChargeAmount = useMemo(() => {
+    const base = Math.max(0, advancePaymentAmount || 0);
+    const pct = Math.max(0, boldSurchargePercent || 0);
+    return Math.round(base * (1 + pct / 100));
+  }, [advancePaymentAmount, boldSurchargePercent]);
+
+  const advancePercent =
+    totalValue > 0
+      ? Math.round(((advancePaymentAmount || 0) / totalValue) * 100)
+      : 0;
+
   const onSubmit = async (values: FormValues) => {
-    const { checkIn, checkOut } = values;
-    if (!checkIn || !checkOut) return;
+    const { checkIn: inDate, checkOut: outDate } = values;
+    if (!inDate || !outDate) return;
 
     setSubmitting(true);
     try {
       const result = await createSaleLink({
         propertyId: values.propertyId,
         contractCode: values.contractCode.trim().toUpperCase(),
-        checkIn: checkIn.getTime(),
-        checkOut: checkOut.getTime(),
+        checkIn: inDate.getTime(),
+        checkOut: outDate.getTime(),
         nights,
         guests: Math.max(1, values.guests),
         checkInTime: values.checkInTime || undefined,
@@ -689,20 +734,40 @@ export function CreateSaleLinkModal({
         petDeposit: values.petDeposit || undefined,
         petSurcharge: values.petSurcharge || undefined,
         petCount: values.petCount || undefined,
+        advancePaymentAmount: values.advancePaymentAmount,
+        boldSurchargePercent: values.boldSurchargePercent || undefined,
+        generateBoldLink: values.generateBoldLink,
         selectedBankAccountIds: values.selectedBankAccountIds,
         notes: values.notes || undefined,
       });
 
-      const link = `${window.location.origin}/venta/${result.token}`;
-      await navigator.clipboard.writeText(link).catch(() => {});
-      toast.success("¡Link creado y copiado al portapapeles!");
+      const saleUrl = `${window.location.origin}/venta/${result.token}`;
+      await navigator.clipboard.writeText(saleUrl).catch(() => {});
+
+      if (result.boldPaymentUrl) {
+        toast.success(
+          `Link de venta copiado. Bold listo por ${formatCOP(result.boldPaymentAmount ?? boldChargeAmount)}.`,
+          { duration: 6000 },
+        );
+      } else if (result.boldError) {
+        toast.warning(
+          `Link de venta creado. Bold no se generó: ${result.boldError}`,
+          { duration: 8000 },
+        );
+      } else {
+        toast.success("¡Link de venta creado y copiado!");
+      }
+
       form.reset(DEFAULT_VALUES);
+      setAdvanceManual(false);
       setPropertySearch("");
       onCreated();
     } catch (err) {
       const message =
-        (err as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? "Error al crear el link";
+        (err as { response?: { data?: { error?: string } }; message?: string })
+          ?.response?.data?.error ??
+        (err instanceof Error ? err.message : null) ??
+        "Error al crear el link";
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -885,21 +950,24 @@ export function CreateSaleLinkModal({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           className={cn(
-            "flex max-h-[min(88vh,720px)] w-[min(96vw,42rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none",
+            "flex max-h-[min(92vh,820px)] w-[min(96vw,44rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none",
             isInbox
-              ? "inbox z-100 border-border bg-card text-foreground shadow-2xl"
-              : "admin",
+              ? "inbox z-100 border-border bg-card text-foreground shadow-md"
+              : "border-border bg-background shadow-md",
           )}
         >
         <DialogHeader
           className={cn(
-            "shrink-0 border-b border-border/60 px-4 py-3 text-left sm:px-5",
+            "shrink-0 space-y-1 border-b border-border px-5 py-4 text-left sm:px-6",
             isInbox ? "bg-card" : "bg-background",
           )}
         >
-          <DialogTitle className="text-[15px] font-bold">Crear link de venta</DialogTitle>
-          <p className="text-[11px] text-muted-foreground">
-            El cliente abre el link, completa sus datos y sube el comprobante.
+          <DialogTitle className="text-base font-semibold tracking-tight">
+            Crear link de venta
+          </DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            El cliente completa datos, ve el abono acordado y puede pagar por
+            transferencia o Bold.
           </p>
         </DialogHeader>
 
@@ -908,7 +976,7 @@ export function CreateSaleLinkModal({
             onSubmit={form.handleSubmit(onSubmit)}
             className="flex min-h-0 flex-1 flex-col"
           >
-            <div className="scrollbar-hide min-h-0 flex-1 space-y-3.5 overflow-y-auto overflow-x-hidden px-4 py-3 sm:px-5">
+            <div className="scrollbar-hide min-h-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden px-5 py-5 sm:px-6">
             {/* Finca — mismo patrón que contrato */}
             <FormField
               control={form.control}
@@ -1343,14 +1411,14 @@ export function CreateSaleLinkModal({
                 name="totalValue"
                 render={({ field }) => (
                   <FormItem className="mt-3">
-                    <FormLabel className="text-xs font-bold">
-                      Valor Total (calculado automáticamente)
+                    <FormLabel className="text-xs font-medium text-muted-foreground">
+                      Valor total
                     </FormLabel>
                     <FormControl>
                       <Input
                         type="text"
                         inputMode="numeric"
-                        className="font-semibold"
+                        className="h-11 rounded-lg font-semibold"
                         value={formatPriceInput(field.value)}
                         onChange={(e) =>
                           field.onChange(parseCOP(e.target.value))
@@ -1371,6 +1439,132 @@ export function CreateSaleLinkModal({
               />
             </div>
 
+            {/* Abono + Bold */}
+            <section className="space-y-4 rounded-xl border border-border bg-muted/30 p-4">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">
+                  Abono del cliente
+                </h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Define cuánto debe pagar ahora. No tiene que ser el 50%.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="advancePaymentAmount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Abono a pagar *</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          className="h-11 rounded-lg"
+                          value={formatPriceInput(field.value)}
+                          onChange={(e) => {
+                            setAdvanceManual(true);
+                            field.onChange(parseCOP(e.target.value));
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                          ref={field.ref}
+                        />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">
+                        {totalValue > 0
+                          ? `${advancePercent}% del total · saldo ${formatCOP(Math.max(0, totalValue - (advancePaymentAmount || 0)))}`
+                          : "Se sugiere 50% al calcular el total"}
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="boldSurchargePercent"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">
+                        Recargo Bold (%)
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          className="h-11 rounded-lg"
+                          placeholder="0"
+                          value={field.value === 0 ? "" : String(field.value)}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/[^\d.]/g, "");
+                            field.onChange(raw === "" ? 0 : Number(raw));
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                          ref={field.ref}
+                        />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">
+                        Ej. 5 si cobras recargo por tarjeta
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name="generateBoldLink"
+                render={({ field }) => (
+                  <FormItem className="flex items-start gap-3 space-y-0 rounded-lg border border-border bg-background p-3">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={(checked) =>
+                          field.onChange(checked === true)
+                        }
+                        className="mt-0.5"
+                      />
+                    </FormControl>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <FormLabel className="flex items-center gap-1.5 text-sm font-medium leading-none">
+                        <CreditCard className="h-3.5 w-3.5 text-muted-foreground" />
+                        Generar link Bold automáticamente
+                      </FormLabel>
+                      <p className="text-xs text-muted-foreground">
+                        {generateBoldLink
+                          ? `Se creará un cobro Bold por ${formatCOP(boldChargeAmount)} al guardar.`
+                          : "Solo se crea el link de venta (transferencia)."}
+                      </p>
+                    </div>
+                  </FormItem>
+                )}
+              />
+
+              {generateBoldLink && advancePaymentAmount > 0 ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2.5 text-xs text-muted-foreground">
+                  <Link2 className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Bold cobrará{" "}
+                    <span className="font-semibold text-foreground">
+                      {formatCOP(boldChargeAmount)}
+                    </span>
+                    {boldSurchargePercent > 0
+                      ? ` (abono + ${boldSurchargePercent}%)`
+                      : ""}
+                    . Requiere{" "}
+                    <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                      BOLD_API_KEY
+                    </code>{" "}
+                    en Convex.
+                  </span>
+                </div>
+              ) : null}
+            </section>
+
             <Separator />
 
             {/* Cuentas bancarias */}
@@ -1379,7 +1573,9 @@ export function CreateSaleLinkModal({
               name="selectedBankAccountIds"
               render={() => (
                 <FormItem>
-                  <FormLabel>Cuentas bancarias para el pago *</FormLabel>
+                  <FormLabel className="text-sm font-semibold">
+                    Cuentas bancarias para el pago *
+                  </FormLabel>
                   {!hasAnyBankHolders && !selectedPropertyId ? (
                     <p className="text-sm text-muted-foreground">
                       Selecciona una finca o agrega cuentas en{" "}
@@ -1515,25 +1711,30 @@ export function CreateSaleLinkModal({
 
             <DialogFooter
               className={cn(
-                "shrink-0 gap-2 border-t border-border/60 px-4 py-3 sm:px-5",
+                "shrink-0 gap-2 border-t border-border px-5 py-4 sm:px-6",
                 isInbox ? "bg-card" : "bg-background",
               )}
             >
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
-                className="h-9"
+                className="h-10 rounded-lg"
                 onClick={() => onOpenChange(false)}
               >
                 Cancelar
               </Button>
-              <Button type="submit" size="sm" className="h-9" disabled={submitting}>
+              <Button
+                type="submit"
+                className="h-10 rounded-lg"
+                disabled={submitting}
+              >
                 {submitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creando...
+                    Creando…
                   </>
+                ) : generateBoldLink ? (
+                  "Crear link + Bold"
                 ) : (
                   "Crear y copiar link"
                 )}

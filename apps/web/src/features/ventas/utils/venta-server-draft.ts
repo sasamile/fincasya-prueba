@@ -11,6 +11,7 @@ export type VentaServerDraftPayload = {
   cedula?: string;
   email?: string;
   telefono?: string;
+  telefonoRespaldo?: string;
   direccion?: string;
   ciudad?: string;
   fechaNacimiento?: string;

@@ -5,19 +5,28 @@ const IDB_NAME = "fincasya-venta-drafts";
 const IDB_STORE = "proof-files";
 const IDB_VERSION = 2;
 
-export type VentaDraftPhase = "datos" | "pago";
+export type VentaDraftPhase = "datos" | "preview" | "pago";
 
 export type VentaFormDraft = {
   nombre: string;
   cedula: string;
   email: string;
   telefono: string;
+  /** Opcional: borradores antiguos pueden no traerlo. */
+  telefonoRespaldo?: string;
   direccion: string;
   ciudad: string;
   fechaNacimiento: string;
   paymentAmount: number;
   phase: VentaDraftPhase;
   uiStep?: number;
+  /** Último veredicto de cédula para no repetir la IA al refrescar. */
+  cedulaGate?: {
+    status: "ok" | "awaiting_typed" | "rejected";
+    photoUrl?: string;
+    aiNumber?: string;
+    reason?: string;
+  };
   updatedAt: number;
 };
 

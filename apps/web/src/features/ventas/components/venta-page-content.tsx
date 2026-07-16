@@ -16,7 +16,6 @@ import {
   CheckCircle2,
   FileText,
   Home,
-  Loader2,
   Lock,
   Users,
 } from "lucide-react";
@@ -62,6 +61,11 @@ export type SaleLinkPublicData = {
   petDeposit?: number;
   petSurcharge?: number;
   petCount?: number;
+  /** Abono configurado por el asesor (fallback: 50% del total). */
+  advancePaymentAmount?: number;
+  boldPaymentUrl?: string;
+  boldPaymentAmount?: number;
+  boldSurchargePercent?: number;
   bankAccounts: Array<{
     id: string;
     bankName: string;
@@ -80,6 +84,7 @@ export type SaleLinkPublicData = {
     cedula: string;
     email: string;
     telefono: string;
+    telefonoRespaldo?: string;
     direccion: string;
     ciudad?: string;
     fechaNacimiento?: string;
@@ -88,8 +93,15 @@ export type SaleLinkPublicData = {
     cedulaPhotoMimeType?: string;
   };
   clientPortalUiStep?: number;
-  clientDraftPhase?: "datos" | "pago";
+  clientDraftPhase?: "datos" | "preview" | "pago";
   clientDraftPaymentAmount?: number;
+  /** Veredicto de IA ya guardado en el link (evita revalidar en cada refresh). */
+  cedulaCheck?: {
+    allow: boolean;
+    photoUrl: string;
+    number?: string;
+    reason?: string;
+  };
   paymentProofSubmitted: boolean;
   paymentProofFileName?: string;
   paymentProofSubmittedAt?: number;
@@ -201,27 +213,47 @@ export function VentaPageContent({ token, validatedParam }: Props) {
 
   if (!mounted || loading) {
     return (
-      <div className="landing min-h-dvh flex items-center justify-center bg-gradient-to-b from-zinc-50 to-white">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          <p className="text-sm text-muted-foreground" suppressHydrationWarning>
-            Cargando tu reserva...
-          </p>
-        </div>
+      <div className="landing min-h-dvh bg-background">
+        <header className="border-b border-border">
+          <div className="mx-auto flex h-14 max-w-2xl items-center px-4">
+            <div className="h-7 w-28 animate-pulse rounded-md bg-muted" />
+          </div>
+        </header>
+        <main className="mx-auto max-w-2xl space-y-6 px-4 py-8">
+          <div className="aspect-video animate-pulse rounded-2xl bg-muted sm:max-h-52" />
+          <div className="h-10 animate-pulse rounded-lg bg-muted" />
+          <div className="space-y-3">
+            <div className="h-6 w-2/3 animate-pulse rounded-md bg-muted" />
+            <div className="h-4 w-1/2 animate-pulse rounded-md bg-muted" />
+          </div>
+          <div className="h-40 animate-pulse rounded-2xl bg-muted" />
+          <div className="h-48 animate-pulse rounded-2xl bg-muted" />
+        </main>
       </div>
     );
   }
 
   if (!data) {
     return (
-      <div className="landing min-h-dvh flex items-center justify-center bg-gradient-to-b from-zinc-50 to-white px-4">
-        <div className="text-center max-w-md">
-          <AlertCircle className="w-12 h-12 text-destructive mx-auto mb-4" />
-          <h1 className="text-xl font-bold mb-2">Link no disponible</h1>
-          <p className="text-muted-foreground">
-            Este link no existe o fue eliminado. Escríbele a tu asesor de FincasYa.
+      <div className="landing flex min-h-dvh flex-col bg-background">
+        <header className="border-b border-border">
+          <div className="mx-auto flex h-14 max-w-2xl items-center px-4">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/dark-logo.svg" alt="FincasYa" className="h-8 w-auto" />
+          </div>
+        </header>
+        <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-4 py-16 text-center">
+          <div className="mb-4 flex size-12 items-center justify-center rounded-full border border-border bg-muted">
+            <AlertCircle className="h-5 w-5 text-muted-foreground" />
+          </div>
+          <h1 className="text-xl font-semibold tracking-tight">
+            Link no disponible
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+            Este enlace no existe o fue eliminado. Escríbele a tu asesor de
+            FincasYa.
           </p>
-        </div>
+        </main>
       </div>
     );
   }
@@ -233,24 +265,23 @@ export function VentaPageContent({ token, validatedParam }: Props) {
   const isReviewingPastStep = viewStep !== null && viewStep < maxStep;
 
   return (
-    <div className="landing min-h-dvh bg-gradient-to-b from-[#fff6f2] via-white to-zinc-50">
-      {/* Top bar */}
-      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-sm border-b border-border/70">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-          <img src="/dark-logo.svg" alt="FincasYa" className="h-9 w-auto" />
+    <div className="landing min-h-dvh bg-background">
+      <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-2xl items-center px-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/dark-logo.svg" alt="FincasYa" className="h-8 w-auto" />
         </div>
       </header>
 
       <main
-        className={`mx-auto px-4 py-6 ${activeStep === 6 ? "max-w-lg" : "max-w-2xl"}`}
+        className={`mx-auto px-4 py-8 ${activeStep === 6 ? "max-w-lg" : "max-w-2xl"}`}
       >
         {data.property ? (
-          <div className="mb-6">
+          <div className="mb-8">
             <VentaPropertyBanner property={data.property} />
           </div>
         ) : null}
 
-        {/* Stepper */}
         <div className="mb-8">
           <VentaStepper
             steps={STEPS}
@@ -263,27 +294,28 @@ export function VentaPageContent({ token, validatedParam }: Props) {
         </div>
 
         {isReviewingPastStep ? (
-          <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 flex flex-wrap items-center justify-between gap-2">
-            <span>Estás viendo un paso anterior (solo lectura).</span>
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">
+            <span className="text-muted-foreground">
+              Viendo un paso anterior (solo lectura).
+            </span>
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => setViewStep(null)}
             >
-              Volver al paso actual
+              Volver al actual
             </Button>
           </div>
         ) : null}
 
-        {/* Step content */}
         <AnimatePresence mode="wait">
           <motion.div
             key={activeStep}
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
-            transition={{ duration: 0.25 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
           >
             {activeStep === 1 && (
               <StepResumen
@@ -297,6 +329,10 @@ export function VentaPageContent({ token, validatedParam }: Props) {
                     cedula: draft?.cedula ?? data.clientData?.cedula ?? "",
                     email: draft?.email ?? data.clientData?.email ?? "",
                     telefono: draft?.telefono ?? data.clientData?.telefono ?? "",
+                    telefonoRespaldo:
+                      draft?.telefonoRespaldo ??
+                      data.clientData?.telefonoRespaldo ??
+                      "",
                     direccion:
                       draft?.direccion ?? data.clientData?.direccion ?? "",
                     ciudad: draft?.ciudad ?? data.clientData?.ciudad ?? "",
@@ -307,6 +343,7 @@ export function VentaPageContent({ token, validatedParam }: Props) {
                     paymentAmount:
                       draft?.paymentAmount ??
                       data.clientDraftPaymentAmount ??
+                      data.advancePaymentAmount ??
                       Math.round(data.totalValue / 2),
                     phase,
                     uiStep: 2,
@@ -318,6 +355,9 @@ export function VentaPageContent({ token, validatedParam }: Props) {
                     cedula: draft?.cedula ?? data.clientData?.cedula,
                     email: draft?.email ?? data.clientData?.email,
                     telefono: draft?.telefono ?? data.clientData?.telefono,
+                    telefonoRespaldo:
+                      draft?.telefonoRespaldo ??
+                      data.clientData?.telefonoRespaldo,
                     direccion: draft?.direccion ?? data.clientData?.direccion,
                     ciudad: draft?.ciudad ?? data.clientData?.ciudad,
                     fechaNacimiento:
@@ -325,6 +365,7 @@ export function VentaPageContent({ token, validatedParam }: Props) {
                     paymentAmount:
                       draft?.paymentAmount ??
                       data.clientDraftPaymentAmount ??
+                      data.advancePaymentAmount ??
                       Math.round(data.totalValue / 2),
                   });
                   setUiStep(2);
@@ -385,75 +426,48 @@ function VentaStepper({
   onStepClick: (stepId: number) => void;
 }) {
   return (
-    <div className="w-full overflow-x-auto pb-1">
-      <div className="relative flex items-start justify-between min-w-[340px]">
-        {/* progress line */}
-        <div className="absolute top-4 left-0 right-0 h-0.5 bg-zinc-100" />
-        <motion.div
-          className="absolute top-4 left-0 h-0.5 bg-primary origin-left"
-          initial={false}
-          animate={{
-            width: `${((maxStep - 1) / (steps.length - 1)) * 100}%`,
-          }}
-          transition={{ duration: 0.4, ease: "easeInOut" }}
-        />
-
-        {steps.map((step) => {
+    <nav aria-label="Progreso de la reserva" className="w-full">
+      <ol className="flex items-center gap-1 sm:gap-1.5">
+        {steps.map((step, index) => {
           const isDone = maxStep > step.id;
           const isActive = activeStep === step.id;
-          const isLocked = maxStep < step.id;
-          const isClickable = step.id <= maxStep;
-          const Icon = step.icon;
+          const isReachable = step.id <= maxStep;
+          const isLast = index === steps.length - 1;
 
           return (
-            <button
-              key={step.id}
-              type="button"
-              disabled={!isClickable}
-              onClick={() => isClickable && onStepClick(step.id)}
-              className={`relative flex flex-col items-center gap-1.5 z-10 bg-transparent border-0 p-0 ${
-                isClickable ? "cursor-pointer" : "cursor-default"
-              }`}
-              style={{ minWidth: 48 }}
-            >
-              <motion.div
-                initial={false}
-                animate={{ scale: isActive ? 1.1 : 1 }}
-                className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-colors
-                  ${
-                    isDone
-                      ? isActive
-                        ? "border-primary bg-primary text-white ring-2 ring-primary/30"
-                        : "border-primary bg-primary text-white hover:bg-primary/90"
-                      : isActive
-                        ? "border-primary bg-white text-primary"
-                        : "border-zinc-200 bg-white text-zinc-400"
-                  }`}
-              >
-                {isDone ? (
-                  <CheckCircle2 className="w-4 h-4" />
-                ) : isLocked ? (
-                  <Lock className="w-3 h-3" />
-                ) : (
-                  <Icon className="w-3.5 h-3.5" />
-                )}
-              </motion.div>
-
-              <span
-                className={`text-[10px] font-semibold text-center leading-tight transition-colors ${
+            <li key={step.id} className="flex min-w-0 flex-1 items-center gap-1 sm:gap-1.5">
+              <button
+                type="button"
+                disabled={!isReachable}
+                onClick={() => isReachable && onStepClick(step.id)}
+                aria-current={isActive ? "step" : undefined}
+                aria-label={`${step.label}${isDone ? ", completado" : isActive ? ", actual" : ""}`}
+                className={`flex h-8 w-full items-center justify-center rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   isActive
-                    ? "text-primary"
+                    ? "bg-primary text-primary-foreground"
                     : isDone
-                      ? "text-zinc-500"
-                      : "text-zinc-300"
-                }`}
+                      ? "bg-muted text-foreground hover:bg-muted/80"
+                      : "bg-muted/50 text-muted-foreground"
+                } ${isReachable ? "cursor-pointer" : "cursor-default opacity-60"}`}
               >
-                {step.label}
-              </span>
-            </button>
+                <span className="sm:hidden">{step.id}</span>
+                <span className="hidden truncate px-1 sm:inline">{step.label}</span>
+              </button>
+              {!isLast ? (
+                <div
+                  className={`h-px w-2 shrink-0 sm:w-3 ${
+                    maxStep > step.id ? "bg-foreground/25" : "bg-border"
+                  }`}
+                  aria-hidden
+                />
+              ) : null}
+            </li>
           );
         })}
-      </div>
-    </div>
+      </ol>
+      <p className="mt-2.5 text-center text-xs text-muted-foreground sm:hidden">
+        {steps.find((s) => s.id === activeStep)?.label}
+      </p>
+    </nav>
   );
 }

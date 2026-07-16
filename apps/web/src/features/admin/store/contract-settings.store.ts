@@ -72,7 +72,7 @@ export const DEFAULT_ADMIN_SETTINGS: GlobalAdminSettings = {
   adminCedula: "81.720.077",
   adminCity: "Chía (Cund)",
   cleaningFee: "$100.000",
-  extraPersonFee: "$50.000",
+  extraPersonFee: "$120.000",
   petDeposit: "$200.000",
   securityDeposit: "$200.000",
 };
@@ -463,7 +463,7 @@ export const useContractSettingsStore = create<ContractSettingsState>()(
     }),
     {
       name: "fincasya-contract-settings",
-      version: 7,
+      version: 8,
       migrate: (persisted, version) => {
         if (
           version < 2 &&
@@ -516,6 +516,23 @@ export const useContractSettingsStore = create<ContractSettingsState>()(
             const primary = s.primaryBankAccountId;
             s.contractBankAccountIds =
               typeof primary === "string" && primary ? [primary] : [];
+          }
+        }
+        if (
+          version < 8 &&
+          persisted &&
+          typeof persisted === "object" &&
+          "state" in persisted
+        ) {
+          const s = (persisted as { state: Record<string, unknown> }).state;
+          const admin = s?.adminSettings;
+          if (admin && typeof admin === "object" && admin !== null) {
+            const fee = String(
+              (admin as { extraPersonFee?: string }).extraPersonFee ?? "",
+            ).replace(/\D/g, "");
+            if (!fee || fee === "50000") {
+              (admin as { extraPersonFee: string }).extraPersonFee = "$120.000";
+            }
           }
         }
         return persisted as never;

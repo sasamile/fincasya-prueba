@@ -73,6 +73,8 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
       audio?: { link?: string };
       video?: { link?: string; caption?: string };
       document?: { link?: string; caption?: string; filename?: string };
+      /** Echo de un interactive product / product_list (catálogo). */
+      interactive?: unknown;
       /** Cita (Responder): wamid del mensaje al que responde. */
       context?: { message_id?: string; messageId?: string; id?: string };
     };
@@ -111,8 +113,11 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
     const eventId = parsed.id ?? wamid ?? `smbecho_${Date.now()}`;
 
     let content = '';
-    let msgType: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text';
+    let msgType: 'text' | 'image' | 'audio' | 'video' | 'document' | 'product' =
+      'text';
     let mediaUrl: string | undefined;
+    let productRetailerId: string | undefined;
+
     if (wm.type === 'text' && wm.text?.body) {
       content = wm.text.body.trim();
     } else if (wm.type === 'image' && wm.image?.link) {
@@ -131,6 +136,53 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
       msgType = 'document';
       mediaUrl = wm.document.link;
       content = wm.document.filename?.trim() || '[documento]';
+    } else if (wm.type === 'interactive' && wm.interactive) {
+      // Meta suele NO ecoar catálogos vía coexistence; si YCloud igual reenvía
+      // un interactive product / product_list, lo persistimos.
+      const interactive = wm.interactive as {
+        type?: string;
+        body?: { text?: string };
+        action?: {
+          catalog_id?: string;
+          product_retailer_id?: string;
+          sections?: Array<{
+            product_items?: Array<{ product_retailer_id?: string }>;
+          }>;
+        };
+      };
+      const interactiveType = String(interactive.type ?? '').toLowerCase();
+      const fromAction = String(
+        interactive.action?.product_retailer_id ?? '',
+      ).trim();
+      const fromSections =
+        interactive.action?.sections
+          ?.flatMap((s) => s.product_items ?? [])
+          .map((p) => String(p.product_retailer_id ?? '').trim())
+          .filter(Boolean) ?? [];
+      const retailerId = fromAction || fromSections[0] || '';
+      if (
+        interactiveType === 'product' ||
+        interactiveType === 'product_list' ||
+        interactiveType === 'catalog_message'
+      ) {
+        msgType = 'product';
+        productRetailerId = retailerId || undefined;
+        let title = '';
+        if (retailerId) {
+          const resolved = await ctx.runQuery(
+            internal.inbound.resolveCatalogPick,
+            { retailerId },
+          );
+          title = resolved?.title?.trim() ?? '';
+        }
+        content =
+          title
+            ? `🏡 Ficha de catálogo: ${title}`
+            : interactive.body?.text?.trim() ||
+              (interactiveType === 'catalog_message'
+                ? '🏡 Catálogo enviado desde WhatsApp'
+                : '🏡 Ficha de catálogo enviada desde WhatsApp');
+      }
     }
 
     if (phone && content) {
@@ -140,10 +192,22 @@ const ycloudWebhookHandler = httpAction(async (ctx, request) => {
         content,
         msgType,
         mediaUrl,
+        productRetailerId,
         wamid,
         replyToWamid:
           wm.context?.message_id ?? wm.context?.messageId ?? wm.context?.id,
       });
+    } else {
+      console.warn(
+        '[ycloud] smb echo descartado',
+        JSON.stringify({
+          type: wm.type,
+          to: wm.to ?? null,
+          wamid: wamid ?? null,
+          hasContent: Boolean(content),
+          hasPhone: Boolean(phone),
+        }),
+      );
     }
     return json200();
   }
@@ -266,6 +330,81 @@ function jsonResponse(
     headers: { 'Content-Type': 'application/json', ...extraHeaders },
   });
 }
+
+const VENTA_CORS = { 'Access-Control-Allow-Origin': '*' } as const;
+
+/**
+ * POST /api/venta/:token/save-draft → borrador del portal de venta
+ * (sincroniza datos entre dispositivos sin avanzar el paso).
+ */
+http.route({
+  pathPrefix: '/api/venta/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const rest = decodeURIComponent(
+      url.pathname.replace('/api/venta/', ''),
+    ).trim();
+    const [token, action] = rest.split('/');
+    if (!token || action !== 'save-draft') {
+      return jsonResponse({ error: 'not_found' }, 404, VENTA_CORS);
+    }
+
+    let body: {
+      clientPortalUiStep?: number;
+      clientDraftPhase?: 'datos' | 'preview' | 'pago';
+      nombre?: string;
+      cedula?: string;
+      email?: string;
+      telefono?: string;
+      telefonoRespaldo?: string;
+      direccion?: string;
+      ciudad?: string;
+      fechaNacimiento?: string;
+      paymentAmount?: number;
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400, VENTA_CORS);
+    }
+
+    const result = await ctx.runMutation(
+      internal.saleLinks.saveClientPortalDraft,
+      {
+        token,
+        clientPortalUiStep: body.clientPortalUiStep,
+        clientDraftPhase: body.clientDraftPhase,
+        nombre: body.nombre,
+        cedula: body.cedula,
+        email: body.email,
+        telefono: body.telefono,
+        telefonoRespaldo: body.telefonoRespaldo,
+        direccion: body.direccion,
+        ciudad: body.ciudad,
+        fechaNacimiento: body.fechaNacimiento,
+        paymentAmount: body.paymentAmount,
+      },
+    );
+    return jsonResponse(result, 200, VENTA_CORS);
+  }),
+});
+
+http.route({
+  pathPrefix: '/api/venta/',
+  method: 'OPTIONS',
+  handler: httpAction(async () => {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...VENTA_CORS,
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }),
+});
 
 /** GET /api/checkin/:reference → resumen de la reserva + lo ya guardado. */
 http.route({

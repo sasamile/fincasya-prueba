@@ -90,11 +90,19 @@ export function AutoCatalogModal({
   conversationId,
   onClose,
   onSent,
+  seed,
 }: {
   conversationId: Id<'conversations'>;
   onClose: () => void;
   /** Tras envío OK: cierra también el panel padre si aplica. */
   onSent?: () => void;
+  /** Prefill desde el asistente (manda sobre getCatalogPrefill). */
+  seed?: {
+    fechaEntrada?: string;
+    fechaSalida?: string;
+    personas?: number;
+    zona?: string;
+  };
 }) {
   const sendAuto = useAction(api.inbox.sendAutoCatalog);
   const previewAuto = useAction(api.inbox.previewAutoCatalog);
@@ -109,18 +117,36 @@ export function AutoCatalogModal({
   const [autoLoadingPreview, setAutoLoadingPreview] = useState(false);
   const [autoPreview, setAutoPreview] = useState<PreviewItem[] | null>(null);
   const [autoSelected, setAutoSelected] = useState<Set<string>>(new Set());
+  const [sendQty, setSendQty] = useState(6);
   const [autoPreviewError, setAutoPreviewError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [filtersTouched, setFiltersTouched] = useState(false);
 
+  function selectFirstN(items: PreviewItem[], n: number) {
+    const qty = Math.max(0, Math.min(n, items.length));
+    setSendQty(qty);
+    setAutoSelected(
+      new Set(items.slice(0, qty).map((i) => String(i.propertyId))),
+    );
+  }
+
   useEffect(() => {
-    if (!prefill || autoInit) return;
+    if (autoInit) return;
+    if (seed) {
+      setAutoFe(seed.fechaEntrada || '');
+      setAutoFs(seed.fechaSalida || '');
+      setAutoPersonas(seed.personas != null ? String(seed.personas) : '');
+      setAutoZona(seed.zona || '');
+      setAutoInit(true);
+      return;
+    }
+    if (!prefill) return;
     setAutoFe(prefill.fechaEntrada || '');
     setAutoFs(prefill.fechaSalida || '');
     setAutoPersonas(prefill.personas != null ? String(prefill.personas) : '');
     setAutoZona(prefill.zona || '');
     setAutoInit(true);
-  }, [prefill, autoInit]);
+  }, [prefill, autoInit, seed]);
 
   useEffect(() => {
     if (!autoInit) return;
@@ -164,7 +190,8 @@ export function AutoCatalogModal({
         return;
       }
       setAutoPreview(res.items);
-      setAutoSelected(new Set(res.items.map((i) => String(i.propertyId))));
+      const preferred = Math.min(sendQty > 0 ? sendQty : 6, res.items.length);
+      selectFirstN(res.items, preferred);
     } catch (err) {
       setAutoPreviewError(
         err instanceof Error ? err.message : 'Error al cargar fincas',
@@ -187,13 +214,16 @@ export function AutoCatalogModal({
     setAutoSending(true);
     setResult(null);
     try {
+      const orderedIds = (autoPreview ?? [])
+        .map((i) => String(i.propertyId))
+        .filter((id) => autoSelected.has(id)) as Id<'properties'>[];
       const res = await sendAuto({
         conversationId,
         personas: autoPersonas ? Number(autoPersonas) : undefined,
         zona: autoZona.trim() || undefined,
         fechaEntrada: autoFe || undefined,
         fechaSalida: autoFs || undefined,
-        propertyIds: [...autoSelected] as Id<'properties'>[],
+        propertyIds: orderedIds,
       });
       if (res.ok) {
         setResult(`✓ Enviando ${res.queued ?? 0} finca(s)…`);
@@ -211,14 +241,16 @@ export function AutoCatalogModal({
     }
   }
 
-  function toggleAuto(id: string) {
-    setAutoSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function applySendQty(raw: number) {
+    if (!autoPreview || autoPreview.length === 0) {
+      setSendQty(Math.max(1, raw));
+      return;
+    }
+    selectFirstN(autoPreview, raw);
   }
+
+  const qtyMax = autoPreview?.length ?? 12;
+  const qtyPresets = [3, 5, 6, 8, 10, 12].filter((n) => n <= qtyMax);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4">
@@ -312,6 +344,82 @@ export function AutoCatalogModal({
             </label>
           </div>
 
+          <div className="mt-3 rounded-xl border border-border/70 bg-muted/15 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-[11px] font-medium text-muted-foreground">
+                Cantidad a enviar
+              </label>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={!autoPreview || sendQty <= 1}
+                  onClick={() => applySendQty(sendQty - 1)}
+                  className="grid h-8 w-8 place-items-center rounded-lg border border-border bg-background text-sm font-bold disabled:opacity-40"
+                  aria-label="Menos"
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  max={qtyMax}
+                  value={sendQty}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (!Number.isFinite(n)) return;
+                    applySendQty(n);
+                  }}
+                  className="h-8 w-14 rounded-lg border border-border bg-background px-1 text-center text-[13px] font-semibold tabular-nums"
+                />
+                <button
+                  type="button"
+                  disabled={!autoPreview || sendQty >= qtyMax}
+                  onClick={() => applySendQty(sendQty + 1)}
+                  className="grid h-8 w-8 place-items-center rounded-lg border border-border bg-background text-sm font-bold disabled:opacity-40"
+                  aria-label="Más"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            {autoPreview && autoPreview.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {qtyPresets.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => applySendQty(n)}
+                    className={cn(
+                      'rounded-full px-2.5 py-1 text-[11px] font-semibold transition',
+                      sendQty === n
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-background text-muted-foreground hover:bg-muted',
+                    )}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => applySendQty(autoPreview.length)}
+                  className={cn(
+                    'rounded-full px-2.5 py-1 text-[11px] font-semibold transition',
+                    sendQty === autoPreview.length
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background text-muted-foreground hover:bg-muted',
+                  )}
+                >
+                  Todas ({autoPreview.length})
+                </button>
+              </div>
+            ) : (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Primero toca “Ver fincas”; luego eliges cuántas enviar (marca las
+                primeras de la lista).
+              </p>
+            )}
+          </div>
+
           {autoPreview && autoPreview.length > 0 && (
             <div className="mt-3 space-y-0.5 rounded-xl border border-border/60 bg-muted/20 p-1.5">
               <div className="flex items-center justify-between px-1.5 pb-1">
@@ -324,10 +432,9 @@ export function AutoCatalogModal({
                   onClick={() => {
                     if (autoSelected.size === autoPreview.length) {
                       setAutoSelected(new Set());
+                      setSendQty(0);
                     } else {
-                      setAutoSelected(
-                        new Set(autoPreview.map((i) => String(i.propertyId))),
-                      );
+                      selectFirstN(autoPreview, autoPreview.length);
                     }
                   }}
                 >
@@ -343,7 +450,15 @@ export function AutoCatalogModal({
                     key={id}
                     item={item}
                     selected={autoSelected.has(id)}
-                    onToggle={() => toggleAuto(id)}
+                    onToggle={() => {
+                      setAutoSelected((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(id)) next.delete(id);
+                        else next.add(id);
+                        setSendQty(next.size);
+                        return next;
+                      });
+                    }}
                   />
                 );
               })}

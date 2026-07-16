@@ -15,18 +15,17 @@ import {
   Minus,
   Plus,
   Search,
-  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   FileCheck,
   Link2,
   Copy,
   MessageCircle,
   History,
-  ChevronLeft,
-  ChevronRight,
   User,
   CalendarDays,
   UserCheck,
-  ClipboardCheck,
+  PenLine,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -50,7 +49,7 @@ import {
   formatHabitacionesText,
 } from "@/features/admin/utils/contract-preview-helpers";
 import { ContractGlobalSetupSections } from "@/features/admin/components/contracts/contract-global-setup-sections";
-import { ContractDocumentPreview } from "@/features/admin/components/contracts/contract-document-preview";
+import { ContractWordEditor, type ContractWordEditorHandle } from "@/features/admin/components/contracts/contract-word-editor";
 import { ContractCodeHistoryModal } from "@/features/admin/components/contracts/contract-code-history-modal";
 import {
   generateContractDocxAction,
@@ -430,6 +429,8 @@ export function ContractsReservationSection({
   const [loadingGenerateLink, setLoadingGenerateLink] = useState(false);
   const [codeHistoryOpen, setCodeHistoryOpen] = useState(false);
   const contractBlobUrlRef = useRef<string | null>(null);
+  const wordEditorRef = useRef<ContractWordEditorHandle | null>(null);
+  const [wordEditorReady, setWordEditorReady] = useState(false);
 
   const { data: propertiesData, isLoading } = useProperties({
     all: true,
@@ -495,7 +496,7 @@ export function ContractsReservationSection({
     "Estadía",
     "Cargos",
     "Cliente",
-    "Revisar",
+    "Editar",
   ] as const;
   const CONTRACT_STEP_HINTS: Record<(typeof CONTRACT_STEPS)[number], string> = {
     Finca: "Busca y selecciona la finca para este contrato.",
@@ -503,7 +504,7 @@ export function ContractsReservationSection({
     Estadía: "Fechas, horas, huéspedes y valores del arrendamiento.",
     Cargos: "Mascotas, servicio, manilla, otros cobros y evento.",
     Cliente: "Datos de quien firma el contrato.",
-    Revisar: "Vista previa del contrato antes de generar.",
+    Editar: "Edita el contrato como en Word y descárgalo o genera la reserva.",
   };
   const CONTRACT_STEP_ICONS: Record<(typeof CONTRACT_STEPS)[number], LucideIcon> = {
     Finca: Home,
@@ -511,7 +512,7 @@ export function ContractsReservationSection({
     Estadía: CalendarDays,
     Cargos: CreditCard,
     Cliente: UserCheck,
-    Revisar: ClipboardCheck,
+    Editar: PenLine,
   };
   const selectedFirmante = useMemo(
     () =>
@@ -1675,7 +1676,37 @@ export function ContractsReservationSection({
       let contractLocalBlob: Blob | null = null;
       setContractArtifactKind(null);
 
-      if (hasPropertyPdfTemplate) {
+      // Si el paso Editar tiene el Word listo, exporta lo que el usuario editó.
+      if (hasPropertyPdfTemplate && wordEditorRef.current?.isReady()) {
+        try {
+          toast.loading("Exportando contrato editado…", {
+            id: loadingToastId,
+          });
+          const { base64, filename } = await wordEditorRef.current.exportPdf();
+          contractLocalBlob = base64ToBlob(base64, "application/pdf");
+          contractDownloadFilename = filename;
+          if (contractBlobUrlRef.current) {
+            URL.revokeObjectURL(contractBlobUrlRef.current);
+            contractBlobUrlRef.current = null;
+          }
+          const blobUrl = URL.createObjectURL(contractLocalBlob);
+          contractBlobUrlRef.current = blobUrl;
+          setContractUrl(blobUrl);
+          setContractArtifactKind("pdf");
+          download(contractLocalBlob, filename);
+          contractDocxDownloadedEarly = true;
+          toast.success("Contrato PDF (con tus ediciones) descargado.", {
+            duration: 4000,
+          });
+        } catch (editExportErr) {
+          console.warn(
+            "[contratos] no se pudo exportar el editor Word, regenerando:",
+            editExportErr,
+          );
+        }
+      }
+
+      if (!contractLocalBlob && hasPropertyPdfTemplate) {
         const contractResponse = await axios.post(
           `/api/fincas/${effectiveForm.propertyId}/direct-booking-contract`,
           buildContractPayload(effectiveForm, generatedContractNumber),
@@ -1723,7 +1754,7 @@ export function ContractsReservationSection({
             contractUrlResult.trim() ? (isDocxArtifact ? "docx" : "pdf") : null,
           );
         }
-      } else {
+      } else if (!contractLocalBlob) {
         const htmlSource = contractPreviewHtml.trim();
 
         // 1. Intentar PDF vía backend (puppeteer)
@@ -2352,7 +2383,7 @@ export function ContractsReservationSection({
                 {isLinkMode ? "Link de Contrato" : "Generar Contrato"}
               </h2>
               <span className="hidden text-[11px] text-zinc-400 lg:inline">
-                · Completa los pasos y genera el PDF
+                · Completa los pasos, edita el Word y genera el PDF
               </span>
               {!isLinkMode && (
                 <Button
@@ -3333,31 +3364,71 @@ export function ContractsReservationSection({
             {step === 5 && (
             <>
               {!form.propertyId ? (
-                <p className="text-sm text-zinc-500">
-                  Selecciona una finca para armar la vista previa.
+                <p className="text-sm text-muted-foreground">
+                  Selecciona una finca para armar el contrato editable.
                 </p>
               ) : (
                 <div className="space-y-3">
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl text-[11px] font-bold"
-                      onClick={() =>
-                        formTopRef.current?.scrollIntoView({
-                          behavior: "smooth",
-                          block: "start",
-                        })
-                      }
-                    >
-                      <ChevronUp className="mr-1.5 h-4 w-4" />
-                      Volver al inicio del formulario
-                    </Button>
+                  <div className="rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-3">
+                    <p className="text-xs font-bold text-foreground">
+                      Vista previa editable (como Word)
+                    </p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                      Puedes corregir texto, tipografía y formato aquí. Al
+                      generar el contrato se usará esta versión editada.
+                      Si cambias datos en pasos anteriores, pulsa «Regenerar».
+                    </p>
                   </div>
-                  <ScrollArea className="h-[min(60vh,640px)] rounded-xl border border-zinc-200">
-                    <ContractDocumentPreview html={contractPreviewHtml} />
-                  </ScrollArea>
+                  <ContractWordEditor
+                    ref={wordEditorRef}
+                    propertyId={form.propertyId}
+                    payload={buildContractPayload(
+                      {
+                        ...form,
+                        petDeposit: String(petDepositTotal),
+                        petSurcharge: String(petSurchargeTotal),
+                        serviceStaffFee: form.serviceStaffIncluded
+                          ? String(serviceStaffTotal)
+                          : "0",
+                      },
+                      form.contractNumber.trim() || "BORRADOR",
+                    )}
+                    active={step === 5 && Boolean(form.propertyId)}
+                    documentKey={[
+                      form.propertyId,
+                      form.contractNumber,
+                      form.nightlyPrice,
+                      form.contractTotalInput,
+                      form.clientName,
+                      form.clientId,
+                      form.clientEmail,
+                      form.clientPhone,
+                      form.clientCity,
+                      form.clientAddress,
+                      form.checkInDate,
+                      form.checkOutDate,
+                      form.checkInTime,
+                      form.checkOutTime,
+                      form.guests,
+                      form.habitaciones,
+                      form.petCount,
+                      form.cleaningFee,
+                      form.refundableDeposit,
+                      form.manillaCondominio,
+                      form.otherCharges,
+                      form.serviceStaffIncluded ? "1" : "0",
+                      form.serviceStaffFee,
+                      petDepositTotal,
+                      petSurchargeTotal,
+                      serviceStaffTotal,
+                      bankIdsForContract.join(","),
+                      selectedFirmante?.id ?? "",
+                      ownerResolved.name,
+                      ownerResolved.cedula,
+                    ].join("|")}
+                    onReadyChange={setWordEditorReady}
+                    heightClassName="h-[min(68vh,780px)]"
+                  />
                 </div>
               )}
             </>
@@ -3393,7 +3464,7 @@ export function ContractsReservationSection({
                 </Button>
               ) : (
                 <span className="text-[11px] font-semibold text-primary">
-                  Último paso · genera abajo
+                  Último paso · edita y genera
                 </span>
               )}
             </div>
@@ -3628,13 +3699,29 @@ export function ContractsReservationSection({
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />{" "}
                         Generando...
                       </>
+                    ) : wordEditorReady ? (
+                      "Generar contrato editado"
                     ) : (
                       "Generar contrato"
                     )}
                   </Button>
 
+                  {!wordEditorReady && form.propertyId ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-10 w-full rounded-xl border-primary/30 bg-primary/5 text-xs font-bold text-primary hover:bg-primary/10"
+                      onClick={() => setStep(5)}
+                    >
+                      <PenLine className="mr-2 h-4 w-4" />
+                      Ir a editar (Word)
+                    </Button>
+                  ) : null}
+
                   <p className="text-center text-[9px] font-bold uppercase leading-snug tracking-wider text-zinc-400">
-                    Revisa la vista previa del contrato abajo antes de generar.
+                    {wordEditorReady
+                      ? "Usará el contrato editado del paso Editar."
+                      : "Ve al paso Editar para revisar el Word antes de generar."}{" "}
                     Usa «Confirmar pago» cuando el cliente haya abonado.
                   </p>
                     </>

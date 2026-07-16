@@ -15,6 +15,11 @@ import { useMutation } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import type { SaleLinkPublicData } from "./venta-page-content";
+import {
+  StepHeader,
+  VentaCallout,
+  VentaPanel,
+} from "./venta-ui";
 
 interface Props {
   data: SaleLinkPublicData;
@@ -119,24 +124,19 @@ export function StepContrato({ data, onSubmitted }: Props) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-xs font-bold text-primary uppercase tracking-widest mb-1">
-          Paso 4
-        </p>
-        <h1 className="text-2xl font-bold">Tu contrato</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Descarga el contrato, fírmalo y súbelo aquí
-        </p>
-      </div>
+      <StepHeader
+        step={4}
+        title="Tu contrato"
+        description="Descarga el contrato, fírmalo y súbelo aquí."
+      />
 
-      {/* Descargar contrato */}
-      <div className="rounded-xl bg-card p-5 space-y-4 shadow-sm">
+      <VentaPanel className="space-y-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            <FileText className="h-6 w-6 text-primary" />
+          <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
+            <FileText className="h-5 w-5 text-muted-foreground" />
           </div>
           <div>
-            <p className="font-semibold text-sm">Contrato de arrendamiento</p>
+            <p className="text-sm font-semibold">Contrato de arrendamiento</p>
             <p className="text-xs text-muted-foreground">
               Generado para tu reserva
             </p>
@@ -156,7 +156,7 @@ export function StepContrato({ data, onSubmitted }: Props) {
             </Button>
           </a>
         ) : generateError ? (
-          <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-800 space-y-2">
+          <VentaCallout tone="destructive" className="space-y-2">
             <p>{generateError}</p>
             <Button
               type="button"
@@ -178,42 +178,38 @@ export function StepContrato({ data, onSubmitted }: Props) {
                 "Reintentar generación"
               )}
             </Button>
-          </div>
+          </VentaCallout>
         ) : (
-          <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground text-center">
-            <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+          <div className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+            <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
             {generating
               ? "Generando tu contrato PDF..."
               : "Preparando tu contrato..."}
           </div>
         )}
-      </div>
+      </VentaPanel>
 
-      {/* Instrucciones */}
-      <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800 space-y-1.5">
-        <p className="font-semibold">Instrucciones:</p>
-        <ol className="list-decimal list-inside space-y-1">
+      <VentaCallout>
+        <p className="mb-1.5 font-medium">Instrucciones</p>
+        <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
           <li>Descarga el contrato PDF</li>
           <li>Imprímelo o fírmalo digitalmente</li>
           <li>Toma una foto o escanea el contrato firmado</li>
           <li>Súbelo a continuación</li>
         </ol>
-      </div>
+      </VentaCallout>
 
-      {/* Subir contrato firmado */}
       <div className="space-y-3">
         <p className="text-sm font-semibold">Subir contrato firmado</p>
         <div
           role="button"
           onClick={() => fileRef.current?.click()}
-          className="rounded-xl border-2 border-dashed border-border hover:border-primary/50 transition-colors p-6 text-center cursor-pointer"
+          className="cursor-pointer rounded-xl border border-dashed border-border p-6 text-center transition-colors duration-150 hover:border-foreground/30"
         >
           {file ? (
             <div className="flex items-center justify-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-              <span className="text-sm font-medium text-emerald-700">
-                {file.name}
-              </span>
+              <CheckCircle2 className="h-5 w-5 text-foreground" />
+              <span className="text-sm font-medium">{file.name}</span>
               <button
                 type="button"
                 onClick={(e) => {
@@ -221,12 +217,12 @@ export function StepContrato({ data, onSubmitted }: Props) {
                   setFile(null);
                 }}
               >
-                <X className="w-4 h-4 text-muted-foreground" />
+                <X className="h-4 w-4 text-muted-foreground" />
               </button>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2 text-muted-foreground">
-              <Upload className="w-8 h-8" />
+              <Upload className="h-7 w-7" />
               <p className="text-sm">Foto del contrato firmado o PDF</p>
               <p className="text-xs">JPG, PNG o PDF · Máx. 20 MB</p>
             </div>
@@ -246,36 +242,33 @@ export function StepContrato({ data, onSubmitted }: Props) {
         <Button
           onClick={handleUploadSigned}
           disabled={submitting || !file || !data.contractUrl}
-          className="w-full"
+          className="h-11 w-full"
           size="lg"
         >
           {submitting ? (
             <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Enviando...
             </>
           ) : (
             <>
-              <Send className="w-4 h-4 mr-2" />
+              <Send className="mr-2 h-4 w-4" />
               Enviar contrato firmado
             </>
           )}
         </Button>
         {!data.contractUrl && (
-          <p className="text-xs text-center text-muted-foreground">
+          <p className="text-center text-xs text-muted-foreground">
             Espera a que el contrato esté disponible para descargarlo primero
           </p>
         )}
       </div>
 
-      {data.signedContractSubmitted && (
-        <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 flex items-center gap-3">
-          <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-          <p className="text-sm text-emerald-800">
-            ¡Contrato firmado recibido! Continúa al siguiente paso.
-          </p>
-        </div>
-      )}
+      {data.signedContractSubmitted ? (
+        <VentaCallout>
+          Contrato firmado recibido. Continúa al siguiente paso.
+        </VentaCallout>
+      ) : null}
     </div>
   );
 }

@@ -36,6 +36,32 @@ function ownerPhoneKey(raw?: string | null): string {
   return (raw ?? '').replace(/\D+/g, '').slice(-10);
 }
 
+/**
+ * Busca contacto por variantes de teléfono (exacto, últimos 10, 57…).
+ * El eco SMB a veces trae `to` sin indicativo y el contacto está como 57…
+ * (o al revés); un match exacto creaba otro chat y el mensaje “desaparecía”.
+ */
+async function findContactByPhoneVariants(
+  ctx: MutationCtx,
+  phone: string,
+) {
+  const digits = phone.replace(/\D+/g, '');
+  if (!digits) return null;
+  const suffix = digits.length >= 7 ? digits.slice(-10) : digits;
+  const candidates = [digits, suffix, `57${suffix}`, `+57${suffix}`];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    const hit = await ctx.db
+      .query('contacts')
+      .withIndex('by_phone', (q) => q.eq('phone', candidate))
+      .first();
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /** Nombre del directorio telefónico (.vcf importado) para un teléfono, si existe. */
 async function phonebookName(
   ctx: MutationCtx,
@@ -47,8 +73,7 @@ async function phonebookName(
     .query('phonebook')
     .withIndex('by_phone_key', (q) => q.eq('phoneKey', key))
     .first();
-  const name = row?.name?.trim();
-  return name && name.length > 0 ? name : null;
+  const name = row?.name?.trim();  return name && name.length > 0 ? name : null;
 }
 
 /** ¿El nombre del contacto es solo el número (placeholder sin nombre real)? */
@@ -193,8 +218,11 @@ export const ingestAdvisorAppMessage = internalMutation({
       v.literal('audio'),
       v.literal('video'),
       v.literal('document'),
+      v.literal('product'),
     ),
     mediaUrl: v.optional(v.string()),
+    /** retailerId de ficha Meta si el eco trae interactive/product. */
+    productRetailerId: v.optional(v.string()),
     wamid: v.optional(v.string()),
     /** wamid del mensaje citado (Responder desde la app). */
     replyToWamid: v.optional(v.string()),
@@ -221,10 +249,7 @@ export const ingestAdvisorAppMessage = internalMutation({
     }
 
     const now = Date.now();
-    let contact = await ctx.db
-      .query('contacts')
-      .withIndex('by_phone', (q) => q.eq('phone', args.phone))
-      .first();
+    let contact = await findContactByPhoneVariants(ctx, args.phone);
     if (!contact) {
       // El directorio del .vcf manda: si el equipo tiene guardado este número,
       // el contacto nace con ese nombre (y no con el número pelado).
@@ -268,6 +293,7 @@ export const ingestAdvisorAppMessage = internalMutation({
     // el bot.
     const autoReply = args.msgType === 'text' && isAppAutoReply(args.content);
 
+    const retailerId = args.productRetailerId?.trim() || undefined;
     const advisorMessageId = await ctx.db.insert('messages', {
       conversationId: conversation._id,
       sender: 'assistant',
@@ -279,7 +305,12 @@ export const ingestAdvisorAppMessage = internalMutation({
       sentByUserId: autoReply ? undefined : 'whatsapp-app',
       whatsappStatus: 'sent',
       metadata: {
-        source: autoReply ? 'ycloud_smb_echo_auto' : 'ycloud_smb_echo',
+        source: autoReply
+          ? 'ycloud_smb_echo_auto'
+          : args.msgType === 'product'
+            ? 'ycloud_smb_echo_catalog'
+            : 'ycloud_smb_echo',
+        ...(retailerId ? { productRetailerId: retailerId } : {}),
       },
       createdAt: now,
     });

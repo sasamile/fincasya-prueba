@@ -15,6 +15,52 @@
  */
 import { v } from 'convex/values';
 import { internalMutation, mutation, query } from './_generated/server';
+import type { MutationCtx } from './_generated/server';
+import type { Doc } from './_generated/dataModel';
+
+/**
+ * Enlaza una finca a su catálogo de WhatsApp al crearla/actualizarla, para que
+ * quede `sendable` sin esperar la reconciliación manual. Elige catálogo por
+ * `locationKeyword` y cae al default. Convención fincasya-new:
+ * productRetailerId = _id de la finca (= columna `id` del feed CSV).
+ * Idempotente: si la finca ya tiene algún enlace, no hace nada.
+ */
+export async function autoLinkPropertyToCatalog(
+  ctx: MutationCtx,
+  property: Doc<'properties'>,
+): Promise<'linked' | 'already-linked' | 'skipped' | 'no-catalog'> {
+  if (property.active === false) return 'skipped';
+  if (property.visible === false || property.visibleInWhatsAppCatalog === false) {
+    return 'skipped';
+  }
+
+  const existing = await ctx.db
+    .query('propertyWhatsAppCatalog')
+    .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+    .first();
+  if (existing) return 'already-linked';
+
+  const catalogs = await ctx.db.query('whatsappCatalogs').collect();
+  const location = String(property.location ?? '').toLowerCase();
+  const target =
+    catalogs.find((c) => {
+      const kw = (c.locationKeyword ?? '').trim().toLowerCase();
+      return kw.length > 0 && location.includes(kw);
+    }) ??
+    catalogs.find((c) => c.isDefault === true) ??
+    null;
+  if (!target) return 'no-catalog';
+
+  const now = Date.now();
+  await ctx.db.insert('propertyWhatsAppCatalog', {
+    propertyId: property._id,
+    catalogId: target._id,
+    productRetailerId: String(property._id),
+    createdAt: now,
+    updatedAt: now,
+  });
+  return 'linked';
+}
 
 /** Enlaces de una finca, enriquecidos con nombre e id Meta del catálogo. */
 export const listByProperty = query({

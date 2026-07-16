@@ -1,16 +1,32 @@
 'use client';
 
 /**
- * Asistente del Experto — voz primero.
- * Hablas lo que quieres (ej. "pídele la cédula"), la IA sugiere el mensaje
- * y lo dejas en el borrador. No envía por WhatsApp.
+ * Asistente del Experto — texto por defecto + voz opcional.
+ * Puede redactar un mensaje O interpretar una orden (p. ej. abrir catálogo).
  */
 import { useEffect, useRef, useState } from 'react';
 import { useAction } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
-import { Loader2, Mic, Square, X } from 'lucide-react';
+import {
+  Loader2,
+  Mic,
+  RefreshCw,
+  Sparkles,
+  Square,
+  Store,
+  X,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+export type AssistCatalogAction = {
+  type: 'open_catalog';
+  label: string;
+  fechaEntrada?: string;
+  fechaSalida?: string;
+  personas?: number;
+  zona?: string;
+};
 
 type SpeechRec = {
   lang: string;
@@ -19,9 +35,13 @@ type SpeechRec = {
   start: () => void;
   stop: () => void;
   abort: () => void;
-  onresult: ((ev: {
-    results: ArrayLike<{ isFinal?: boolean } & ArrayLike<{ transcript: string }>>;
-  }) => void) | null;
+  onresult:
+    | ((ev: {
+        results: ArrayLike<
+          { isFinal?: boolean } & ArrayLike<{ transcript: string }>
+        >;
+      }) => void)
+    | null;
   onerror: ((ev: { error?: string }) => void) | null;
   onend: (() => void) | null;
 };
@@ -40,31 +60,44 @@ export function AdvisorAssistPanel({
   open,
   onClose,
   onUseSuggestion,
+  onOpenCatalog,
 }: {
   conversationId: Id<'conversations'>;
   open: boolean;
   onClose: () => void;
   onUseSuggestion: (text: string) => void;
+  /** Cuando la IA detecta una orden de catálogo. */
+  onOpenCatalog?: (action: AssistCatalogAction) => void;
 }) {
   const suggest = useAction(api.inbox.suggestAdvisorReply);
-  const [heard, setHeard] = useState('');
+  const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [action, setAction] = useState<AssistCatalogAction | null>(null);
   const [listening, setListening] = useState(false);
   const [supported, setSupported] = useState(true);
   const recRef = useRef<SpeechRec | null>(null);
-  const heardRef = useRef('');
+  const noteRef = useRef('');
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const pendingSuggestRef = useRef(false);
 
   useEffect(() => {
-    setHeard('');
-    heardRef.current = '';
+    noteRef.current = note;
+  }, [note]);
+
+  useEffect(() => {
+    setNote('');
+    noteRef.current = '';
     setSuggestion(null);
+    setAction(null);
     setError(null);
     setLoading(false);
     pendingSuggestRef.current = false;
     stopListening(false);
+    if (open) {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, open]);
 
@@ -84,21 +117,28 @@ export function AdvisorAssistPanel({
     setListening(false);
   }
 
-  async function runSuggest(note: string) {
+  async function runSuggest(instruction: string) {
     if (loading) return;
     setLoading(true);
     setError(null);
     setSuggestion(null);
+    setAction(null);
     try {
       const res = await suggest({
         conversationId,
-        note: note.trim() || undefined,
+        note: instruction.trim() || undefined,
       });
-      if (!res.ok || !res.suggestion) {
+      if (!res.ok) {
         setError(res.error ?? 'No se pudo sugerir');
         return;
       }
-      setSuggestion(res.suggestion);
+      if (res.suggestion) setSuggestion(res.suggestion);
+      if (res.action?.type === 'open_catalog') {
+        setAction(res.action);
+      }
+      if (!res.suggestion && !res.action) {
+        setError(res.error ?? 'No se pudo sugerir');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al sugerir');
     } finally {
@@ -110,14 +150,14 @@ export function AdvisorAssistPanel({
     const Ctor = getSpeechRecognition();
     if (!Ctor) {
       setSupported(false);
-      setError('Tu navegador no soporta voz. Prueba Chrome o Edge.');
+      setError('Tu navegador no soporta voz. Escribe la instrucción abajo.');
+      inputRef.current?.focus();
       return;
     }
     setError(null);
     setSuggestion(null);
+    setAction(null);
     stopListening(false);
-    heardRef.current = '';
-    setHeard('');
 
     const rec = new Ctor();
     rec.lang = 'es-CO';
@@ -130,15 +170,15 @@ export function AdvisorAssistPanel({
         if (row?.[0]?.transcript) text += row[0].transcript;
       }
       const clean = text.trim();
-      heardRef.current = clean;
-      setHeard(clean);
+      noteRef.current = clean;
+      setNote(clean);
     };
     rec.onerror = (ev) => {
       setListening(false);
       if (ev.error === 'not-allowed') {
-        setError('Permite el micrófono para hablarle al asistente.');
+        setError('Permite el micrófono o escribe la instrucción.');
       } else if (ev.error !== 'aborted') {
-        setError('No se pudo escuchar. Revisa el micrófono.');
+        setError('No se pudo escuchar. Puedes escribir la instrucción.');
       }
     };
     rec.onend = () => {
@@ -146,8 +186,9 @@ export function AdvisorAssistPanel({
       recRef.current = null;
       if (pendingSuggestRef.current) {
         pendingSuggestRef.current = false;
-        const note = heardRef.current.trim();
-        void runSuggest(note);
+        void runSuggest(noteRef.current);
+      } else {
+        inputRef.current?.focus();
       }
     };
     recRef.current = rec;
@@ -155,8 +196,9 @@ export function AdvisorAssistPanel({
       rec.start();
       setListening(true);
     } catch {
-      setError('No se pudo iniciar el micrófono.');
+      setError('No se pudo iniciar el micrófono. Escribe la instrucción.');
       setListening(false);
+      inputRef.current?.focus();
     }
   }
 
@@ -168,17 +210,31 @@ export function AdvisorAssistPanel({
     startListening();
   }
 
+  function handleSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (listening) {
+      stopListening(true);
+      return;
+    }
+    void runSuggest(note);
+  }
+
   if (!open) return null;
 
+  const hasResult = Boolean(suggestion || action);
+
   return (
-    <div className="mb-2 overflow-hidden rounded-2xl border border-border/80 bg-card/95 shadow-lg backdrop-blur-sm">
-      <header className="flex items-center gap-2 px-3 pt-2.5 pb-1">
-        <p className="min-w-0 flex-1 text-[12px] font-medium text-muted-foreground">
+    <div className="mb-2 overflow-hidden rounded-2xl border border-border bg-card shadow-md">
+      <header className="flex items-center gap-2 border-b border-border/70 px-3 py-2">
+        <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
+        <p className="min-w-0 flex-1 text-[12px] font-medium text-foreground">
           {listening
-            ? 'Escuchando… habla y toca de nuevo para sugerir'
+            ? 'Escuchando… toca el mic de nuevo'
             : loading
-              ? 'Redactando sugerencia…'
-              : 'Háblale: dile qué quieres responder'}
+              ? action || note.match(/ficha|cat[aá]logo/i)
+                ? 'Interpretando tu orden…'
+                : 'Redactando…'
+              : '¿Qué quieres hacer o responder?'}
         </p>
         <button
           type="button"
@@ -186,90 +242,144 @@ export function AdvisorAssistPanel({
             stopListening(false);
             onClose();
           }}
-          className="grid h-7 w-7 place-items-center rounded-full text-muted-foreground hover:bg-muted"
+          className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
           aria-label="Cerrar"
         >
           <X className="h-3.5 w-3.5" />
         </button>
       </header>
 
-      <div className="flex flex-col items-center gap-2 px-3 pb-3 pt-1">
-        <button
-          type="button"
-          onClick={toggleMic}
-          disabled={loading}
-          className={cn(
-            'grid h-14 w-14 place-items-center rounded-full transition',
-            listening
-              ? 'bg-primary text-primary-foreground shadow-[0_0_0_6px_hsl(var(--primary)/0.25)]'
-              : 'bg-primary text-primary-foreground hover:opacity-90',
-            loading && 'opacity-50',
-          )}
-          aria-label={listening ? 'Dejar de escuchar' : 'Hablar al asistente'}
-        >
-          {loading ? (
-            <Loader2 className="h-6 w-6 animate-spin" />
-          ) : listening ? (
-            <Square className="h-5 w-5 fill-current" />
-          ) : (
-            <Mic className="h-6 w-6" />
-          )}
-        </button>
+      <form onSubmit={handleSubmit} className="space-y-2.5 p-3">
+        <textarea
+          ref={inputRef}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          disabled={loading || listening}
+          rows={2}
+          placeholder='Ej: envíale fichas del 16 al 19 de agosto para 13…'
+          className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-[13px] leading-snug placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-60"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+        />
 
-        {heard ? (
-          <p className="max-w-full text-center text-[13px] text-foreground/90">
-            “{heard}”
-          </p>
-        ) : !listening && !loading && !suggestion ? (
-          <p className="text-center text-[11px] text-muted-foreground">
-            Ej: “pídele cédula y correo” · o toca sin hablar para sugerir solo
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleMic}
+            disabled={loading}
+            className={cn(
+              'grid h-10 w-10 shrink-0 place-items-center rounded-xl transition',
+              listening
+                ? 'bg-primary text-primary-foreground ring-2 ring-primary/25'
+                : 'border border-border bg-background text-foreground hover:bg-muted',
+              loading && 'opacity-50',
+            )}
+            aria-label={listening ? 'Dejar de escuchar' : 'Dictar instrucción'}
+            title={listening ? 'Dejar de escuchar' : 'Dictar'}
+          >
+            {listening ? (
+              <Square className="h-3.5 w-3.5 fill-current" />
+            ) : (
+              <Mic className="h-4 w-4" />
+            )}
+          </button>
+
+          <button
+            type="submit"
+            disabled={loading || listening}
+            className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary px-3 text-[13px] font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+          >
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            {note.trim() ? 'Interpretar' : 'Sugerir respuesta'}
+          </button>
+        </div>
+
+        {!listening && !loading && !hasResult ? (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Órdenes (“envíale fichas…”) abren el catálogo. Pedidos de texto
+            (“pídele cédula…”) redactan el mensaje.
           </p>
         ) : null}
 
-        {!listening && !loading && (
-          <button
-            type="button"
-            onClick={() => void runSuggest(heard)}
-            className="text-[11px] font-medium text-primary hover:underline"
-          >
-            {heard ? 'Sugerir con lo que dije' : 'Sugerir sin instrucción'}
-          </button>
-        )}
-
         {!supported ? (
-          <p className="text-[11px] text-amber-600">
-            Voz no disponible aquí — usa Chrome o Edge.
+          <p className="text-[11px] text-muted-foreground">
+            Voz no disponible aquí — escribe la instrucción.
           </p>
         ) : null}
         {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
 
-        {suggestion ? (
-          <div className="w-full rounded-xl border border-border bg-muted/40 p-2.5">
-            <p className="whitespace-pre-wrap text-[13px] leading-snug">
-              {suggestion}
-            </p>
-            <div className="mt-2 flex gap-2">
+        {hasResult ? (
+          <div className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+            {action ? (
+              <div className="space-y-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Orden detectada
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (suggestion) onUseSuggestion(suggestion);
+                    onOpenCatalog?.(action);
+                    onClose();
+                  }}
+                  className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 text-[13px] font-semibold text-primary-foreground transition hover:opacity-90"
+                >
+                  <Store className="h-4 w-4" />
+                  {action.label}
+                </button>
+              </div>
+            ) : null}
+
+            {suggestion ? (
+              <div className={cn(action && 'border-t border-border/60 pt-2')}>
+                {action ? (
+                  <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Mensaje de acompañamiento
+                  </p>
+                ) : null}
+                <p className="whitespace-pre-wrap text-[13px] leading-snug text-foreground">
+                  {suggestion}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="flex gap-2 pt-0.5">
+              {suggestion ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onUseSuggestion(suggestion);
+                    onClose();
+                  }}
+                  className="flex h-9 flex-1 items-center justify-center rounded-xl border border-border bg-background px-3 text-[12px] font-semibold transition hover:bg-muted"
+                >
+                  {action ? 'Solo el texto' : 'Usar en el input'}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
-                  onUseSuggestion(suggestion);
-                  onClose();
+                  setSuggestion(null);
+                  setAction(null);
+                  inputRef.current?.focus();
                 }}
-                className="flex-1 rounded-lg bg-foreground px-3 py-1.5 text-[12px] font-semibold text-background"
+                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-3 text-[12px] font-medium transition hover:bg-muted"
               >
-                Usar en el input
-              </button>
-              <button
-                type="button"
-                onClick={startListening}
-                className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium hover:bg-muted"
-              >
+                <RefreshCw className="h-3.5 w-3.5" />
                 Otra vez
               </button>
             </div>
           </div>
         ) : null}
-      </div>
+      </form>
     </div>
   );
 }

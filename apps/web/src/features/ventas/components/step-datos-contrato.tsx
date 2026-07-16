@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
@@ -13,6 +13,7 @@ import {
   Upload,
   X,
   CheckCircle2,
+  IdCard,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAction, useMutation } from "convex/react";
@@ -29,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { formatPriceInput, parseCOP } from "@/lib/utils";
 import { VentaBankAccounts } from "./venta-bank-accounts";
+import { StepHeader, VentaCallout } from "./venta-ui";
 import type { SaleLinkPublicData } from "./venta-page-content";
 import {
   clearVentaDraftAll,
@@ -46,7 +48,9 @@ import {
 } from "@/features/ventas/utils/venta-draft-storage";
 import { syncVentaDraftToServer } from "@/features/ventas/utils/venta-server-draft";
 import { guessProofMimeType, resolveProofMediaKind } from "@/lib/proof-file-utils";
+import { generatePdfPreview } from "@/lib/pdf-preview";
 import { SaleLinkDocumentViewerDialog } from "./sale-link-document-viewer";
+import { StepContratoPreview } from "./step-contrato-preview";
 
 /**
  * Sube un archivo al bucket S3 vía la ruta genérica de admin y devuelve su URL
@@ -73,13 +77,22 @@ const datosSchema = z.object({
   cedula: z.string().min(4, "Ingresa tu número de cédula"),
   email: z.string().email("Email inválido"),
   telefono: z.string().min(7, "Ingresa tu número de teléfono"),
+  telefonoRespaldo: z
+    .string()
+    .refine(
+      (v) => !v.trim() || v.trim().length >= 7,
+      "Ingresa un número de respaldo válido",
+    ),
   direccion: z.string().min(5, "Ingresa tu dirección"),
-  ciudad: z.string().optional(),
+  /** Ciudad de expedición de la cédula → en el contrato: “N° … DE {ciudad}”. */
+  ciudad: z
+    .string()
+    .min(2, "Ingresa la ciudad de expedición de tu cédula"),
   fechaNacimiento: z
     .string()
-    .optional()
+    .min(1, "Ingresa tu fecha de nacimiento")
     .refine(
-      (v) => !v?.trim() || /^\d{4}-\d{2}-\d{2}$/.test(v.trim()),
+      (v) => /^\d{4}-\d{2}-\d{2}$/.test(v.trim()),
       "Fecha inválida",
     ),
 });
@@ -95,6 +108,7 @@ const EMPTY_FORM_VALUES: PagoValues = {
   cedula: "",
   email: "",
   telefono: "",
+  telefonoRespaldo: "",
   direccion: "",
   ciudad: "",
   fechaNacimiento: "",
@@ -137,6 +151,190 @@ function isAllowedProofFile(file: File) {
   return PROOF_EXTENSIONS.has(ext);
 }
 
+/** Foto o PDF de cédula (el PDF se rasteriza antes de enviarlo a la IA). */
+function isCedulaAcceptedFile(file: File) {
+  const mime = (file.type || "").toLowerCase();
+  if (mime === "application/pdf" || mime.includes("pdf")) return true;
+  if (mime.startsWith("image/")) return true;
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return ["jpg", "jpeg", "png", "webp", "heic", "heif", "pdf"].includes(ext);
+}
+
+function isPdfCedulaFile(file: File) {
+  const mime = (file.type || "").toLowerCase();
+  if (mime === "application/pdf" || mime.includes("pdf")) return true;
+  return (file.name.split(".").pop()?.toLowerCase() ?? "") === "pdf";
+}
+
+async function dataUrlToJpegFile(dataUrl: string, baseName: string): Promise<File> {
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const name = baseName.replace(/\.[^.]+$/i, "") || "cedula";
+  return new File([blob], `${name}.jpg`, { type: "image/jpeg" });
+}
+
+function isHeicCedulaFile(file: File) {
+  const mime = (file.type || "").toLowerCase();
+  if (mime.includes("heic") || mime.includes("heif")) return true;
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return ext === "heic" || ext === "heif";
+}
+
+/** Algunos iPhone mandan HEIC sin extensión / mime raro: mirar magic bytes. */
+async function fileLooksLikeHeic(file: File): Promise<boolean> {
+  if (isHeicCedulaFile(file)) return true;
+  try {
+    const buf = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    if (buf.length < 12) return false;
+    const ftyp = String.fromCharCode(buf[4]!, buf[5]!, buf[6]!, buf[7]!);
+    if (ftyp !== "ftyp") return false;
+    const brand = String.fromCharCode(
+      buf[8]!,
+      buf[9]!,
+      buf[10]!,
+      buf[11]!,
+    ).toLowerCase();
+    return ["heic", "heix", "hevc", "hevx", "mif1", "msf1", "heif"].includes(
+      brand,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** JPEG ≤1.5MB listo para visión; HEIC/grandes/PDF se rasterizan. */
+async function rasterizeImageToJpeg(
+  file: File,
+  maxEdge = 1600,
+): Promise<File> {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("decode_failed"));
+      el.src = objectUrl;
+    });
+    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas_unavailable");
+    ctx.drawImage(img, 0, 0, w, h);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error("toBlob_failed"))),
+        "image/jpeg",
+        0.85,
+      );
+    });
+    const name = file.name.replace(/\.[^.]+$/i, "") || "cedula";
+    return new File([blob], `${name}.jpg`, { type: "image/jpeg" });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+/** Convierte HEIC/HEIF → JPEG en el navegador. Si falla, el upload lo hace en servidor. */
+async function convertHeicToJpegFile(file: File): Promise<File> {
+  const { heicTo } = await import("heic-to");
+  const blob = await heicTo({
+    blob: file,
+    type: "image/jpeg",
+    quality: 0.85,
+  });
+  if (!(blob instanceof Blob)) throw new Error("heic_convert_failed");
+  const name = file.name.replace(/\.[^.]+$/i, "") || "cedula";
+  return new File([blob], `${name}.jpg`, { type: "image/jpeg" });
+}
+
+function needsRasterizeForAi(file: File): boolean {
+  if (isPdfCedulaFile(file)) return true;
+  if (isHeicCedulaFile(file)) return true;
+  const mime = (file.type || "").toLowerCase();
+  if (file.size > 1.5 * 1024 * 1024) return true;
+  return !(
+    mime === "image/jpeg" ||
+    mime === "image/jpg" ||
+    mime === "image/png" ||
+    mime === "image/webp"
+  );
+}
+
+async function prepareCedulaFileForAi(file: File): Promise<File> {
+  if (isPdfCedulaFile(file)) {
+    const pdfFile =
+      file.type === "application/pdf"
+        ? file
+        : new File([await file.arrayBuffer()], file.name.replace(/\.pdf$/i, "") + ".pdf", {
+            type: "application/pdf",
+          });
+    const preview = await generatePdfPreview(pdfFile);
+    return dataUrlToJpegFile(preview.thumbnail, file.name);
+  }
+
+  const heic = await fileLooksLikeHeic(file);
+  if (!needsRasterizeForAi(file) && !heic) return file;
+
+  // HEIC: Safari/canvas → heic-to en cliente → si falla, el API /upload convierte.
+  if (heic) {
+    try {
+      return await rasterizeImageToJpeg(file);
+    } catch {
+      try {
+        const jpeg = await convertHeicToJpegFile(file);
+        try {
+          return await rasterizeImageToJpeg(jpeg);
+        } catch {
+          return jpeg;
+        }
+      } catch {
+        // Servidor convierte al subir (heic-convert).
+        return file;
+      }
+    }
+  }
+
+  try {
+    return await rasterizeImageToJpeg(file);
+  } catch {
+    return file;
+  }
+}
+
+const CEDULA_REJECT_MESSAGES: Record<string, string> = {
+  not_a_document:
+    "La imagen que adjuntaste no parece un documento de identidad. Sube una foto clara del frente de tu cédula.",
+  number_mismatch:
+    "El número de la cédula en la foto no coincide con el que escribiste. Revisa ambos.",
+  name_mismatch:
+    "El nombre en la cédula no coincide con el que escribiste. Revisa ambos.",
+  pdf_not_allowed:
+    "No pudimos leer ese PDF. Sube una foto (JPG/PNG) del frente de tu cédula, o un PDF con la cédula visible en la primera página.",
+  unreadable:
+    "No pudimos leer esa imagen. Sube una foto más clara del frente de tu cédula.",
+  ai_unavailable:
+    "No pudimos validar tu cédula en este momento. Espera un momento e intenta de nuevo.",
+  inactive: "Este link ya no está activo. Contacta a tu asesor.",
+  not_found: "El link ya no existe.",
+};
+
+function cedulaRejectMessage(
+  reason: string | undefined,
+  aiNumber?: string,
+): string {
+  if (reason === "number_mismatch" && aiNumber) {
+    return `El número de la cédula que adjuntaste (${aiNumber}) no coincide con el que escribiste. Revisa ambos.`;
+  }
+  return (
+    CEDULA_REJECT_MESSAGES[String(reason)] ??
+    "No pudimos validar tu cédula. Intenta con otra foto."
+  );
+}
+
 export function StepDatosContrato({
   data,
   onSubmitted,
@@ -145,8 +343,18 @@ export function StepDatosContrato({
 }: Props) {
   const submitClientData = useMutation(api.saleLinks.submitClientData);
   const verifyCedula = useAction(api.saleLinks.verifyCedula);
+  const verifyPaymentReceipt = useAction(api.saleLinks.verifyPaymentReceipt);
+  const revalidateCedulaTyped = useAction(api.saleLinks.revalidateCedulaTyped);
   const [phase, setPhase] = useState<VentaDraftPhase>("datos");
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  /** Comprobantes ya validados por IA (solo estos se pueden enviar). */
+  const [verifiedProofs, setVerifiedProofs] = useState<
+    Array<{
+      file: File;
+      url: string;
+      amount?: number;
+      bankName?: string;
+    }>
+  >([]);
   const [pendingCedulaFile, setPendingCedulaFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<{
@@ -162,24 +370,65 @@ export function StepDatosContrato({
   const [hasStoredCedulaFile, setHasStoredCedulaFile] = useState(false);
   const [cedulaPreviewLoading, setCedulaPreviewLoading] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
+  const [verifyingCedula, setVerifyingCedula] = useState(false);
+  /** Resultado de la IA al subir: el botón solo se habilita con status === "ok". */
+  const [cedulaGate, setCedulaGate] = useState<{
+    status: "idle" | "uploading" | "checking" | "ok" | "rejected" | "awaiting_typed";
+    photoUrl?: string;
+    aiNumber?: string;
+    reason?: string;
+  }>({ status: "idle" });
+  /** Estado de la IA sobre el comprobante de pago. */
+  const [receiptGate, setReceiptGate] = useState<{
+    status: "idle" | "uploading" | "checking" | "ok" | "rejected";
+    reason?: string;
+  }>({ status: "idle" });
   const fileRef = useRef<HTMLInputElement>(null);
   const cedulaFileRef = useRef<HTMLInputElement>(null);
   const cedulaPreviewBlobRef = useRef<string | null>(null);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingFilesRef = useRef<File[]>([]);
+  const verifiedProofsRef = useRef(verifiedProofs);
   const proofHydratedRef = useRef(false);
+  const cedulaAutoVerifyRef = useRef(false);
+  const cedulaRevalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const form = useForm<PagoValues>({
     resolver: zodResolver(pagoSchema),
+    mode: "onTouched",
+    reValidateMode: "onChange",
     defaultValues: {
       ...EMPTY_FORM_VALUES,
-      paymentAmount: Math.round(data.totalValue / 2),
+      paymentAmount:
+        data.advancePaymentAmount ?? Math.round(data.totalValue / 2),
     },
   });
 
+  const watched = useWatch({ control: form.control });
+  const hasCedulaPhoto =
+    !!pendingCedulaFile ||
+    hasStoredCedulaFile ||
+    !!data.clientData?.cedulaPhotoUrl?.trim();
+  const emailOk = z.string().email().safeParse(watched.email?.trim() ?? "").success;
+
+  const canContinueToPayment =
+    (watched.nombre?.trim().length ?? 0) >= 2 &&
+    (watched.cedula?.trim().length ?? 0) >= 4 &&
+    emailOk &&
+    (watched.telefono?.trim().length ?? 0) >= 7 &&
+    (watched.direccion?.trim().length ?? 0) >= 5 &&
+    (watched.ciudad?.trim().length ?? 0) >= 2 &&
+    /^\d{4}-\d{2}-\d{2}$/.test((watched.fechaNacimiento ?? "").trim()) &&
+    hasCedulaPhoto &&
+    cedulaGate.status === "ok" &&
+    !submitting &&
+    !verifyingCedula &&
+    !attachingCedulaFile;
+
   useEffect(() => {
-    pendingFilesRef.current = pendingFiles;
-  }, [pendingFiles]);
+    verifiedProofsRef.current = verifiedProofs;
+  }, [verifiedProofs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,12 +440,17 @@ export function StepDatosContrato({
       }
 
       const draft = loadVentaDraft(data.token);
-      const suggestedPayment = Math.round(data.totalValue / 2);
+      const suggestedPayment =
+        data.advancePaymentAmount ?? Math.round(data.totalValue / 2);
       const values = {
         nombre: pickStr(draft?.nombre, data.clientData?.nombre),
         cedula: pickStr(draft?.cedula, data.clientData?.cedula),
         email: pickStr(draft?.email, data.clientData?.email),
         telefono: pickStr(draft?.telefono, data.clientData?.telefono),
+        telefonoRespaldo: pickStr(
+          draft?.telefonoRespaldo,
+          data.clientData?.telefonoRespaldo,
+        ),
         direccion: pickStr(draft?.direccion, data.clientData?.direccion),
         ciudad: pickStr(draft?.ciudad, data.clientData?.ciudad),
         fechaNacimiento: pickStr(
@@ -231,21 +485,27 @@ export function StepDatosContrato({
           data.paymentProofSubmitted ||
           draft?.phase === "pago" ||
           data.clientDraftPhase === "pago";
+        const wantsPreview =
+          !wantsPago &&
+          (draft?.phase === "preview" || data.clientDraftPhase === "preview");
 
-        setPhase(wantsPago && datosCompletos ? "pago" : "datos");
+        if (wantsPago && datosCompletos) setPhase("pago");
+        else if (wantsPreview && datosCompletos) setPhase("preview");
+        else setPhase("datos");
       }
 
+      // El comprobante guardado localmente no tiene veredicto de IA: se pide
+      // volver a adjuntarlo para validarlo antes de enviar.
       if (
         !data.paymentProofSubmitted &&
         !proofHydratedRef.current &&
-        pendingFilesRef.current.length === 0
+        verifiedProofsRef.current.length === 0
       ) {
         const savedFile = await loadVentaProofFile(data.token);
         if (!cancelled && savedFile) {
           const readable = await isProofBlobReadable(savedFile);
           if (readable) {
-            setPendingFiles([savedFile]);
-            setFileStale(false);
+            setFileStale(true);
           } else {
             await clearVentaProofFile(data.token);
             setFileStale(true);
@@ -256,8 +516,43 @@ export function StepDatosContrato({
 
       const savedCedula = await loadVentaCedulaFile(data.token);
       if (!cancelled && savedCedula && (await isProofBlobReadable(savedCedula))) {
-        setPendingCedulaFile(savedCedula);
-        setHasStoredCedulaFile(true);
+        if (isCedulaAcceptedFile(savedCedula)) {
+          setPendingCedulaFile(savedCedula);
+          setHasStoredCedulaFile(true);
+        } else {
+          await clearVentaCedulaFile(data.token);
+          setPendingCedulaFile(null);
+          setHasStoredCedulaFile(false);
+        }
+      }
+
+      // Restaura veredicto ya guardado (servidor o borrador local) — sin esperar a mano.
+      const serverCheck = data.cedulaCheck;
+      const localGate = draft?.cedulaGate;
+      if (
+        !cancelled &&
+        serverCheck?.allow &&
+        serverCheck.photoUrl
+      ) {
+        setCedulaGate({
+          status: "ok",
+          photoUrl: serverCheck.photoUrl,
+          aiNumber: serverCheck.number,
+        });
+        cedulaAutoVerifyRef.current = true;
+      } else if (
+        !cancelled &&
+        localGate &&
+        (localGate.status === "ok" || localGate.status === "awaiting_typed") &&
+        localGate.photoUrl
+      ) {
+        setCedulaGate({
+          status: localGate.status,
+          photoUrl: localGate.photoUrl,
+          aiNumber: localGate.aiNumber,
+          reason: localGate.reason,
+        });
+        cedulaAutoVerifyRef.current = true;
       }
 
       if (!cancelled) setDraftReady(true);
@@ -279,6 +574,7 @@ export function StepDatosContrato({
     data.clientPortalUiStep,
     data.clientDraftPhase,
     data.clientDraftPaymentAmount,
+    data.cedulaCheck,
     form,
   ]);
 
@@ -297,6 +593,7 @@ export function StepDatosContrato({
         cedula: values.cedula,
         email: values.email,
         telefono: values.telefono,
+        telefonoRespaldo: values.telefonoRespaldo,
         direccion: values.direccion,
         ciudad: values.ciudad,
         fechaNacimiento: values.fechaNacimiento,
@@ -317,11 +614,23 @@ export function StepDatosContrato({
     if (!draftReady) return;
 
     const persist = (values: PagoValues) => {
+      const gate =
+        cedulaGate.status === "ok" ||
+        cedulaGate.status === "awaiting_typed" ||
+        cedulaGate.status === "rejected"
+          ? {
+              status: cedulaGate.status as "ok" | "awaiting_typed" | "rejected",
+              photoUrl: cedulaGate.photoUrl,
+              aiNumber: cedulaGate.aiNumber,
+              reason: cedulaGate.reason,
+            }
+          : undefined;
       saveVentaDraft(data.token, {
         nombre: values.nombre ?? "",
         cedula: values.cedula ?? "",
         email: values.email ?? "",
         telefono: values.telefono ?? "",
+        telefonoRespaldo: values.telefonoRespaldo ?? "",
         direccion: values.direccion ?? "",
         ciudad: values.ciudad ?? "",
         fechaNacimiento: values.fechaNacimiento ?? "",
@@ -329,6 +638,7 @@ export function StepDatosContrato({
           values.paymentAmount || Math.round(data.totalValue / 2),
         phase,
         uiStep: 2,
+        ...(gate ? { cedulaGate: gate } : {}),
       });
       scheduleServerSync(values, phase);
     };
@@ -341,36 +651,154 @@ export function StepDatosContrato({
       subscription.unsubscribe();
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     };
-  }, [draftReady, data.token, data.totalValue, form, phase]);
+  }, [
+    draftReady,
+    data.token,
+    data.totalValue,
+    form,
+    phase,
+    cedulaGate.status,
+    cedulaGate.photoUrl,
+    cedulaGate.aiNumber,
+    cedulaGate.reason,
+  ]);
 
-  const goToPago = async () => {
+  // Si ya hay foto leída por la IA, al cambiar cédula/nombre se recontrasta
+  // sin volver a llamar a visión.
+  useEffect(() => {
+    if (readOnly) return;
+    const photoUrl = cedulaGate.photoUrl;
+    if (!photoUrl) return;
+
+    const typed = (watched.cedula ?? "").trim();
+    const nombre = (watched.nombre ?? "").trim();
+    if (typed.replace(/\D/g, "").length < 6) {
+      setCedulaGate((g) =>
+        g.photoUrl && g.status === "ok"
+          ? { ...g, status: "awaiting_typed" }
+          : g,
+      );
+      return;
+    }
+
+    if (cedulaRevalidateTimerRef.current) {
+      clearTimeout(cedulaRevalidateTimerRef.current);
+    }
+    cedulaRevalidateTimerRef.current = setTimeout(() => {
+      void (async () => {
+        try {
+          const verdict = await revalidateCedulaTyped({
+            token: data.token,
+            typedCedula: typed,
+            typedName: nombre,
+          });
+          setCedulaGate((g) => {
+            if (!g.photoUrl) return g;
+            if (g.status === "checking") return g;
+            return {
+              ...g,
+              photoUrl: g.photoUrl,
+              aiNumber: verdict.aiNumber ?? g.aiNumber,
+              status: verdict.allow ? "ok" : "rejected",
+              reason: verdict.reason,
+            };
+          });
+        } catch {
+          // No tumbar el flujo por un fallo de red al tipar.
+        }
+      })();
+    }, 450);
+
+    return () => {
+      if (cedulaRevalidateTimerRef.current) {
+        clearTimeout(cedulaRevalidateTimerRef.current);
+      }
+    };
+  }, [
+    watched.cedula,
+    watched.nombre,
+    cedulaGate.photoUrl,
+    data.token,
+    readOnly,
+    revalidateCedulaTyped,
+  ]);
+
+  const goToPreview = async () => {
     const valid = await form.trigger([
       "nombre",
       "cedula",
       "email",
       "telefono",
+      "telefonoRespaldo",
       "direccion",
       "ciudad",
+      "fechaNacimiento",
     ]);
     if (!valid) return;
 
-    const hasCedulaPhoto =
-      !!pendingCedulaFile ||
-      !!data.clientData?.cedulaPhotoUrl ||
-      (await loadVentaCedulaFile(data.token)) != null;
-
-    if (!hasCedulaPhoto) {
-      showError("Adjunta la foto de tu cédula para continuar");
+    if (cedulaGate.status !== "ok" || !cedulaGate.photoUrl) {
+      showError(
+        cedulaGate.status === "rejected"
+          ? cedulaRejectMessage(cedulaGate.reason, cedulaGate.aiNumber)
+          : "Sube y valida la foto de tu cédula antes de continuar.",
+      );
       return;
     }
 
-    setPhase("pago");
     const values = form.getValues();
+    setVerifyingCedula(true);
+    setSubmitMessage(null);
+    try {
+      const verdict = await revalidateCedulaTyped({
+        token: data.token,
+        typedCedula: values.cedula,
+        typedName: values.nombre,
+      });
+      if (!verdict.allow) {
+        setCedulaGate((g) => ({
+          ...g,
+          status: "rejected",
+          reason: verdict.reason,
+          aiNumber: verdict.aiNumber,
+        }));
+        showError(cedulaRejectMessage(verdict.reason, verdict.aiNumber));
+        return;
+      }
+
+      setPhase("preview");
+      saveVentaDraft(data.token, {
+        nombre: values.nombre ?? "",
+        cedula: values.cedula ?? "",
+        email: values.email ?? "",
+        telefono: values.telefono ?? "",
+        telefonoRespaldo: values.telefonoRespaldo ?? "",
+        direccion: values.direccion ?? "",
+        ciudad: values.ciudad ?? "",
+        fechaNacimiento: values.fechaNacimiento ?? "",
+        paymentAmount: values.paymentAmount ?? Math.round(data.totalValue / 2),
+        phase: "preview",
+        uiStep: 2,
+      });
+      scheduleServerSync(values, "preview", true);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch {
+      showError(
+        "No pudimos validar tu cédula. Revisa tu conexión e intenta de nuevo.",
+      );
+    } finally {
+      setVerifyingCedula(false);
+    }
+  };
+
+  const goToPagoFromPreview = () => {
+    const values = form.getValues();
+    setPhase("pago");
     saveVentaDraft(data.token, {
       nombre: values.nombre ?? "",
       cedula: values.cedula ?? "",
       email: values.email ?? "",
       telefono: values.telefono ?? "",
+      telefonoRespaldo: values.telefonoRespaldo ?? "",
       direccion: values.direccion ?? "",
       ciudad: values.ciudad ?? "",
       fechaNacimiento: values.fechaNacimiento ?? "",
@@ -519,35 +947,218 @@ export function StepDatosContrato({
     </>
   );
 
+  const clearCedulaAttachment = () => {
+    setPendingCedulaFile(null);
+    setHasStoredCedulaFile(false);
+    setCedulaGate({ status: "idle" });
+    void clearVentaCedulaFile(data.token);
+  };
+
+  /** Sube (si hace falta) y pide veredicto a la IA. */
+  const verifyCedulaAgainstAi = async (opts: {
+    file?: File;
+    photoUrl?: string;
+    silent?: boolean;
+  }) => {
+    setAttachingCedulaFile(true);
+    setVerifyingCedula(true);
+    setSubmitMessage(null);
+    let photoUrl = opts.photoUrl?.trim() || "";
+    try {
+      let stableFile = opts.file ?? null;
+
+      if (!photoUrl) {
+        if (!stableFile) {
+          showError("Sube una foto de tu cédula para continuar.");
+          return;
+        }
+        setCedulaGate({ status: "uploading" });
+        let forAi: File;
+        try {
+          forAi = await prepareCedulaFileForAi(stableFile);
+        } catch (prepErr) {
+          const heic =
+            prepErr instanceof Error && prepErr.message === "heic_unsupported";
+          showError(
+            heic
+              ? "No pudimos leer esa foto del iPhone. Prueba de nuevo, o sube un JPG/PNG / PDF."
+              : "No pudimos leer ese PDF. Sube una foto clara del frente de tu cédula.",
+          );
+          clearCedulaAttachment();
+          return;
+        }
+        setPendingCedulaFile(stableFile);
+        setHasStoredCedulaFile(true);
+        try {
+          await saveVentaCedulaFile(data.token, stableFile);
+        } catch {
+          // IndexedDB opcional
+        }
+        const uploaded = await uploadDocument(forAi);
+        photoUrl = uploaded.url;
+      }
+
+      setCedulaGate((g) => ({
+        ...g,
+        status: "checking",
+        photoUrl,
+      }));
+
+      const values = form.getValues();
+      const verdict = await verifyCedula({
+        token: data.token,
+        photoUrl,
+        typedCedula: values.cedula ?? "",
+        typedName: values.nombre ?? "",
+      });
+
+      if (!verdict.allow) {
+        const msg = cedulaRejectMessage(verdict.reason, verdict.aiNumber);
+        if (!opts.silent) showError(msg);
+        // Fallo transitorio de IA: no borres la foto para poder reintentar.
+        if (verdict.reason === "ai_unavailable") {
+          setCedulaGate({
+            status: "rejected",
+            reason: "ai_unavailable",
+            photoUrl,
+            aiNumber: verdict.aiNumber,
+          });
+          return;
+        }
+        clearCedulaAttachment();
+        setCedulaGate({
+          status: "rejected",
+          reason: verdict.reason,
+          aiNumber: verdict.aiNumber,
+        });
+        return;
+      }
+
+      const typedDigits = (values.cedula ?? "").replace(/\D/g, "");
+      if (typedDigits.length < 6) {
+        setCedulaGate({
+          status: "awaiting_typed",
+          photoUrl,
+          aiNumber: verdict.aiNumber,
+        });
+        if (!opts.silent) {
+          toast.message(
+            "Documento reconocido. Escribe tu número de cédula para contrastarlo.",
+          );
+        }
+        return;
+      }
+
+      setCedulaGate({
+        status: "ok",
+        photoUrl,
+        aiNumber: verdict.aiNumber,
+      });
+      if (!opts.silent) toast.success("Cédula verificada");
+    } catch {
+      if (!opts.silent) {
+        showError("No se pudo validar la cédula. Intenta de nuevo.");
+      }
+      if (photoUrl) {
+        setCedulaGate({
+          status: "rejected",
+          reason: "ai_unavailable",
+          photoUrl,
+        });
+      } else {
+        clearCedulaAttachment();
+        setCedulaGate({ status: "rejected", reason: "ai_unavailable" });
+      }
+    } finally {
+      setAttachingCedulaFile(false);
+      setVerifyingCedula(false);
+    }
+  };
+
   const handleCedulaSelection = async (pickedList: FileList | File[]) => {
     const picked = Array.from(pickedList)[0];
     if (!picked) return;
 
-    setAttachingCedulaFile(true);
-    setSubmitMessage(null);
+    if (!isCedulaAcceptedFile(picked)) {
+      showError("Sube una foto (JPG/PNG) o un PDF con el frente de tu cédula.");
+      return;
+    }
+    if (picked.size > 10 * 1024 * 1024) {
+      showError("El archivo de cédula debe pesar menos de 10 MB");
+      return;
+    }
+
     try {
-      if (!isAllowedProofFile(picked)) {
-        showError("La foto de cédula debe ser JPG, PNG o PDF");
-        return;
-      }
-      if (picked.size > 10 * 1024 * 1024) {
-        showError("La foto de cédula debe pesar menos de 10 MB");
-        return;
-      }
       const stable = await materializeProofFile(picked);
-      setPendingCedulaFile(stable);
-      setHasStoredCedulaFile(true);
-      try {
-        await saveVentaCedulaFile(data.token, stable);
-      } catch {
-        // IndexedDB opcional
-      }
+      await verifyCedulaAgainstAi({ file: stable });
     } catch {
-      showError("No se pudo leer la foto de cédula");
-    } finally {
-      setAttachingCedulaFile(false);
+      showError("No se pudo leer el archivo. Intenta de nuevo.");
+      clearCedulaAttachment();
     }
   };
+
+  // Si hay foto guardada pero aún no hay veredicto, valida sola (no deja el spinner eterno).
+  useEffect(() => {
+    if (!draftReady || readOnly) return;
+    if (cedulaAutoVerifyRef.current) return;
+    if (
+      cedulaGate.status === "ok" ||
+      cedulaGate.status === "checking" ||
+      cedulaGate.status === "uploading" ||
+      cedulaGate.status === "awaiting_typed"
+    ) {
+      cedulaAutoVerifyRef.current = true;
+      return;
+    }
+
+    const existingUrl =
+      cedulaGate.photoUrl ||
+      data.clientData?.cedulaPhotoUrl?.trim() ||
+      data.cedulaCheck?.photoUrl;
+
+    if (existingUrl && data.cedulaCheck?.allow) {
+      setCedulaGate({
+        status: "ok",
+        photoUrl: existingUrl,
+        aiNumber: data.cedulaCheck.number,
+      });
+      cedulaAutoVerifyRef.current = true;
+      return;
+    }
+
+    if (existingUrl) {
+      cedulaAutoVerifyRef.current = true;
+      void verifyCedulaAgainstAi({ photoUrl: existingUrl, silent: true });
+      return;
+    }
+
+    if (pendingCedulaFile) {
+      cedulaAutoVerifyRef.current = true;
+      void verifyCedulaAgainstAi({ file: pendingCedulaFile, silent: true });
+    }
+    // Solo una vez al hidratar el paso.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftReady, pendingCedulaFile, readOnly]);
+
+  const RECEIPT_REJECT_MESSAGES: Record<string, string> = {
+    not_a_receipt:
+      "Eso no parece un comprobante de pago bancario. Sube la captura o PDF de la transferencia (Bancolombia, Nequi, Davivienda, Bre-B, PSE, etc.).",
+    pdf_not_allowed:
+      "No pudimos leer ese PDF. Sube una imagen (JPG/PNG) del comprobante, o un PDF con el voucher visible en la primera página.",
+    unreadable:
+      "No pudimos leer esa imagen. Sube un comprobante más claro y completo.",
+    ai_unavailable:
+      "No pudimos validar el comprobante ahora. Espera un momento e intenta de nuevo.",
+    inactive: "Este link ya no está activo. Contacta a tu asesor.",
+    not_found: "El link ya no existe.",
+  };
+
+  function receiptRejectMessage(reason: string | undefined): string {
+    if (!reason) return RECEIPT_REJECT_MESSAGES.not_a_receipt;
+    return (
+      RECEIPT_REJECT_MESSAGES[reason] ?? RECEIPT_REJECT_MESSAGES.not_a_receipt
+    );
+  }
 
   const handleProofSelection = async (pickedList: FileList | File[]) => {
     const picked = Array.from(pickedList);
@@ -555,9 +1166,15 @@ export function StepDatosContrato({
 
     setAttachingFile(true);
     setSubmitMessage(null);
+    setReceiptGate({ status: "uploading" });
     try {
-      const stableFiles: File[] = [];
       const rejected: string[] = [];
+      const accepted: Array<{
+        file: File;
+        url: string;
+        amount?: number;
+        bankName?: string;
+      }> = [];
 
       for (const item of picked) {
         if (!isAllowedProofFile(item)) {
@@ -568,41 +1185,97 @@ export function StepDatosContrato({
           rejected.push(`${item.name}: máximo 10 MB`);
           continue;
         }
+
+        let stable: File;
         try {
-          stableFiles.push(await materializeProofFile(item));
+          stable = await materializeProofFile(item);
         } catch {
           rejected.push(`${item.name}: no se pudo leer`);
+          continue;
+        }
+
+        setReceiptGate({ status: "uploading" });
+        let forAi: File;
+        try {
+          forAi = await prepareCedulaFileForAi(stable);
+        } catch {
+          rejected.push(
+            `${item.name}: no se pudo preparar para validación (usa JPG/PNG)`,
+          );
+          continue;
+        }
+
+        const uploaded = await uploadDocument(forAi);
+        setReceiptGate({ status: "checking" });
+
+        const verdict = await verifyPaymentReceipt({
+          token: data.token,
+          photoUrl: uploaded.url,
+        });
+
+        if (!verdict.allow) {
+          rejected.push(
+            `${item.name}: ${receiptRejectMessage(verdict.reason)}`,
+          );
+          continue;
+        }
+
+        accepted.push({
+          file: stable,
+          url: uploaded.url,
+          amount: verdict.amount,
+          bankName: verdict.bankName,
+        });
+
+        if (verdict.amount && verdict.amount > 0) {
+          form.setValue("paymentAmount", verdict.amount, {
+            shouldDirty: true,
+          });
         }
       }
 
-      if (!stableFiles.length) {
-        if (rejected.length) showError(rejected.join(" · "));
-        else
-          showError(
-            "No se pudo leer el archivo. Evita archivos en la nube o muy grandes.",
-          );
+      if (!accepted.length) {
+        setReceiptGate({
+          status: "rejected",
+          reason: "not_a_receipt",
+        });
+        showError(
+          rejected.length
+            ? rejected.join(" · ")
+            : "Debes adjuntar un comprobante de pago real del banco.",
+        );
         return;
       }
 
-      setPendingFiles((prev) => [...prev, ...stableFiles]);
+      setVerifiedProofs((prev) => [...prev, ...accepted]);
+      setReceiptGate({ status: "ok" });
       setFileStale(false);
 
-      const last = stableFiles[stableFiles.length - 1];
+      const last = accepted[accepted.length - 1];
       if (last) {
         try {
-          await saveVentaProofFile(data.token, last);
+          await saveVentaProofFile(data.token, last.file);
         } catch {
-          // IndexedDB puede fallar; el archivo en memoria sigue siendo válido.
+          // IndexedDB opcional
         }
       }
 
       if (rejected.length) {
         showError(`Algunos archivos no se agregaron: ${rejected.join(" · ")}`);
+      } else {
+        toast.success(
+          accepted.length === 1
+            ? "Comprobante validado. Ya puedes enviarlo."
+            : `${accepted.length} comprobantes validados.`,
+        );
       }
-    } catch {
+    } catch (err) {
+      setReceiptGate({ status: "rejected", reason: "ai_unavailable" });
       setFileStale(true);
       showError(
-        "No se pudo leer el archivo. Vuelve a seleccionarlo (evita archivos muy grandes o que estén en la nube).",
+        err instanceof Error && err.message
+          ? err.message
+          : "No se pudo validar el comprobante. Vuelve a intentarlo.",
       );
     } finally {
       setAttachingFile(false);
@@ -629,55 +1302,69 @@ export function StepDatosContrato({
     await onSubmit(values);
   };
 
-  const resolveProofFiles = async (): Promise<File[]> => {
-    const readable: File[] = [];
-    for (const candidate of pendingFiles) {
-      if (await isProofBlobReadable(candidate)) {
-        readable.push(candidate);
-      }
-    }
-    if (readable.length) return readable;
-
-    const fromStorage = await loadVentaProofFile(data.token);
-    if (fromStorage && (await isProofBlobReadable(fromStorage))) {
-      setPendingFiles([fromStorage]);
-      setFileStale(false);
-      return [fromStorage];
-    }
-
+  const resolveProofFiles = async (): Promise<
+    Array<{ file: File; url: string; amount?: number }>
+  > => {
+    if (verifiedProofs.length) return verifiedProofs;
     return [];
   };
 
   /**
-   * Sube la foto de cédula (una sola vez) o reutiliza la ya guardada en el
-   * servidor para no perderla al reenviar comprobantes.
+   * Sube la foto de cédula (una sola vez) o reutiliza la ya validada / guardada
+   * en el servidor para no perderla al reenviar comprobantes.
    */
   const resolveCedulaUpload = async (): Promise<{
     cedulaPhotoUrl: string;
     cedulaPhotoFileName: string;
     cedulaPhotoMimeType?: string;
   } | null> => {
+    if (cedulaGate.photoUrl && cedulaGate.status === "ok") {
+      const name =
+        pendingCedulaFile?.name ||
+        data.clientData?.cedulaPhotoFileName?.trim() ||
+        "cedula.jpg";
+      return {
+        cedulaPhotoUrl: cedulaGate.photoUrl,
+        cedulaPhotoFileName: name,
+        cedulaPhotoMimeType:
+          pendingCedulaFile?.type ||
+          data.clientData?.cedulaPhotoMimeType ||
+          "image/jpeg",
+      };
+    }
+
     const cedulaFile =
       pendingCedulaFile ?? (await loadVentaCedulaFile(data.token));
 
     if (cedulaFile && (await isProofBlobReadable(cedulaFile))) {
-      const uploaded = await uploadDocument(cedulaFile);
+      if (!isCedulaAcceptedFile(cedulaFile)) {
+        clearCedulaAttachment();
+        return null;
+      }
+      let forUpload: File;
+      try {
+        forUpload = await prepareCedulaFileForAi(cedulaFile);
+      } catch {
+        return null;
+      }
+      const uploaded = await uploadDocument(forUpload);
       return {
         cedulaPhotoUrl: uploaded.url,
         cedulaPhotoFileName: cedulaFile.name,
         cedulaPhotoMimeType: guessProofMimeType(
-          cedulaFile.name,
-          cedulaFile.type || "application/octet-stream",
+          forUpload.name,
+          forUpload.type || "image/jpeg",
         ),
       };
     }
 
     const existingUrl = data.clientData?.cedulaPhotoUrl?.trim();
     if (existingUrl) {
+      const existingName =
+        data.clientData?.cedulaPhotoFileName?.trim() || "cedula.jpg";
       return {
         cedulaPhotoUrl: existingUrl,
-        cedulaPhotoFileName:
-          data.clientData?.cedulaPhotoFileName?.trim() || "cedula.jpg",
+        cedulaPhotoFileName: existingName,
         cedulaPhotoMimeType: data.clientData?.cedulaPhotoMimeType || undefined,
       };
     }
@@ -700,13 +1387,19 @@ export function StepDatosContrato({
       }
 
       showError(
-        pendingFiles.length
-          ? "El comprobante guardado expiró. Quítalo y vuelve a adjuntarlo."
-          : "Debes adjuntar el soporte de pago",
+        "Debes adjuntar un comprobante de pago real y esperar a que la IA lo valide.",
       );
-      setPendingFiles([]);
-      setFileStale(pendingFiles.length > 0);
+      setVerifiedProofs([]);
+      setReceiptGate({ status: "idle" });
+      setFileStale(true);
       void clearVentaProofFile(data.token);
+      return;
+    }
+
+    if (receiptGate.status !== "ok") {
+      showError(
+        "Espera a que la IA valide el comprobante antes de enviarlo.",
+      );
       return;
     }
 
@@ -729,47 +1422,62 @@ export function StepDatosContrato({
       }
 
       // La IA confirma que sea un documento real y que el número coincida.
-      // Solo frena si está confiada; ante la duda pasa y el asesor revisa.
       const verdict = await verifyCedula({
         token: data.token,
         photoUrl: cedula.cedulaPhotoUrl,
         typedCedula: values.cedula,
+        typedName: values.nombre,
       });
 
       if (!verdict.allow) {
-        const messages: Record<string, string> = {
-          not_a_document:
-            "La imagen que adjuntaste no parece un documento de identidad. Sube una foto de tu cédula.",
-          number_mismatch: `El número de la cédula que adjuntaste${
-            verdict.aiNumber ? ` (${verdict.aiNumber})` : ""
-          } no coincide con el que escribiste. Revisa ambos.`,
-          inactive: "Este link ya no está activo. Contacta a tu asesor.",
-          not_found: "El link ya no existe.",
-        };
-        showError(
-          messages[String(verdict.reason)] ??
-            "No pudimos validar tu cédula. Intenta con otra foto.",
-        );
+        showError(cedulaRejectMessage(verdict.reason, verdict.aiNumber));
+        setCedulaGate({
+          status: "rejected",
+          photoUrl: cedula.cedulaPhotoUrl,
+          aiNumber: verdict.aiNumber,
+          reason: verdict.reason,
+        });
         setPhase("datos");
         return;
       }
 
+      setCedulaGate({
+        status: "ok",
+        photoUrl: cedula.cedulaPhotoUrl,
+        aiNumber: verdict.aiNumber,
+      });
+
       let appended = isAmending;
-      for (const proofFile of proofFiles) {
-        const proof = await uploadDocument(proofFile);
+      for (const proof of proofFiles) {
+        // Re-verifica la URL ya validada (el servidor exige paymentReceiptCheck).
+        const receiptVerdict = await verifyPaymentReceipt({
+          token: data.token,
+          photoUrl: proof.url,
+        });
+        if (!receiptVerdict.allow) {
+          showError(receiptRejectMessage(receiptVerdict.reason));
+          setReceiptGate({
+            status: "rejected",
+            reason: receiptVerdict.reason,
+          });
+          return;
+        }
+
         const result = await submitClientData({
           token: data.token,
           nombre: values.nombre,
           cedula: values.cedula,
           email: values.email,
           telefono: values.telefono,
+          telefonoRespaldo: values.telefonoRespaldo?.trim() || undefined,
           direccion: values.direccion,
-          ciudad: values.ciudad?.trim() || undefined,
+          ciudad: values.ciudad.trim(),
           fechaNacimiento: values.fechaNacimiento?.trim() || undefined,
           paymentProofUrl: proof.url,
-          paymentProofFileName: proofFile.name,
-          paymentProofMimeType: proofFile.type || undefined,
-          paymentProofAmount: values.paymentAmount || undefined,
+          paymentProofFileName: proof.file.name,
+          paymentProofMimeType: proof.file.type || undefined,
+          paymentProofAmount:
+            values.paymentAmount || proof.amount || undefined,
           paymentValidationKey: crypto.randomUUID(),
           ...(cedula ?? {}),
         });
@@ -781,10 +1489,28 @@ export function StepDatosContrato({
             already_validated: "El pago ya fue validado.",
             past_payment_step: "Esta etapa ya fue completada.",
             missing_cedula: "Adjunta la foto de tu cédula para continuar.",
+            missing_ciudad:
+              "Indica la ciudad de expedición de tu cédula (como aparece en el documento).",
+            cedula_not_verified:
+              "Debemos validar tu cédula antes de continuar. Vuelve al paso anterior e intenta de nuevo.",
             not_a_document:
               "La imagen que adjuntaste no parece un documento de identidad. Sube una foto de tu cédula.",
             number_mismatch:
               "El número de la cédula que adjuntaste no coincide con el que escribiste.",
+            name_mismatch:
+              "El nombre en la cédula no coincide con el que escribiste.",
+            pdf_not_allowed:
+              "No pudimos leer ese PDF. Sube una foto del frente de tu cédula.",
+            ai_unavailable:
+              "No pudimos validar tu cédula. Intenta de nuevo en un momento.",
+            cedula_rejected:
+              "No pudimos validar tu cédula. Sube una foto clara del frente.",
+            receipt_not_verified:
+              "El comprobante debe ser validado por la IA antes de enviarlo. Vuelve a adjuntarlo.",
+            not_a_receipt:
+              "Eso no parece un comprobante de pago bancario. Sube la captura de la transferencia.",
+            receipt_rejected:
+              "No pudimos validar el comprobante. Sube uno más claro del banco.",
           };
           const msg = reasons[String(result.reason)] ?? "No se pudo enviar.";
           setSubmitMessage({ type: "error", text: msg });
@@ -795,7 +1521,8 @@ export function StepDatosContrato({
         appended = appended || result.appended === true;
       }
 
-      setPendingFiles([]);
+      setVerifiedProofs([]);
+      setReceiptGate({ status: "idle" });
       void clearVentaProofFile(data.token);
 
       if (appended) {
@@ -819,7 +1546,8 @@ export function StepDatosContrato({
           err.message.includes("ya no se puede leer"));
 
       if (notReadable) {
-        setPendingFiles([]);
+        setVerifiedProofs([]);
+        setReceiptGate({ status: "idle" });
         setFileStale(true);
         void clearVentaProofFile(data.token);
         showError(
@@ -855,17 +1583,13 @@ export function StepDatosContrato({
           : [];
     return (
       <div className="space-y-6">
-        <div>
-          <p className="text-xs font-bold text-primary uppercase tracking-widest mb-1">
-            Paso 2
-          </p>
-          <h1 className="text-2xl font-bold">Mis datos enviados</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Solo lectura — el pago ya fue validado
-          </p>
-        </div>
+        <StepHeader
+          step={2}
+          title="Mis datos enviados"
+          description="Solo lectura — el pago ya fue validado."
+        />
 
-        <div className="rounded-xl bg-card p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm shadow-sm">
+        <div className="grid grid-cols-1 gap-3 rounded-2xl border border-border bg-card p-5 text-sm shadow-sm sm:grid-cols-2">
           <div>
             <p className="text-muted-foreground text-xs">Nombre</p>
             <p className="font-medium">{c?.nombre ?? data.clientName ?? "—"}</p>
@@ -882,60 +1606,115 @@ export function StepDatosContrato({
             <p className="text-muted-foreground text-xs">Teléfono</p>
             <p className="font-medium">{c?.telefono ?? "—"}</p>
           </div>
+          {c?.telefonoRespaldo ? (
+            <div>
+              <p className="text-muted-foreground text-xs">
+                Teléfono de respaldo
+              </p>
+              <p className="font-medium">{c.telefonoRespaldo}</p>
+            </div>
+          ) : null}
           <div className="sm:col-span-2">
             <p className="text-muted-foreground text-xs">Dirección</p>
-            <p className="font-medium">
-              {[c?.direccion, c?.ciudad].filter(Boolean).join(", ") || "—"}
-            </p>
+            <p className="font-medium">{c?.direccion ?? "—"}</p>
           </div>
+          <div>
+            <p className="text-muted-foreground text-xs">
+              Ciudad de expedición
+            </p>
+            <p className="font-medium">{c?.ciudad ?? "—"}</p>
+          </div>
+          {c?.fechaNacimiento ? (
+            <div>
+              <p className="text-muted-foreground text-xs">
+                Fecha de nacimiento
+              </p>
+              <p className="font-medium">{c.fechaNacimiento}</p>
+            </div>
+          ) : null}
         </div>
 
         {submittedProofs.length ? (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 space-y-2">
-            <p className="font-semibold flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" />
+          <VentaCallout className="space-y-2">
+            <p className="flex items-center gap-2 font-medium">
+              <CheckCircle2 className="h-4 w-4" />
               Comprobante(s) de pago recibido(s)
             </p>
             {submittedProofs.map((proof, index) => (
               <div key={`${proof.fileName ?? "proof"}-${proof.submittedAt}-${index}`}>
                 {proof.fileName ? <p>{proof.fileName}</p> : null}
                 {proof.amount ? (
-                  <p className="text-emerald-800">
+                  <p className="text-muted-foreground">
                     Monto reportado: {formatCOP(proof.amount)}
                   </p>
                 ) : null}
               </div>
             ))}
-          </div>
+          </VentaCallout>
         ) : null}
       </div>
+    );
+  }
+
+  if (phase === "preview") {
+    const values = form.getValues();
+    return (
+      <StepContratoPreview
+        token={data.token}
+        readOnly={readOnly}
+        client={{
+          nombre: values.nombre ?? "",
+          cedula: values.cedula ?? "",
+          email: values.email ?? "",
+          telefono: values.telefono ?? "",
+          ciudad: values.ciudad ?? "",
+          direccion: values.direccion ?? "",
+        }}
+        onContinueToPayment={goToPagoFromPreview}
+        onBackToDatos={() => {
+          setPhase("datos");
+          const v = form.getValues();
+          saveVentaDraft(data.token, {
+            nombre: v.nombre ?? "",
+            cedula: v.cedula ?? "",
+            email: v.email ?? "",
+            telefono: v.telefono ?? "",
+            telefonoRespaldo: v.telefonoRespaldo ?? "",
+            direccion: v.direccion ?? "",
+            ciudad: v.ciudad ?? "",
+            fechaNacimiento: v.fechaNacimiento ?? "",
+            paymentAmount: v.paymentAmount ?? Math.round(data.totalValue / 2),
+            phase: "datos",
+            uiStep: 2,
+          });
+          scheduleServerSync(v, "datos", true);
+        }}
+      />
     );
   }
 
   if (phase === "datos") {
     return withCedulaPreview(
       <div className="space-y-6">
-        <div>
-          <p className="text-xs font-bold text-primary uppercase tracking-widest mb-1">
-            Paso 2
-          </p>
-          <h1 className="text-2xl font-bold">Tus datos</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {data.paymentProofSubmitted
+        <StepHeader
+          step={2}
+          title="Tus datos"
+          description={
+            data.paymentProofSubmitted
               ? "Puedes corregir tus datos; lo ya enviado no se borra."
-              : "Primero necesitamos tus datos de contacto para el contrato"}
-          </p>
-        </div>
+              : "Necesitamos tus datos de contacto para el contrato."
+          }
+        />
 
         <Form {...form}>
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void goToPago();
+              void goToPreview();
             }}
             className="space-y-4"
           >
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField
                 control={form.control}
                 name="nombre"
@@ -945,6 +1724,7 @@ export function StepDatosContrato({
                     <FormControl>
                       <Input
                         placeholder="Ej: Juan Carlos Pérez"
+                        className="h-11"
                         {...field}
                         value={field.value ?? ""}
                       />
@@ -957,11 +1737,12 @@ export function StepDatosContrato({
                 control={form.control}
                 name="cedula"
                 render={({ field }) => (
-                  <FormItem className="sm:col-span-2">
+                  <FormItem>
                     <FormLabel>Cédula / Documento *</FormLabel>
                     <FormControl>
                       <Input
                         placeholder="1234567890"
+                        className="h-11"
                         {...field}
                         value={field.value ?? ""}
                       />
@@ -970,18 +1751,47 @@ export function StepDatosContrato({
                   </FormItem>
                 )}
               />
-              <div className="sm:col-span-2 rounded-xl border border-dashed border-border bg-muted/20 p-4 space-y-3">
-                <div>
-                  <p className="text-sm font-semibold">Foto de la cédula *</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Sube una foto clara del documento (frente). JPG, PNG o PDF.
-                  </p>
+              <FormField
+                control={form.control}
+                name="ciudad"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Ciudad de expedición *</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="Ej: Villavicencio"
+                        className="h-11"
+                        {...field}
+                        value={field.value ?? ""}
+                      />
+                    </FormControl>
+                    <p className="text-[11px] text-muted-foreground">
+                      Como en tu cédula: “N° … DE{" "}
+                      {field.value?.trim() || "…"}”.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="space-y-3 rounded-2xl border border-border bg-card p-4 shadow-sm sm:col-span-2">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+                    <IdCard className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">Foto de la cédula *</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      Foto clara del frente: JPG, PNG, HEIC (iPhone) o PDF.
+                      Se valida al subir; si no es una cédula, no podrás continuar.
+                    </p>
+                  </div>
                 </div>
                 <input
                   id={cedulaInputId}
                   ref={cedulaFileRef}
                   type="file"
-                  accept="image/*,.pdf"
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/*,application/pdf,.pdf"
                   className="hidden"
                   onChange={(e) => {
                     const files = e.target.files;
@@ -994,22 +1804,72 @@ export function StepDatosContrato({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={attachingCedulaFile}
+                    className="h-9"
+                    disabled={attachingCedulaFile || verifyingCedula}
                     onClick={() => cedulaFileRef.current?.click()}
                   >
-                    {attachingCedulaFile ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {attachingCedulaFile ||
+                    cedulaGate.status === "checking" ||
+                    cedulaGate.status === "uploading" ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
-                      <Upload className="w-4 h-4 mr-2" />
+                      <Upload className="mr-2 h-4 w-4" />
                     )}
-                    {pendingCedulaFile || data.clientData?.cedulaPhotoUrl
-                      ? "Cambiar foto"
-                      : "Subir foto de cédula"}
+                    {hasCedulaPhoto || cedulaGate.photoUrl
+                      ? "Cambiar archivo"
+                      : "Subir cédula"}
                   </Button>
-                  {(pendingCedulaFile || data.clientData?.cedulaPhotoFileName) && (
-                    <span className="text-xs text-muted-foreground truncate max-w-[240px]">
-                      {pendingCedulaFile?.name ??
-                        data.clientData?.cedulaPhotoFileName}
+                  {cedulaGate.status === "uploading" ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                      Subiendo foto…
+                    </span>
+                  ) : cedulaGate.status === "checking" ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                      Validando cédula automáticamente…
+                    </span>
+                  ) : cedulaGate.status === "ok" ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600">
+                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                      <span className="max-w-[220px] truncate">
+                        Cédula verificada
+                        {pendingCedulaFile?.name
+                          ? ` · ${pendingCedulaFile.name}`
+                          : ""}
+                      </span>
+                    </span>
+                  ) : cedulaGate.status === "awaiting_typed" ? (
+                    <span className="text-xs text-amber-600">
+                      Documento OK — escribe tu n° de cédula para contrastarlo
+                    </span>
+                  ) : cedulaGate.status === "rejected" ? (
+                    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-destructive">
+                      <span>
+                        {cedulaRejectMessage(
+                          cedulaGate.reason,
+                          cedulaGate.aiNumber,
+                        )}
+                      </span>
+                      {cedulaGate.reason === "ai_unavailable" &&
+                      cedulaGate.photoUrl ? (
+                        <button
+                          type="button"
+                          className="font-medium underline underline-offset-2"
+                          disabled={verifyingCedula}
+                          onClick={() =>
+                            void verifyCedulaAgainstAi({
+                              photoUrl: cedulaGate.photoUrl,
+                            })
+                          }
+                        >
+                          Reintentar
+                        </button>
+                      ) : null}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      Obligatoria — se valida sola al subir
                     </span>
                   )}
                   {canPreviewCedula ? (
@@ -1017,6 +1877,7 @@ export function StepDatosContrato({
                       type="button"
                       variant="ghost"
                       size="sm"
+                      className="h-9"
                       disabled={attachingCedulaFile || cedulaPreviewLoading}
                       onClick={(e) => {
                         e.preventDefault();
@@ -1025,15 +1886,16 @@ export function StepDatosContrato({
                       }}
                     >
                       {cedulaPreviewLoading ? (
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : (
-                        <Eye className="w-4 h-4 mr-2" />
+                        <Eye className="mr-2 h-4 w-4" />
                       )}
                       Ver foto
                     </Button>
                   ) : null}
                 </div>
               </div>
+
               <FormField
                 control={form.control}
                 name="telefono"
@@ -1043,6 +1905,25 @@ export function StepDatosContrato({
                     <FormControl>
                       <Input
                         placeholder="3001234567"
+                        className="h-11"
+                        {...field}
+                        value={field.value ?? ""}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="telefonoRespaldo"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Teléfono de respaldo</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="Otro número de contacto"
+                        className="h-11"
                         {...field}
                         value={field.value ?? ""}
                       />
@@ -1061,6 +1942,7 @@ export function StepDatosContrato({
                       <Input
                         type="email"
                         placeholder="tucorreo@ejemplo.com"
+                        className="h-11"
                         {...field}
                         value={field.value ?? ""}
                       />
@@ -1073,11 +1955,12 @@ export function StepDatosContrato({
                 control={form.control}
                 name="direccion"
                 render={({ field }) => (
-                  <FormItem>
+                  <FormItem className="sm:col-span-2">
                     <FormLabel>Dirección *</FormLabel>
                     <FormControl>
                       <Input
                         placeholder="Cra 1 # 23-45"
+                        className="h-11"
                         {...field}
                         value={field.value ?? ""}
                       />
@@ -1088,29 +1971,14 @@ export function StepDatosContrato({
               />
               <FormField
                 control={form.control}
-                name="ciudad"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Ciudad</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Bogotá"
-                        {...field}
-                        value={field.value ?? ""}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
                 name="fechaNacimiento"
                 render={({ field }) => (
                   <FormItem className="sm:col-span-2">
-                    <FormLabel>Fecha de nacimiento</FormLabel>
+                    <FormLabel>Fecha de nacimiento *</FormLabel>
                     <FormControl>
                       <Input
                         type="date"
+                        className="h-11"
                         {...field}
                         value={field.value ?? ""}
                       />
@@ -1121,13 +1989,49 @@ export function StepDatosContrato({
               />
             </div>
 
-            <Button
-              type="submit"
-              className="w-full bg-orange-500 text-white hover:bg-orange-600"
-              size="lg"
-            >
-              Continuar al pago
-            </Button>
+            {submitMessage?.type === "error" ? (
+              <VentaCallout tone="destructive" className="flex items-start gap-2">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>{submitMessage.text}</p>
+              </VentaCallout>
+            ) : null}
+
+            <div className="space-y-2 pt-1">
+              <Button
+                type="submit"
+                className="h-11 w-full"
+                size="lg"
+                disabled={!canContinueToPayment}
+              >
+                {verifyingCedula ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Validando cédula…
+                  </>
+                ) : (
+                  "Continuar a revisar el contrato"
+                )}
+              </Button>
+              {!canContinueToPayment ? (
+                <p className="text-center text-xs text-muted-foreground">
+                  {cedulaGate.status === "uploading"
+                    ? "Subiendo tu foto…"
+                    : cedulaGate.status === "checking"
+                      ? "Validando cédula automáticamente…"
+                      : cedulaGate.status === "rejected"
+                        ? "La cédula no pasó la validación. Sube otra foto del documento."
+                        : cedulaGate.status === "awaiting_typed"
+                          ? "Escribe tu número de cédula para contrastarlo con el documento."
+                          : !hasCedulaPhoto || cedulaGate.status !== "ok"
+                            ? "Sube la foto de tu cédula; se valida sola al cargarla."
+                            : "Completa todos los campos obligatorios para continuar."}
+                </p>
+              ) : (
+                <p className="text-center text-xs text-muted-foreground">
+                  Primero verás un borrador del contrato; después eliges cómo pagar.
+                </p>
+              )}
+            </div>
           </form>
         </Form>
       </div>,
@@ -1151,32 +2055,51 @@ export function StepDatosContrato({
 
   return withCedulaPreview(
     <div className="space-y-6">
-      <div>
-        <p className="text-xs font-bold text-primary uppercase tracking-widest mb-1">
-          Paso 2
-        </p>
-        <h1 className="text-2xl font-bold">
-          {isAmending ? "Actualizar datos o soportes" : "Soporte de pago"}
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {isAmending
+      <StepHeader
+        step={2}
+        title={isAmending ? "Actualizar datos o soportes" : "Soporte de pago"}
+        description={
+          isAmending
             ? "Puedes corregir tus datos y agregar más comprobantes sin perder lo ya enviado."
-            : `Transfiere el anticipo (${formatCOP(data.totalValue / 2)}) a una de las cuentas y adjunta tu comprobante`}
-        </p>
-      </div>
+            : `Transfiere el anticipo (${formatCOP(
+                data.advancePaymentAmount ?? Math.round(data.totalValue / 2),
+              )}) a una de las cuentas y adjunta tu comprobante.`
+        }
+      />
 
       {isAmending ? (
-        <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-900">
+        <VentaCallout>
           Ya recibimos al menos un comprobante. Tus datos y soportes anteriores
           se conservan; solo se agrega lo nuevo que envíes ahora.
-        </div>
+        </VentaCallout>
       ) : null}
 
-      <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-800">
-        <strong>¿Cuánto pago ahora?</strong> — Para confirmar tu reserva debes
-        enviar el <strong>50% ({formatCOP(data.totalValue / 2)})</strong> como
-        anticipo. El saldo restante lo pagas al llegar.
-      </div>
+      <VentaCallout>
+        <span className="font-medium">Anticipo ahora:</span>{" "}
+        {formatCOP(
+          data.advancePaymentAmount ?? Math.round(data.totalValue / 2),
+        )}
+        {data.advancePaymentAmount
+          ? data.totalValue > 0
+            ? ` (${Math.round((data.advancePaymentAmount / data.totalValue) * 100)}% del total).`
+            : "."
+          : " (50%)."}{" "}
+        El saldo restante lo pagas al llegar.
+      </VentaCallout>
+
+      {data.boldPaymentUrl ? (
+        <a
+          href={data.boldPaymentUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-muted/50"
+        >
+          Pagar abono con Bold
+          {data.boldPaymentAmount
+            ? ` · ${formatCOP(data.boldPaymentAmount)}`
+            : ""}
+        </a>
+      ) : null}
 
       <VentaBankAccounts accounts={data.bankAccounts} />
 
@@ -1206,7 +2129,11 @@ export function StepDatosContrato({
                   />
                 </FormControl>
                 <p className="text-xs text-muted-foreground">
-                  Anticipo sugerido: {formatCOP(data.totalValue / 2)}
+                  Anticipo sugerido:{" "}
+                  {formatCOP(
+                    data.advancePaymentAmount ??
+                      Math.round(data.totalValue / 2),
+                  )}
                 </p>
                 <FormMessage />
               </FormItem>
@@ -1221,51 +2148,95 @@ export function StepDatosContrato({
             </label>
 
             {submittedProofs.length ? (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 space-y-2">
+              <VentaCallout className="space-y-2">
                 <p className="font-medium">Comprobantes ya enviados</p>
                 {submittedProofs.map((proof, index) => (
                   <div
                     key={`${proof.fileName ?? "proof"}-${proof.submittedAt}-${index}`}
                     className="flex items-start gap-2"
                   >
-                    <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                     <div>
                       <p>{proof.fileName ?? `Comprobante ${index + 1}`}</p>
                       {proof.amount ? (
-                        <p className="text-xs text-emerald-800">
+                        <p className="text-xs text-muted-foreground">
                           {formatCOP(proof.amount)}
                         </p>
                       ) : null}
                     </div>
                   </div>
                 ))}
-              </div>
+              </VentaCallout>
             ) : null}
 
-            {fileStale && pendingFiles.length === 0 ? (
+            {fileStale && verifiedProofs.length === 0 ? (
               <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                El comprobante guardado ya no es válido (suele pasar al recargar).
-                Vuelve a seleccionar el archivo antes de enviar.
+                Debes adjuntar de nuevo el comprobante para que la IA lo valide
+                antes de enviarlo.
               </p>
             ) : null}
 
-            {pendingFiles.length ? (
+            {receiptGate.status === "uploading" ||
+            receiptGate.status === "checking" ? (
+              <VentaCallout className="flex items-center gap-2 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                {receiptGate.status === "uploading"
+                  ? "Subiendo comprobante…"
+                  : "La IA está verificando que sea un comprobante de pago…"}
+              </VentaCallout>
+            ) : null}
+
+            {receiptGate.status === "rejected" ? (
+              <VentaCallout
+                tone="destructive"
+                className="flex items-start gap-2 text-sm"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>{receiptRejectMessage(receiptGate.reason)}</p>
+              </VentaCallout>
+            ) : null}
+
+            {verifiedProofs.length ? (
               <div className="space-y-2">
-                {pendingFiles.map((pending, index) => (
+                {verifiedProofs.map((pending, index) => (
                   <div
-                    key={`${pending.name}-${index}`}
+                    key={`${pending.file.name}-${index}`}
                     className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2 text-sm shadow-sm"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                      <span className="truncate">{pending.name}</span>
+                      <div className="min-w-0">
+                        <span className="truncate block">{pending.file.name}</span>
+                        {pending.bankName || pending.amount ? (
+                          <span className="text-xs text-muted-foreground">
+                            {[
+                              pending.bankName,
+                              pending.amount
+                                ? formatCOP(pending.amount)
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-emerald-700">
+                            Validado por IA
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => {
-                        setPendingFiles((prev) =>
-                          prev.filter((_, i) => i !== index),
-                        );
+                        setVerifiedProofs((prev) => {
+                          const next = prev.filter((_, i) => i !== index);
+                          setReceiptGate(
+                            next.length
+                              ? { status: "ok" }
+                              : { status: "idle" },
+                          );
+                          return next;
+                        });
                       }}
                       className="text-muted-foreground hover:text-destructive shrink-0"
                     >
@@ -1297,7 +2268,11 @@ export function StepDatosContrato({
               {attachingFile ? (
                 <div className="flex flex-col items-center gap-2 text-muted-foreground">
                   <Loader2 className="w-8 h-8 animate-spin" />
-                  <p className="text-sm">Preparando comprobante...</p>
+                  <p className="text-sm">
+                    {receiptGate.status === "checking"
+                      ? "Validando con IA…"
+                      : "Preparando comprobante…"}
+                  </p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-2 text-muted-foreground">
@@ -1307,7 +2282,9 @@ export function StepDatosContrato({
                       ? "Haz clic para agregar otro soporte (puedes elegir varios)"
                       : "Haz clic o arrastra la imagen / PDF del comprobante"}
                   </p>
-                  <p className="text-xs">JPG, PNG o PDF · Máx. 10 MB c/u</p>
+                  <p className="text-xs">
+                    JPG, PNG o PDF · Máx. 10 MB c/u · debe ser un voucher bancario
+                  </p>
                 </div>
               )}
               <input
@@ -1328,20 +2305,19 @@ export function StepDatosContrato({
           </div>
 
           {submitMessage ? (
-            <div
-              className={`rounded-lg border p-3 text-sm flex items-start gap-2 ${
-                submitMessage.type === "success"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                  : "border-red-200 bg-red-50 text-red-800"
-              }`}
+            <VentaCallout
+              tone={
+                submitMessage.type === "success" ? "success" : "destructive"
+              }
+              className="flex items-start gap-2"
             >
               {submitMessage.type === "success" ? (
-                <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
               ) : (
-                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               )}
               <p>{submitMessage.text}</p>
-            </div>
+            </VentaCallout>
           ) : null}
 
           <div className="flex gap-3">
@@ -1358,6 +2334,7 @@ export function StepDatosContrato({
                   cedula: values.cedula ?? "",
                   email: values.email ?? "",
                   telefono: values.telefono ?? "",
+                  telefonoRespaldo: values.telefonoRespaldo ?? "",
                   direccion: values.direccion ?? "",
                   ciudad: values.ciudad ?? "",
                   fechaNacimiento: values.fechaNacimiento ?? "",
@@ -1373,8 +2350,18 @@ export function StepDatosContrato({
             </Button>
             <Button
               type="button"
-              disabled={submitting || attachingFile}
-              className="flex-1 bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-70"
+              disabled={
+                submitting ||
+                attachingFile ||
+                receiptGate.status === "uploading" ||
+                receiptGate.status === "checking" ||
+                (!isAmending &&
+                  (verifiedProofs.length === 0 || receiptGate.status !== "ok")) ||
+                (isAmending &&
+                  verifiedProofs.length > 0 &&
+                  receiptGate.status !== "ok")
+              }
+              className="flex-1 disabled:opacity-50"
               size="lg"
               onClick={() => void submitPago()}
             >
@@ -1383,11 +2370,18 @@ export function StepDatosContrato({
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Enviando...
                 </>
+              ) : attachingFile ||
+                receiptGate.status === "uploading" ||
+                receiptGate.status === "checking" ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Validando…
+                </>
               ) : isAmending ? (
                 <>
                   <Send className="w-4 h-4 mr-2" />
-                  {pendingFiles.length
-                    ? `Enviar ${pendingFiles.length} comprobante(s) nuevo(s)`
+                  {verifiedProofs.length
+                    ? `Enviar ${verifiedProofs.length} comprobante(s) nuevo(s)`
                     : "Guardar cambios en mis datos"}
                 </>
               ) : (

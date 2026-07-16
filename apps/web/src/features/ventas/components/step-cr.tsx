@@ -10,7 +10,9 @@ import { useMutation } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import { toast } from "sonner";
 import { CheckCircle2, Download, FileCheck, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { SaleLinkPublicData } from "./venta-page-content";
+import { StepHeader, VentaCallout, VentaPanel } from "./venta-ui";
 
 interface Props {
   data: SaleLinkPublicData;
@@ -63,24 +65,20 @@ export function StepCr({ data, onSubmitted }: Props) {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-xs font-bold uppercase tracking-widest text-primary">
-          Paso 5
-        </p>
-        <h1 className="text-2xl font-bold">Confirmación de reserva</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Tu confirmación de reserva (CR) con todos los detalles de tu estadía.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <StepHeader
+        step={5}
+        title="Confirmación de reserva"
+        description="Tu CR con los detalles de la estadía."
+      />
 
-      <div className="rounded-2xl bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary/10 text-primary">
-            <FileCheck className="h-6 w-6" />
+      <VentaPanel className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
+            <FileCheck className="h-5 w-5 text-muted-foreground" />
           </div>
           <div>
-            <p className="text-sm font-bold">Confirmación de reserva</p>
+            <p className="text-sm font-semibold">Confirmación de reserva</p>
             <p className="text-xs text-muted-foreground">
               Generada para tu reserva {data.contractCode || ""}
             </p>
@@ -88,52 +86,51 @@ export function StepCr({ data, onSubmitted }: Props) {
         </div>
 
         {data.crUrl ? (
-          <a
-            href={data.crUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-white"
-          >
-            <Download className="h-4 w-4" /> Descargar confirmación (PDF)
-          </a>
+          <Button asChild className="h-11 w-full">
+            <a href={data.crUrl} target="_blank" rel="noopener noreferrer">
+              <Download className="mr-2 h-4 w-4" />
+              Descargar confirmación (PDF)
+            </a>
+          </Button>
         ) : generating ? (
           <div className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
             <span>Generando tu confirmación de reserva…</span>
           </div>
         ) : error ? (
-          <div className="space-y-2">
-            <p className="text-sm text-destructive">{error}</p>
+          <VentaCallout tone="destructive" className="space-y-2">
+            <p>{error}</p>
             <button
               type="button"
               onClick={generate}
-              className="text-sm font-bold text-primary underline"
+              className="text-sm font-medium underline underline-offset-2"
             >
               Reintentar
             </button>
-          </div>
+          </VentaCallout>
         ) : (
           <div className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
             <span>Preparando tu confirmación…</span>
           </div>
         )}
-      </div>
+      </VentaPanel>
 
       {data.crUrl ? (
-        <button
+        <Button
           type="button"
+          variant="outline"
+          className="h-11 w-full"
           onClick={() => void handleContinue()}
           disabled={confirming}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 text-sm font-bold text-primary disabled:opacity-60"
         >
           {confirming ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
-            <CheckCircle2 className="h-4 w-4" />
+            <CheckCircle2 className="mr-2 h-4 w-4" />
           )}
           Continuar al check-in
-        </button>
+        </Button>
       ) : null}
     </div>
   );

@@ -38,6 +38,7 @@ import {
   BETWEEN_WEB_FICHA_SENDS_MS,
 } from './lib/webFichaSend';
 import { isInvalidCatalogMapping } from './lib/metaCatalog';
+import { extractCatalogHintsFromChat } from './lib/catalogHints';
 import {
   countEligibilitySignals,
   canManuallyEnableAi,
@@ -437,17 +438,21 @@ export const getMessages = query({
         }
       }
 
-      const isCatalogPick = Boolean(rid);
+      const isCatalogPick = Boolean(rid) && m.sender === 'user';
+      const isCatalogSend =
+        Boolean(rid) && m.sender === 'assistant' && (m.type ?? 'text') === 'product';
       out.push({
         id: m._id,
         sender: m.sender,
         // Contenido limpio para la UI: no mostramos IDs crudos del catálogo.
-        content: product
-          ? `Seleccioné: ${product.title}`
-          : isCatalogPick
-            ? 'Seleccioné una finca del catálogo'
+        content: isCatalogPick
+          ? product
+            ? `Seleccioné: ${product.title}`
+            : 'Seleccioné una finca del catálogo'
+          : isCatalogSend && product
+            ? `🏡 Ficha de catálogo: ${product.title}`
             : m.content,
-        type: product || isCatalogPick ? 'product' : (m.type ?? 'text'),
+        type: product || isCatalogPick || isCatalogSend ? 'product' : (m.type ?? 'text'),
         mediaUrl: m.mediaUrl ?? null,
         mediaFilename: m.mediaFilename ?? null,
         mediaMime: m.mediaMime ?? null,
@@ -1886,23 +1891,47 @@ Devuelve UNICAMENTE el mensaje reescrito, sin comillas ni explicaciones.`;
 
 /**
  * Asistente del Experto: lee el chat y sugiere un mensaje para el borrador.
- * NO envía por WhatsApp ni escribe en la base — solo recomienda texto.
+ * Si la instrucción es una ORDEN operativa (p. ej. enviar catálogo), también
+ * devuelve una `action` para abrir esa herramienta con prefill.
+ * NO envía por WhatsApp ni escribe en la base — solo recomienda.
  */
 export const suggestAdvisorReply = action({
   args: {
     conversationId: v.id('conversations'),
-    /** Instrucción opcional del asesor ("pídele la cédula", "cierra con calidez"…). */
+    /** Instrucción opcional del asesor ("pídele la cédula", "envíale fichas…"…). */
     note: v.optional(v.string()),
   },
   returns: v.object({
     ok: v.boolean(),
     suggestion: v.string(),
+    action: v.optional(
+      v.object({
+        type: v.literal('open_catalog'),
+        label: v.string(),
+        fechaEntrada: v.optional(v.string()),
+        fechaSalida: v.optional(v.string()),
+        personas: v.optional(v.number()),
+        zona: v.optional(v.string()),
+      }),
+    ),
     error: v.optional(v.string()),
   }),
   handler: async (
     ctx,
     { conversationId, note },
-  ): Promise<{ ok: boolean; suggestion: string; error?: string }> => {
+  ): Promise<{
+    ok: boolean;
+    suggestion: string;
+    action?: {
+      type: 'open_catalog';
+      label: string;
+      fechaEntrada?: string;
+      fechaSalida?: string;
+      personas?: number;
+      zona?: string;
+    };
+    error?: string;
+  }> => {
     const context = await ctx.runQuery(internal.agent.getAgentContext, {
       conversationId,
     });
@@ -1920,17 +1949,61 @@ export const suggestAdvisorReply = action({
 
     const transcript = history
       .map((m) => {
-        const who =
-          m.sender === 'user'
-            ? 'Cliente'
-            : 'Equipo';
+        const who = m.sender === 'user' ? 'Cliente' : 'Equipo';
         return `${who}: ${m.content}`;
       })
       .join('\n');
 
     const contact = context.contactName?.trim() || 'el cliente';
     const noteTrim = (note ?? '').trim();
-    const system = `Eres el asistente interno de un Experto de FincasYa.com (alquiler de fincas, atencion por WhatsApp).
+    const catalogOrder = noteTrim
+      ? looksLikeCatalogOrder(noteTrim)
+      : false;
+
+    let action:
+      | {
+          type: 'open_catalog';
+          label: string;
+          fechaEntrada?: string;
+          fechaSalida?: string;
+          personas?: number;
+          zona?: string;
+        }
+      | undefined;
+
+    if (catalogOrder) {
+      const hints = extractCatalogHintsFromChat(
+        `${noteTrim}\n${transcript}`,
+      );
+      const bits: string[] = [];
+      if (hints.fechaEntrada && hints.fechaSalida) {
+        bits.push(`${hints.fechaEntrada} → ${hints.fechaSalida}`);
+      }
+      if (hints.personas) bits.push(`${hints.personas} personas`);
+      if (hints.zona) bits.push(hints.zona);
+      action = {
+        type: 'open_catalog',
+        label: bits.length
+          ? `Abrir catálogo (${bits.join(' · ')})`
+          : 'Abrir catálogo automático',
+        fechaEntrada: hints.fechaEntrada,
+        fechaSalida: hints.fechaSalida,
+        personas: hints.personas,
+        zona: hints.zona,
+      };
+    }
+
+    const system = catalogOrder
+      ? `Eres el asistente interno de un Experto de FincasYa.com (alquiler de fincas, WhatsApp).
+El Experto VA A ENVIAR el catalogo de fincas ahora (no es una pregunta al cliente).
+Redacta UN mensaje corto de acompanamiento (1-2 frases) que diga que le comparte opciones segun fechas/cupo de la instruccion o el historial.
+REGLAS:
+- Espanol colombiano, tuteo. Calido y breve.
+- NO preguntes si quiere que le mandes fichas: ya se las estan enviando.
+- NO inventes precios ni disponibilidad concreta.
+- 1 emoji al final maximo.
+- Devuelve UNICAMENTE el mensaje, sin comillas ni explicaciones.`
+      : `Eres el asistente interno de un Experto de FincasYa.com (alquiler de fincas, atencion por WhatsApp).
 Tu trabajo: redactar UN mensaje listo para que el Experto lo revise y envie al cliente.
 REGLAS:
 - Espanol colombiano, tuteo ("tu", "te"). Calido, breve, profesional (WhatsApp, no correo).
@@ -1955,17 +2028,25 @@ Devuelve UNICAMENTE el mensaje sugerido, sin comillas ni explicaciones.`;
           { role: 'system', content: system },
           { role: 'user', content: userPrompt },
         ],
-        temperature: 0.5,
+        temperature: catalogOrder ? 0.35 : 0.5,
       });
       const suggestion = (content ?? '').trim();
-      if (!suggestion) {
+      if (!suggestion && !action) {
         return {
           ok: false,
           suggestion: '',
           error: 'La IA no devolvió texto. Intenta de nuevo.',
         };
       }
-      return { ok: true, suggestion };
+      return {
+        ok: true,
+        suggestion:
+          suggestion ||
+          (action
+            ? 'Te comparto algunas opciones de fincas según lo que me pediste. 🏡'
+            : ''),
+        action,
+      };
     } catch (err) {
       console.error('[suggestAdvisorReply] fallo IA', err);
       return {
@@ -1976,6 +2057,26 @@ Devuelve UNICAMENTE el mensaje sugerido, sin comillas ni explicaciones.`;
     }
   },
 });
+
+/** Detecta órdenes del tipo “envíale fichas / catálogo / opciones”. */
+function looksLikeCatalogOrder(note: string): boolean {
+  const t = note
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (
+    /\b(ficha|catalogo|catalog)s?\b/.test(t) ||
+    /\b(enviar|enviarle|enviarles|manda|mandale|mandales|comparte|pasar|mostrar)\b.{0,50}\b(ficha|catalogo|opcion|finca|villa)s?\b/.test(
+      t,
+    ) ||
+    /\b(ficha|catalogo|opcion)s?\b.{0,40}\b(enviar|enviarle|manda|mandale|comparte)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
 
 /** Prefill del formulario de catálogo automático con lo último que pidió el cliente. */
 export const getCatalogPrefill = query({
@@ -2029,92 +2130,6 @@ export const getCatalogPrefill = query({
     };
   },
 });
-
-/** Extrae fechas / cupo / zona aproximados del texto del cliente. */
-function extractCatalogHintsFromChat(text: string): {
-  fechaEntrada?: string;
-  fechaSalida?: string;
-  personas?: number;
-  zona?: string;
-  mascotas?: boolean;
-} {
-  const out: {
-    fechaEntrada?: string;
-    fechaSalida?: string;
-    personas?: number;
-    zona?: string;
-    mascotas?: boolean;
-  } = {};
-
-  const isos = [...text.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)].map((m) => m[1]!);
-  if (isos.length >= 2) {
-    out.fechaEntrada = isos[0];
-    out.fechaSalida = isos[1];
-  } else {
-    const dmys = [
-      ...text.matchAll(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](20\d{2})\b/g),
-    ];
-    if (dmys.length >= 2) {
-      const toIso = (m: RegExpMatchArray) => {
-        const d = m[1]!.padStart(2, '0');
-        const mo = m[2]!.padStart(2, '0');
-        return `${m[3]}-${mo}-${d}`;
-      };
-      out.fechaEntrada = toIso(dmys[0]!);
-      out.fechaSalida = toIso(dmys[1]!);
-    }
-  }
-
-  const pers =
-    text.match(/\b(\d{1,3})\s*(?:personas?|pax|gente)\b/i) ||
-    text.match(/\bsomos\s+(?:unas?\s+)?(\d{1,3})\b/i) ||
-    text.match(/\bpara\s+(\d{1,3})\b/i) ||
-    text.match(/\bgrupo\s+de\s+(\d{1,3})\b/i);
-  if (pers?.[1]) {
-    const n = Number(pers[1]);
-    if (n >= 1 && n <= 200) out.personas = n;
-  }
-
-  const zones = [
-    'Melgar',
-    'Girardot',
-    'Anapoima',
-    'Apulo',
-    'Tocaima',
-    'Ricaurte',
-    'Carmen de Apicalá',
-    'Nilo',
-    'Villeta',
-    'Guaduas',
-    'Honda',
-    'Mariquita',
-    'Ibagué',
-    'Bogotá',
-    'Cundinamarca',
-    'Tolima',
-    'Cartagena',
-    'Santa Marta',
-    'Barú',
-    'Coveñas',
-    'Tolú',
-  ];
-  const lower = text.toLowerCase();
-  for (const z of zones) {
-    if (lower.includes(z.toLowerCase())) {
-      out.zona = z;
-      break;
-    }
-  }
-  if (!out.zona && /\bcerca\s+(?:a|de)\s+bogot/i.test(text)) {
-    out.zona = 'cerca a Bogotá';
-  }
-
-  if (/\bmascotas?\b|\bperr[oa]s?\b|\bgat[oa]s?\b/i.test(text)) {
-    out.mascotas = true;
-  }
-
-  return out;
-}
 
 /** Arma las fichas web (imagen + caption + enlace) para las fincas seleccionadas. */
 export const buildWebFichasForSelection = internalQuery({

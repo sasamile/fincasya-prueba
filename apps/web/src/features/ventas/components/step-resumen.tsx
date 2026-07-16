@@ -2,16 +2,17 @@
 
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import {
-  CalendarDays,
-  ChevronRight,
-  Moon,
-  Users,
-  CreditCard,
-} from "lucide-react";
+import { ArrowRight, Moon, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { SaleLinkPublicData } from "./venta-page-content";
+import {
+  StepHeader,
+  VentaCallout,
+  VentaMetaRow,
+  VentaPanel,
+  VentaPanelTitle,
+} from "./venta-ui";
 
 interface Props {
   data: SaleLinkPublicData;
@@ -30,138 +31,126 @@ function formatCOP(n: number) {
 export function StepResumen({ data, onContinue, readOnly }: Props) {
   const checkInDate = new Date(data.checkIn);
   const checkOutDate = new Date(data.checkOut);
+  const depositHalf =
+    data.advancePaymentAmount ?? Math.round(data.totalValue / 2);
 
   const breakdown = [
     { label: "Alquiler", amount: data.rentalValue },
     { label: "Limpieza / aseo", amount: data.cleaningFee },
     data.depositAmount > 0 && {
-      label: "Depósito de garantía (reembolsable)",
+      label: "Depósito de garantía",
       amount: data.depositAmount,
-      highlight: true,
+      refundable: true,
     },
-    data.petSurcharge && data.petSurcharge > 0 && {
-      label: `Recargo mascotas (${data.petCount ?? ""})`,
-      amount: data.petSurcharge,
-    },
-    data.petDeposit && data.petDeposit > 0 && {
-      label: "Depósito mascotas (reembolsable)",
-      amount: data.petDeposit,
-      highlight: true,
-    },
-  ].filter(Boolean) as { label: string; amount: number; highlight?: boolean }[];
+    data.petSurcharge &&
+      data.petSurcharge > 0 && {
+        label: `Recargo mascotas${data.petCount ? ` (${data.petCount})` : ""}`,
+        amount: data.petSurcharge,
+      },
+    data.petDeposit &&
+      data.petDeposit > 0 && {
+        label: "Depósito mascotas",
+        amount: data.petDeposit,
+        refundable: true,
+      },
+  ].filter(Boolean) as {
+    label: string;
+    amount: number;
+    refundable?: boolean;
+  }[];
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-xs font-bold text-primary uppercase tracking-widest mb-1">
-          Paso 1
-        </p>
-        <h1 className="text-2xl font-bold">Resumen de tu reserva</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Revisa los detalles antes de continuar
-        </p>
-      </div>
+      <StepHeader
+        step={1}
+        title="Resumen de tu reserva"
+        description="Revisa fechas y valores antes de continuar."
+      />
 
-      {/* Fechas */}
-      <div className="rounded-xl bg-card p-4 space-y-3 shadow-sm">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <CalendarDays className="w-4 h-4 text-primary" />
-          Fechas de la estadía
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-center flex-1">
+      <VentaPanel>
+        <VentaPanelTitle>Estadía</VentaPanelTitle>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div>
             <p className="text-xs text-muted-foreground">Check-in</p>
-            <p className="font-bold">
-              {format(checkInDate, "d MMM", { locale: es })}
+            <p className="mt-0.5 text-base font-semibold tracking-tight">
+              {format(checkInDate, "d MMM yyyy", { locale: es })}
             </p>
-            <p className="text-xs text-muted-foreground">
-              {format(checkInDate, "yyyy")}
-            </p>
-            {data.checkInTime && (
-              <p className="text-xs font-medium text-primary mt-0.5">
+            {data.checkInTime ? (
+              <p className="mt-0.5 text-xs text-muted-foreground">
                 {data.checkInTime}
               </p>
-            )}
+            ) : null}
           </div>
-          <ChevronRight className="w-5 h-5 text-muted-foreground" />
-          <div className="text-center flex-1">
+          <ArrowRight className="h-4 w-4 text-muted-foreground/60" />
+          <div className="text-right">
             <p className="text-xs text-muted-foreground">Check-out</p>
-            <p className="font-bold">
-              {format(checkOutDate, "d MMM", { locale: es })}
+            <p className="mt-0.5 text-base font-semibold tracking-tight">
+              {format(checkOutDate, "d MMM yyyy", { locale: es })}
             </p>
-            <p className="text-xs text-muted-foreground">
-              {format(checkOutDate, "yyyy")}
-            </p>
-            {data.checkOutTime && (
-              <p className="text-xs font-medium text-primary mt-0.5">
+            {data.checkOutTime ? (
+              <p className="mt-0.5 text-xs text-muted-foreground">
                 {data.checkOutTime}
               </p>
-            )}
+            ) : null}
           </div>
         </div>
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <Moon className="w-3.5 h-3.5" /> {data.nights} noches
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-sm text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <Moon className="h-3.5 w-3.5" />
+            {data.nights} {data.nights === 1 ? "noche" : "noches"}
           </span>
-          <span className="flex items-center gap-1">
-            <Users className="w-3.5 h-3.5" /> {data.guests} personas
+          <span className="inline-flex items-center gap-1.5">
+            <Users className="h-3.5 w-3.5" />
+            {data.guests} {data.guests === 1 ? "persona" : "personas"}
           </span>
         </div>
-      </div>
+      </VentaPanel>
 
-      {/* Desglose de valores */}
-      <div className="rounded-xl bg-card p-4 space-y-3 shadow-sm">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <CreditCard className="w-4 h-4 text-primary" />
-          Desglose del valor
-        </div>
-        <div className="space-y-2">
-          {breakdown.map((row, i) => (
-            <div
-              key={i}
-              className={`flex items-center justify-between text-sm ${
-                row.highlight ? "font-medium" : ""
-              }`}
-            >
-              <span
-                className={
-                  row.highlight ? "text-amber-700" : "text-muted-foreground"
-                }
-              >
-                {row.label}
-                {row.highlight && (
-                  <span className="ml-1 text-xs bg-amber-100 text-amber-700 px-1 rounded">
-                    Reembolsable
+      <VentaPanel className="space-y-3">
+        <VentaPanelTitle>Desglose</VentaPanelTitle>
+        <div className="space-y-2.5">
+          {breakdown.map((row) => (
+            <VentaMetaRow
+              key={row.label}
+              label={
+                row.refundable ? (
+                  <span>
+                    {row.label}
+                    <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
+                      · reembolsable
+                    </span>
                   </span>
-                )}
-              </span>
-              <span className={row.highlight ? "text-amber-700" : ""}>
-                {formatCOP(row.amount)}
-              </span>
-            </div>
+                ) : (
+                  row.label
+                )
+              }
+              value={formatCOP(row.amount)}
+            />
           ))}
         </div>
-        <Separator />
-        <div className="flex items-center justify-between font-bold text-base">
-          <span>Total</span>
-          <span className="text-primary text-lg">{formatCOP(data.totalValue)}</span>
+        <Separator className="my-1" />
+        <div className="flex items-center justify-between gap-4 pt-0.5">
+          <span className="text-sm font-semibold">Total</span>
+          <span className="text-lg font-semibold tracking-tight tabular-nums">
+            {formatCOP(data.totalValue)}
+          </span>
         </div>
-        <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-800">
-          <strong>¿Cuánto pago ahora?</strong> — Para confirmar tu reserva debes
-          enviar el <strong>50% ({formatCOP(data.totalValue / 2)})</strong> como
-          anticipo. El saldo restante lo pagas al llegar.
-        </div>
-      </div>
+        <VentaCallout className="mt-2">
+          <p>
+            <span className="font-medium">Anticipo ahora:</span>{" "}
+            {formatCOP(depositHalf)}
+            {data.advancePaymentAmount && data.totalValue > 0
+              ? ` (${Math.round((depositHalf / data.totalValue) * 100)}% del total).`
+              : " (sugerido)."}{" "}
+            El saldo restante lo pagas al llegar.
+          </p>
+        </VentaCallout>
+      </VentaPanel>
 
-      {/* CTA */}
       {!readOnly ? (
-        <Button
-          onClick={onContinue}
-          className="w-full bg-orange-500 text-white hover:bg-orange-600"
-          size="lg"
-        >
+        <Button onClick={onContinue} className="h-11 w-full" size="lg">
           Continuar con mis datos
-          <ChevronRight className="w-4 h-4 ml-1" />
+          <ArrowRight className="ml-1.5 h-4 w-4" />
         </Button>
       ) : null}
     </div>

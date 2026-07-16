@@ -9,6 +9,7 @@ import type { FunctionReturnType } from 'convex/server';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import { Link2, Search, Store, X, Zap } from 'lucide-react';
+import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { catalogCache } from '@/lib/queryCache';
@@ -39,22 +40,30 @@ function CatalogListRow({
   mode,
   selected,
   onToggle,
+  onBlocked,
 }: {
   property: CatalogRow;
   mode: ShareMode;
   selected: boolean;
   onToggle: () => void;
+  onBlocked: (property: CatalogRow) => void;
 }) {
   const sendable = mode === 'meta' ? p.sendable : p.webSendable;
   return (
     <button
       type="button"
-      onClick={onToggle}
-      disabled={!sendable}
+      onClick={() => {
+        if (!sendable) {
+          onBlocked(p);
+          return;
+        }
+        onToggle();
+      }}
       className={cn(
         'flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors',
         sendable ? 'hover:bg-muted' : 'cursor-not-allowed opacity-45',
       )}
+      aria-disabled={!sendable}
     >
       <span
         className={cn(
@@ -114,9 +123,19 @@ function CatalogListRow({
 export function CatalogModal({
   conversationId,
   onClose,
+  initialAuto = false,
+  catalogSeed,
 }: {
   conversationId: Id<'conversations'>;
   onClose: () => void;
+  /** Abre directo el envío automático (p. ej. desde el asistente). */
+  initialAuto?: boolean;
+  catalogSeed?: {
+    fechaEntrada?: string;
+    fechaSalida?: string;
+    personas?: number;
+    zona?: string;
+  };
 }) {
   const liveProperties = useQuery(api.inbox.listCatalogProperties);
   const properties = liveProperties ?? (catalogCache.value as typeof liveProperties);
@@ -129,7 +148,7 @@ export function CatalogModal({
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [dept, setDept] = useState<string>('Todos');
-  const [showAuto, setShowAuto] = useState(false);
+  const [showAuto, setShowAuto] = useState(initialAuto);
 
   const departments = useMemo(() => {
     const counts = new Map<string, number>();
@@ -160,6 +179,31 @@ export function CatalogModal({
       else next.add(id);
       return next;
     });
+  }
+
+  function explainBlocked(p: CatalogRow) {
+    if (mode === 'meta' && !p.sendable) {
+      if (p.webSendable) {
+        toast.message('Sin ficha Meta', {
+          description:
+            'Esta finca no está enlazada al catálogo de WhatsApp. Cambia a “Ficha web” para enviarla, o enlázala en Admin → Catálogos.',
+          action: {
+            label: 'Usar ficha web',
+            onClick: () => switchMode('web'),
+          },
+        });
+      } else {
+        toast.error(
+          'Sin ficha Meta: esta finca no está en el catálogo de WhatsApp. Enlázala en Admin → Catálogos.',
+        );
+      }
+      return;
+    }
+    if (mode === 'web' && !p.webSendable) {
+      toast.error(
+        'No se puede enviar como ficha web: falta slug o foto de la finca.',
+      );
+    }
   }
 
   function switchMode(next: ShareMode) {
@@ -321,6 +365,7 @@ export function CatalogModal({
                 mode={mode}
                 selected={selected.has(id)}
                 onToggle={() => toggle(id, sendable)}
+                onBlocked={explainBlocked}
               />
             );
           })
@@ -350,6 +395,7 @@ export function CatalogModal({
       {showAuto && (
         <AutoCatalogModal
           conversationId={conversationId}
+          seed={catalogSeed}
           onClose={() => setShowAuto(false)}
           onSent={onClose}
         />

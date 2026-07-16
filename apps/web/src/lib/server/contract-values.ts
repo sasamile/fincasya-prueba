@@ -9,10 +9,26 @@ export const DEFAULT_CONTRACT_ADMIN = {
   adminCedula: "81.720.077",
   adminCity: "Chía (Cund)",
   cleaningFee: "$100.000",
-  extraPersonFee: "$50.000",
+  extraPersonFee: "$120.000",
   petDeposit: "$200.000",
   securityDeposit: "$200.000",
 } as const;
+
+/** Normaliza el fee de personas extras: el viejo $50k pasa a $120k. */
+export function normalizeExtraPersonFeeLabel(
+  raw: string | undefined | null,
+): string {
+  const trimmed = String(raw ?? "").trim();
+  const digits = trimmed.replace(/[^\d]/g, "");
+  if (!digits || digits === "50000") {
+    return DEFAULT_CONTRACT_ADMIN.extraPersonFee;
+  }
+  if (trimmed.startsWith("$")) return trimmed;
+  // "120000" → "$120.000"
+  const n = Number(digits);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_CONTRACT_ADMIN.extraPersonFee;
+  return `$${n.toLocaleString("es-CO")}`;
+}
 
 export type ContractAdminSettings = {
   adminName?: string;
@@ -57,10 +73,13 @@ export function parseContractSettingsPayload(payload: unknown): {
   }
   const o = payload as Record<string, unknown>;
   const rawAdmin = o.adminSettings;
-  const admin: ContractAdminSettings =
-    rawAdmin && typeof rawAdmin === "object"
-      ? { ...(rawAdmin as ContractAdminSettings) }
-      : { ...DEFAULT_CONTRACT_ADMIN };
+  const admin: ContractAdminSettings = {
+    ...DEFAULT_CONTRACT_ADMIN,
+    ...(rawAdmin && typeof rawAdmin === "object"
+      ? (rawAdmin as ContractAdminSettings)
+      : {}),
+  };
+  admin.extraPersonFee = normalizeExtraPersonFeeLabel(admin.extraPersonFee);
   const ownerOverrides =
     o.propertyContractOwnerOverrides &&
     typeof o.propertyContractOwnerOverrides === "object"
@@ -306,6 +325,8 @@ export type ContractFinca = {
 /** Payload del contrato (salida de buildContractPayload en el front). */
 export type ContractDto = Record<string, unknown> & {
   contractNumber?: string;
+  /** Borrador de solo lectura (sin numeración contractual). */
+  draft?: boolean;
   nightlyPrice?: string;
   totalPrice?: string;
   clientName?: string;
@@ -325,6 +346,7 @@ export type ContractDto = Record<string, unknown> & {
   petCount?: number;
   petDeposit?: number;
   petSurcharge?: number;
+  petCleaningFee?: number;
   serviceStaffFee?: number;
   bankName?: string;
   accountNumber?: string;
@@ -366,6 +388,10 @@ export function buildContractWordValues(
   contractSettingsPayload: unknown,
   resolvedContractNumber: string,
 ): ContractWordValuesResult {
+  const isDraft = Boolean(dto.draft);
+  const displayContractNumber = isDraft
+    ? "BORRADOR — SIN VALOR CONTRACTUAL"
+    : resolvedContractNumber;
   const now = new Date();
   const months = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -399,10 +425,22 @@ export function buildContractWordValues(
       : unitPriceNum * totalDays;
 
   const petCount = Number(dto.petCount) || 0;
-  // Política: 1ª-2ª → depósito 100k c/u; desde la 3ª → 30k ingreso c/u + 70k aseo (único).
-  const petSurchargeRefundable = Math.min(petCount, 2) * 100000;
-  const petSurchargeNonRefundable = Math.max(0, petCount - 2) * 30000;
-  const petCleaningFee = petCount >= 3 ? 70000 : 0;
+  // Política por defecto; si el asesor envió overrides (editables en inbox), se usan.
+  const computedPetDeposit = Math.min(petCount, 2) * 100000;
+  const computedPetService = Math.max(0, petCount - 2) * 30000;
+  const computedPetCleaning = petCount >= 3 ? 70000 : 0;
+  const petSurchargeRefundable =
+    dto.petDeposit != null && Number.isFinite(Number(dto.petDeposit))
+      ? Math.max(0, Number(dto.petDeposit))
+      : computedPetDeposit;
+  const petSurchargeNonRefundable =
+    dto.petSurcharge != null && Number.isFinite(Number(dto.petSurcharge))
+      ? Math.max(0, Number(dto.petSurcharge))
+      : computedPetService;
+  const petCleaningFee =
+    dto.petCleaningFee != null && Number.isFinite(Number(dto.petCleaningFee))
+      ? Math.max(0, Number(dto.petCleaningFee))
+      : computedPetCleaning;
   const serviceStaffFee = Number(dto.serviceStaffFee) || 0;
   if (isNaN(providedTotal) || providedTotal <= 0) {
     totalPriceNum +=
@@ -507,7 +545,7 @@ export function buildContractWordValues(
     titularCedula: contractAccountCedula,
     cuentasBancarias: cuentasBancariasPlain,
     cuentasBancariasContrato: cuentasBancariasPlain,
-    contratoNumero: resolvedContractNumber,
+    contratoNumero: displayContractNumber,
     fechaEntrada: dto.checkInDate || "",
     fechaLlegada: dto.checkInDate || "",
     fecha_entrada: dto.checkInDate || "",
@@ -578,10 +616,10 @@ export function buildContractWordValues(
     dto.petDepositLabel,
     contractAdmin.petDeposit ?? "$100.000",
   );
-  const personasExtrasLabel =
+  const personasExtrasLabel = normalizeExtraPersonFeeLabel(
     (dto.extraPersonFeeLabel && String(dto.extraPersonFeeLabel).trim()) ||
-    contractAdmin.extraPersonFee ||
-    "$50.000";
+      contractAdmin.extraPersonFee,
+  );
 
   Object.assign(values, {
     aseofinal: aseoFinalLabel,
@@ -606,6 +644,6 @@ export function buildContractWordValues(
     bankAccounts: bankSnippets,
     ownerName: contractAccountHolder,
     ownerCedula: contractAccountCedula,
-    contractNumber: resolvedContractNumber,
+    contractNumber: displayContractNumber,
   };
 }

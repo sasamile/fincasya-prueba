@@ -641,6 +641,16 @@ export function ChatPanel({
   const [showEmoji, setShowEmoji] = useState(false);
   const [recording, setRecording] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
+  const [catalogOpenAuto, setCatalogOpenAuto] = useState(false);
+  const [catalogSeed, setCatalogSeed] = useState<
+    | {
+        fechaEntrada?: string;
+        fechaSalida?: string;
+        personas?: number;
+        zona?: string;
+      }
+    | undefined
+  >(undefined);
   const [showInfo, setShowInfo] = useState(false);
   const [showShared, setShowShared] = useState(false);
   const [showQuickReplyMgr, setShowQuickReplyMgr] = useState(false);
@@ -741,6 +751,8 @@ export function ChatPanel({
   function handleAttachSelect(id: string) {
     setShowAttach(false);
     if (id === 'catalogo') {
+      setCatalogOpenAuto(false);
+      setCatalogSeed(undefined);
       setShowCatalog(true);
       return;
     }
@@ -1134,6 +1146,16 @@ export function ChatPanel({
               setDraft(text);
               draftRef.current?.focus();
             }}
+            onOpenCatalog={(action) => {
+              setCatalogSeed({
+                fechaEntrada: action.fechaEntrada,
+                fechaSalida: action.fechaSalida,
+                personas: action.personas,
+                zona: action.zona,
+              });
+              setCatalogOpenAuto(true);
+              setShowCatalog(true);
+            }}
           />
           {(dictation.listening || dictation.error) && (
             <div
@@ -1442,7 +1464,16 @@ export function ChatPanel({
 
         {/* Modal de catálogo (overlay sobre el chat) */}
         {showCatalog && (
-          <CatalogModal conversationId={conv.conversationId} onClose={() => setShowCatalog(false)} />
+          <CatalogModal
+            conversationId={conv.conversationId}
+            initialAuto={catalogOpenAuto}
+            catalogSeed={catalogSeed}
+            onClose={() => {
+              setShowCatalog(false);
+              setCatalogOpenAuto(false);
+              setCatalogSeed(undefined);
+            }}
+          />
         )}
 
         {/* Administrador de respuestas rápidas */}

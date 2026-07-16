@@ -13,6 +13,7 @@ import { v } from 'convex/values';
 import { mutation, query } from './_generated/server';
 import type { Id, Doc } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
+import { autoLinkPropertyToCatalog } from './propertyWhatsAppCatalog';
 
 // ─── Coerción de literales (category/type son unions estrictos en el schema) ───
 
@@ -624,6 +625,9 @@ export const create = mutation({
     }
 
     const property = await ctx.db.get(propertyId);
+    // Sin este enlace la finca sale "sin ficha Meta" en el modal de catálogo
+    // hasta que alguien corra la reconciliación a mano.
+    await autoLinkPropertyToCatalog(ctx, property!);
     return await joinProperty(ctx, property!);
   },
 });
@@ -660,6 +664,8 @@ export const update = mutation({
     }
 
     const property = await ctx.db.get(propertyId);
+    // Cura fincas viejas sin enlace de catálogo al editarlas desde el panel.
+    await autoLinkPropertyToCatalog(ctx, property!);
     return await joinProperty(ctx, property!);
   },
 });
@@ -671,7 +677,8 @@ export const remove = mutation({
     const propertyId = ctx.db.normalizeId('properties', id);
     if (!propertyId) throw new Error('Finca no encontrada');
 
-    const [images, features, pricing, ownerInfos] = await Promise.all([
+    const [images, features, pricing, ownerInfos, catalogLinks] =
+      await Promise.all([
       ctx.db
         .query('propertyImages')
         .withIndex('by_property', (q) => q.eq('propertyId', propertyId))
@@ -688,8 +695,18 @@ export const remove = mutation({
         .query('propertyOwnerInfo')
         .withIndex('by_property', (q) => q.eq('propertyId', propertyId))
         .collect(),
+      ctx.db
+        .query('propertyWhatsAppCatalog')
+        .withIndex('by_property', (q) => q.eq('propertyId', propertyId))
+        .collect(),
     ]);
-    for (const d of [...images, ...features, ...pricing, ...ownerInfos]) {
+    for (const d of [
+      ...images,
+      ...features,
+      ...pricing,
+      ...ownerInfos,
+      ...catalogLinks,
+    ]) {
       await ctx.db.delete(d._id);
     }
     await ctx.db.delete(propertyId);

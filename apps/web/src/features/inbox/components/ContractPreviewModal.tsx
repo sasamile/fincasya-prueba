@@ -9,12 +9,14 @@
  * NO usa el HTML de la página de contratos.
  */
 import { useEffect, useRef, useState } from 'react';
-import { useAction } from 'convex/react';
+import { useAction, useMutation } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { toast } from 'sonner';
 import { Download, FileWarning, Loader2, Send, X } from 'lucide-react';
 import '@harbour-enterprises/superdoc/style.css';
 import type { ConversationRow } from '@/features/inbox/types';
+import { buildInboxContractUpsertArgs } from '@/features/inbox/utils/persist-inbox-contract';
+import { toStoredCopLabel } from '@/features/admin/components/contracts/cop-money-input';
 
 export type PreviewDraft = {
   fincaId: string;
@@ -25,9 +27,14 @@ export type PreviewDraft = {
   checkInTime: string;
   checkOutTime: string;
   guests: string;
+  extraGuests?: string;
   petCount: string;
+  petDeposit?: string;
+  petServiceFee?: string;
+  petCleaningFee?: string;
   cleaningFee: string;
   refundableDeposit: string;
+  extraPersonFee?: string;
   manillaCondominio: string;
   otherCharges: string;
   clientName: string;
@@ -53,14 +60,19 @@ export function ContractPreviewModal({
   draft,
   selectedBankIds,
   conversation,
+  propertyTitle,
+  propertyLocation,
   onClose,
 }: {
   draft: PreviewDraft;
   selectedBankIds: string[];
   conversation: ConversationRow | null;
+  propertyTitle?: string;
+  propertyLocation?: string;
   onClose: () => void;
 }) {
   const sendDocument = useAction(api.advisorDocuments.sendDocumentToConversation);
+  const upsertContract = useMutation(api.contracts.upsert);
   const superdocRef = useRef<SuperDocInstance | null>(null);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -68,6 +80,24 @@ export function ContractPreviewModal({
   const [busy, setBusy] = useState<null | 'send' | 'pdf' | 'docx'>(null);
   const [baseName, setBaseName] = useState('contrato');
 
+  const persistContract = async (
+    estado: 'generado' | 'enviado',
+    extra?: { pdfUrl?: string; pdfFilename?: string },
+  ) => {
+    try {
+      await upsertContract(
+        buildInboxContractUpsertArgs(draft, {
+          estado,
+          propertyTitle,
+          propertyLocation,
+          pdfUrl: extra?.pdfUrl,
+          pdfFilename: extra?.pdfFilename,
+        }),
+      );
+    } catch (err) {
+      console.error('[inbox] no se pudo guardar el contrato en la lista', err);
+    }
+  };
   // 1) Genera el .docx desde la plantilla y 2) lo abre en el editor Word.
   useEffect(() => {
     let cancelled = false;
@@ -114,10 +144,22 @@ export function ContractPreviewModal({
               checkOutTime: draft.checkOutTime,
               guests: Number(draft.guests) || 1,
               petCount: Number(draft.petCount) || 0,
+              petDeposit: Number(draft.petDeposit) || 0,
+              petSurcharge: Number(draft.petServiceFee) || 0,
+              petCleaningFee: Number(draft.petCleaningFee) || 0,
               cleaningFee: Number(draft.cleaningFee) || 0,
               refundableDeposit: Number(draft.refundableDeposit) || 0,
               manillaCondominio: Number(draft.manillaCondominio) || 0,
               otherCharges: Number(draft.otherCharges) || 0,
+              extraPersonFeeLabel: toStoredCopLabel(
+                (() => {
+                  const digits = String(draft.extraPersonFee || '').replace(
+                    /\D/g,
+                    '',
+                  );
+                  return !digits || digits === '50000' ? '120000' : digits;
+                })(),
+              ),
               bankAccountIds: selectedBankIds,
             }),
           },
@@ -134,6 +176,8 @@ export function ContractPreviewModal({
 
         const filename = data.filename || 'contrato.docx';
         setBaseName(filename.replace(/\.docx$/i, ''));
+        // Registra en Admin → Contratos (aunque sea prueba o corrección).
+        void persistContract('generado');
         const bytes = Uint8Array.from(atob(data.fileBase64), (c) =>
           c.charCodeAt(0),
         );
@@ -289,6 +333,10 @@ export function ContractPreviewModal({
         caption: `Contrato ${draft.contractCode || ''}`.trim(),
       });
       if (!result.ok) throw new Error(result.error || 'No se pudo enviar.');
+      await persistContract('enviado', {
+        pdfUrl: upData.url,
+        pdfFilename: filename,
+      });
       toast.success(
         `Contrato enviado a ${conversation.name || conversation.phone}.`,
       );

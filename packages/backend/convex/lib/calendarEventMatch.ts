@@ -138,6 +138,37 @@ export function parseClientNameFromTitle(summary: string): string | null {
 }
 
 /**
+ * Fincas que un evento SIN match confiable podría estar ocupando. Se usa para
+ * la salvaguarda del bot: mientras el evento espera revisión, sus candidatas no
+ * se ofrecen en esas fechas. Une:
+ *  - las alternativas del empate de nombre (varias fincas con el mismo token),
+ *  - el match de confianza BAJA (probable, pero sin confirmar),
+ *  - todas las fincas cuyo MUNICIPIO aparece en el título ("TOCAIMA OCUPADA"
+ *    → las 3 fincas de Tocaima: no sabemos cuál es, así que se retienen todas).
+ */
+export function candidatePropertiesForEvent(
+  summary: string,
+  props: PropertyForMatch[],
+  stop: Set<string>,
+): string[] {
+  const suggestion = suggestPropertyForEvent(summary, props, stop);
+  const out = new Set<string>(suggestion.alternatives);
+  if (suggestion.propertyId && suggestion.confidence === 'baja') {
+    out.add(suggestion.propertyId);
+  }
+  const whole = norm(summary);
+  for (const p of props) {
+    for (const w of norm(p.location ?? '').split(' ')) {
+      if (w.length >= 4 && whole.includes(w)) {
+        out.add(p.id);
+        break;
+      }
+    }
+  }
+  return [...out];
+}
+
+/**
  * Sugiere la finca de un evento. Devuelve confianza y alternativas; el operador
  * siempre puede corregir en la pantalla de revisión.
  */

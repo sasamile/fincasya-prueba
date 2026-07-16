@@ -626,12 +626,23 @@ export default defineSchema(
       petDeposit: v.optional(v.number()),
       petSurcharge: v.optional(v.number()),
       petCount: v.optional(v.number()),
+      /**
+       * Abono que el cliente debe pagar al abrir el link (no siempre es 50%).
+       * Si falta, el portal usa totalValue/2 como fallback.
+       */
+      advancePaymentAmount: v.optional(v.number()),
+      /** Link Bold generado al crear la venta (checkout.bold.co/...). */
+      boldPaymentUrl: v.optional(v.string()),
+      boldPaymentLinkId: v.optional(v.string()),
+      /** Monto cobrado en Bold (puede incluir recargo %). */
+      boldPaymentAmount: v.optional(v.number()),
+      boldSurchargePercent: v.optional(v.number()),
       selectedBankAccountIds: v.array(v.string()),
       notes: v.optional(v.string()),
       clientStep: v.number(),
       clientPortalUiStep: v.optional(v.number()),
       clientDraftPhase: v.optional(
-        v.union(v.literal('datos'), v.literal('pago')),
+        v.union(v.literal('datos'), v.literal('preview'), v.literal('pago')),
       ),
       clientDraftPaymentAmount: v.optional(v.number()),
       status: v.union(
@@ -645,6 +656,8 @@ export default defineSchema(
           cedula: v.string(),
           email: v.string(),
           telefono: v.string(),
+          /** Segundo número por si no contestan el principal. */
+          telefonoRespaldo: v.optional(v.string()),
           direccion: v.string(),
           ciudad: v.optional(v.string()),
           fechaNacimiento: v.optional(v.string()),
@@ -671,6 +684,24 @@ export default defineSchema(
           isCedula: v.optional(v.boolean()),
           number: v.optional(v.string()),
           name: v.optional(v.string()),
+          confidence: v.optional(v.number()),
+          note: v.optional(v.string()),
+          checkedAt: v.number(),
+        }),
+      ),
+      /**
+       * Veredicto de lib/receiptAi sobre el comprobante de pago.
+       * Sin allow=true atado a paymentProofUrl, submitClientData rechaza.
+       */
+      paymentReceiptCheck: v.optional(
+        v.object({
+          photoUrl: v.string(),
+          allow: v.boolean(),
+          needsReview: v.boolean(),
+          reason: v.optional(v.string()),
+          isReceipt: v.optional(v.boolean()),
+          amount: v.optional(v.number()),
+          bankName: v.optional(v.string()),
           confidence: v.optional(v.number()),
           note: v.optional(v.string()),
           checkedAt: v.number(),
@@ -833,6 +864,21 @@ export default defineSchema(
       googleEventId: v.string(),
       summary: v.optional(v.string()),
       createdAt: v.number(),
+    }).index('by_google_event', ['googleEventId']),
+
+    // Eventos de Google SIN finca confiable (título ambiguo tipo "TOCAIMA
+    // OCUPADA"): quedan esperando la pantalla de revisión, pero mientras tanto
+    // el bot NO ofrece sus fincas candidatas en las fechas del evento — mejor
+    // no ofrecer que ofrecer una ocupada. Los refresca el cron de auto-import
+    // y confirmarlos/descartarlos en la revisión los saca de aquí.
+    googleCalendarPendingEvents: defineTable({
+      googleEventId: v.string(),
+      summary: v.string(),
+      startMs: v.number(),
+      endMs: v.number(),
+      /** Fincas que PODRÍAN ser (empate de nombre o municipio en el título). */
+      candidatePropertyIds: v.array(v.string()),
+      updatedAt: v.number(),
     }).index('by_google_event', ['googleEventId']),
 
 

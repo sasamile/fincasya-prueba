@@ -2,6 +2,8 @@ import { test, expect, describe } from 'bun:test';
 import {
   decideCedulaVerdict,
   normalizeCedulaNumber,
+  namesLikelyMatch,
+  verdictFromInspectError,
   type CedulaAiCheck,
 } from './cedulaAi';
 
@@ -34,6 +36,20 @@ describe('normalizeCedulaNumber', () => {
   });
 });
 
+describe('namesLikelyMatch', () => {
+  test('mismo nombre con tildes', () => {
+    expect(namesLikelyMatch('José Pérez', 'JOSE PEREZ')).toBe(true);
+  });
+
+  test('nombres claramente distintos', () => {
+    expect(namesLikelyMatch('Maria Lopez', 'JUAN PEREZ')).toBe(false);
+  });
+
+  test('sin datos', () => {
+    expect(namesLikelyMatch('', 'JUAN')).toBeUndefined();
+  });
+});
+
 describe('decideCedulaVerdict — bloquea', () => {
   test('cuando la IA está segura de que no es un documento', () => {
     const v = decideCedulaVerdict(
@@ -45,8 +61,6 @@ describe('decideCedulaVerdict — bloquea', () => {
   });
 
   test('un comprobante de pago (probabilidad 0) NO pasa', () => {
-    // Regresión: con el diseño anterior este caso real se colaba, porque
-    // "confianza 0" se leía como "la IA dudó" en vez de "seguro que no".
     const v = decideCedulaVerdict(
       check({ cedulaProbability: 0, number: undefined, name: undefined }),
       '1020304050',
@@ -68,53 +82,87 @@ describe('decideCedulaVerdict — bloquea', () => {
     expect(v.allow).toBe(true);
     expect(v.reason).toBeUndefined();
   });
-});
 
-describe('decideCedulaVerdict — deja pasar (no frenar ventas reales)', () => {
-  test('documento válido y número coincidente pasa sin revisión', () => {
-    const v = decideCedulaVerdict(check(), '1020304050');
-    expect(v.allow).toBe(true);
-    expect(v.needsReview).toBe(false);
-  });
-
-  test('caso ambiguo (0.5): pasa pero marcado', () => {
-    const v = decideCedulaVerdict(check({ cedulaProbability: 0.5 }), '1020304050');
-    expect(v.allow).toBe(true);
-    expect(v.needsReview).toBe(true);
-  });
-
-  test('es documento pero no se pudo leer el número: pasa marcado', () => {
-    const v = decideCedulaVerdict(check({ number: undefined }), '1020304050');
-    expect(v.allow).toBe(true);
-    expect(v.needsReview).toBe(true);
-  });
-
-  test('foto borrosa reconocida como documento: pasa marcado', () => {
+  test('caso ambiguo (0.5) NO pasa', () => {
     const v = decideCedulaVerdict(
-      check({ cedulaProbability: 0.6, number: undefined, note: 'borrosa' }),
+      check({ cedulaProbability: 0.5 }),
       '1020304050',
     );
-    expect(v.allow).toBe(true);
-    expect(v.needsReview).toBe(true);
+    expect(v.allow).toBe(false);
+    expect(v.reason).toBe('unreadable');
   });
 
-  test('el cliente escribió mal su cédula pero el documento es válido: pasa marcado', () => {
-    // No bloquea por typedCedula ilegible; solo por contradicción real.
-    const v = decideCedulaVerdict(check(), 'abc');
-    expect(v.allow).toBe(true);
+  test('documento sin número legible NO pasa', () => {
+    const v = decideCedulaVerdict(
+      check({ number: undefined }),
+      '1020304050',
+    );
+    expect(v.allow).toBe(false);
+    expect(v.reason).toBe('unreadable');
+  });
+
+  test('nombre claramente distinto NO pasa', () => {
+    const v = decideCedulaVerdict(check(), {
+      typedCedula: '1020304050',
+      typedName: 'Maria Fernanda Lopez',
+    });
+    expect(v.allow).toBe(false);
+    expect(v.reason).toBe('name_mismatch');
   });
 
   test('justo en el umbral de bloqueo (0.2) todavía bloquea', () => {
-    const v = decideCedulaVerdict(check({ cedulaProbability: 0.2 }), '1020304050');
+    const v = decideCedulaVerdict(
+      check({ cedulaProbability: 0.2 }),
+      '1020304050',
+    );
     expect(v.allow).toBe(false);
   });
 
-  test('apenas por encima del umbral (0.21) pasa marcado', () => {
+  test('apenas por encima del umbral débil (0.21) también bloquea (exige ≥0.8)', () => {
     const v = decideCedulaVerdict(
       check({ cedulaProbability: 0.21 }),
       '1020304050',
     );
+    expect(v.allow).toBe(false);
+    expect(v.reason).toBe('unreadable');
+  });
+});
+
+describe('decideCedulaVerdict — deja pasar', () => {
+  test('documento válido y número coincidente pasa', () => {
+    const v = decideCedulaVerdict(check(), {
+      typedCedula: '1020304050',
+      typedName: 'Juan Perez',
+    });
+    expect(v.allow).toBe(true);
+    expect(v.needsReview).toBe(false);
+  });
+
+  test('documento claro sin cédula tipada aún: pasa (el portal exige tiparla)', () => {
+    const v = decideCedulaVerdict(check(), '');
     expect(v.allow).toBe(true);
     expect(v.needsReview).toBe(true);
+  });
+
+  test('foto clara reconocida como documento con número: pasa', () => {
+    const v = decideCedulaVerdict(
+      check({ cedulaProbability: 0.9, note: 'ligera sombra' }),
+      '1020304050',
+    );
+    expect(v.allow).toBe(true);
+  });
+});
+
+describe('verdictFromInspectError', () => {
+  test('PDF bloquea (antes dejaba pasar y colaban listas de invitados)', () => {
+    const v = verdictFromInspectError('pdf_not_supported');
+    expect(v.allow).toBe(false);
+    expect(v.reason).toBe('pdf_not_allowed');
+  });
+
+  test('IA caída NO deja pasar (hay que poder validar)', () => {
+    const v = verdictFromInspectError('Vision 500: boom');
+    expect(v.allow).toBe(false);
+    expect(v.reason).toBe('ai_unavailable');
   });
 });

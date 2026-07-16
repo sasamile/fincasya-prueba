@@ -1,9 +1,17 @@
 import { v } from "convex/values";
-import { action, internalAction, internalQuery, mutation, query } from "./_generated/server";
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
   buildStopWords,
+  candidatePropertiesForEvent,
   parseClientNameFromTitle,
   suggestPropertyForEvent,
 } from "./lib/calendarEventMatch";
@@ -576,6 +584,12 @@ export const importEventsAsBlocks = mutation({
         reason: `Google Calendar${auto ? " (auto)" : ""}: ${item.summary.slice(0, 120)}`,
         googleEventId: item.eventId,
       });
+      // Ya tiene finca confirmada: levanta la retención de candidatas del bot.
+      const pending = await ctx.db
+        .query("googleCalendarPendingEvents")
+        .withIndex("by_google_event", (q) => q.eq("googleEventId", item.eventId))
+        .first();
+      if (pending) await ctx.db.delete(pending._id);
       creados++;
     }
     return { creados, omitidos };
@@ -630,19 +644,43 @@ export const autoImportHighConfidence = internalAction({
       fechaSalida: number;
       summary: string;
     }> = [];
+    const pending: Array<{
+      googleEventId: string;
+      summary: string;
+      startMs: number;
+      endMs: number;
+      candidatePropertyIds: string[];
+    }> = [];
     for (const e of byId.values()) {
       if (imported.has(e.id) || skipped.has(e.id)) continue;
       const s = suggestPropertyForEvent(e.summary, props, stop);
-      if (!s.propertyId) continue;
-      if (s.confidence !== "alta" && s.confidence !== "media") continue;
-      items.push({
-        eventId: e.id,
-        propertyId: s.propertyId as Id<"properties">,
-        fechaEntrada: e.startMs,
-        fechaSalida: e.endMs,
-        summary: e.summary,
-      });
+      if (s.propertyId && (s.confidence === "alta" || s.confidence === "media")) {
+        items.push({
+          eventId: e.id,
+          propertyId: s.propertyId as Id<"properties">,
+          fechaEntrada: e.startMs,
+          fechaSalida: e.endMs,
+          summary: e.summary,
+        });
+        continue;
+      }
+      // Sin match confiable: queda para la pantalla de revisión, pero sus
+      // fincas CANDIDATAS se retienen (el bot no las ofrece esas fechas).
+      const candidates = candidatePropertiesForEvent(e.summary, props, stop);
+      if (candidates.length > 0) {
+        pending.push({
+          googleEventId: e.id,
+          summary: e.summary,
+          startMs: e.startMs,
+          // Igual que los bloqueos: mínimo 1 día aunque el evento sea corto.
+          endMs: Math.max(e.endMs, e.startMs + DAY),
+          candidatePropertyIds: candidates,
+        });
+      }
     }
+    await ctx.runMutation(internal.googleCalendar.replacePendingEvents, {
+      items: pending,
+    });
     if (items.length === 0) {
       return { creados: 0, omitidos: 0, candidatos: 0 };
     }
@@ -657,6 +695,35 @@ export const autoImportHighConfidence = internalAction({
       );
     }
     return { ...res, candidatos: items.length };
+  },
+});
+
+/**
+ * Reemplaza el snapshot de eventos pendientes de revisión (lo llama el
+ * auto-import cada hora con la ventana completa de ~6 meses). Reconstrucción
+ * total: un evento que se confirmó, se descartó o desapareció del calendario
+ * sale solo de la tabla en el siguiente ciclo.
+ */
+export const replacePendingEvents = internalMutation({
+  args: {
+    items: v.array(
+      v.object({
+        googleEventId: v.string(),
+        summary: v.string(),
+        startMs: v.number(),
+        endMs: v.number(),
+        candidatePropertyIds: v.array(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, { items }) => {
+    const existing = await ctx.db.query("googleCalendarPendingEvents").collect();
+    for (const row of existing) await ctx.db.delete(row._id);
+    const now = Date.now();
+    for (const it of items) {
+      await ctx.db.insert("googleCalendarPendingEvents", { ...it, updatedAt: now });
+    }
+    return { pendientes: items.length };
   },
 });
 

@@ -259,8 +259,11 @@ export default function App() {
    * (requiere mensajes/plantillas habilitados en Automatizaciones). */
   async function openChatByPhone(phone: string) {
     const d = phone.replace(/\D/g, '');
-    if (d.length < 7) {
-      toast.error('Número inválido.');
+    if (d.length < 10) {
+      toast.error('Número inválido para WhatsApp', {
+        description:
+          'Se necesitan al menos 10 dígitos (celular colombiano). Revisa el número en la reserva.',
+      });
       return;
     }
     const match = conversations.find((c) => {
@@ -275,19 +278,48 @@ export default function App() {
     try {
       const settings = await getAutomationSettings();
       if (!settings.scheduledMessagingEnabled) {
-        toast.error('No hay un chat con ese número', {
-          description:
-            'Para iniciar uno con plantilla, activa Automatizaciones cuando las plantillas estén listas.',
-          action: {
-            label: 'Automatizaciones',
-            onClick: () => {
-              window.open('/admin/automatizaciones', '_blank', 'noopener,noreferrer');
-            },
-          },
-        });
+        toast.custom(
+          (id) => (
+            <div className="flex w-[min(100vw-2rem,22rem)] flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-md">
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium leading-snug">
+                  No hay un chat con ese número
+                </p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Para iniciar uno con plantilla, activa Automatizaciones cuando
+                  las plantillas estén listas.
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className="h-8 rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
+                  onClick={() => toast.dismiss(id)}
+                >
+                  Cerrar
+                </button>
+                <button
+                  type="button"
+                  className="h-8 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  onClick={() => {
+                    window.open(
+                      '/admin/automatizaciones',
+                      '_blank',
+                      'noopener,noreferrer',
+                    );
+                    toast.dismiss(id);
+                  }}
+                >
+                  Automatizaciones
+                </button>
+              </div>
+            </div>
+          ),
+          { duration: 8_000 },
+        );
         return;
       }
-      setPendingTemplatePhone(phone);
+      setPendingTemplatePhone(d.length === 10 ? `57${d}` : d);
     } catch {
       toast.error('No se pudo verificar Automatizaciones. Intenta de nuevo.');
     }

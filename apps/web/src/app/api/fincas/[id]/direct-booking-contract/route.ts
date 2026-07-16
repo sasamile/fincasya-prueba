@@ -19,6 +19,7 @@ function sanitize(name: string): string {
 
 /** Genera el número de contrato si no vino (formato DIR-...). */
 function resolveContractNumber(dto: ContractDto, finca: ContractFinca): string {
+  if (dto.draft) return "BORRADOR";
   const given = String(dto.contractNumber ?? "").trim();
   if (given) return given;
   const base = sanitize(finca.title || "FINCA").toUpperCase();

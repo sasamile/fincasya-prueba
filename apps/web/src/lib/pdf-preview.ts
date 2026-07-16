@@ -1,4 +1,8 @@
 // @ts-nocheck — port de FincasYaWeb; tipos de pdfjs-dist v6 difieren del original v3.
+//
+// pdfjs v6 exige getDocument({ url }): a diferencia de v3 (el que usa FincasYaWeb),
+// ya no acepta la URL como string suelto — lanza "getDocument - expected either
+// `data`, `range`, or `url` parameter". No revertir a getDocument(url) al portar.
 
 let pdfJsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
 
@@ -9,10 +13,10 @@ async function loadPdfJs() {
 
   if (!pdfJsPromise) {
     pdfJsPromise = import("pdfjs-dist").then((pdfjs) => {
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs",
-        import.meta.url,
-      ).toString();
+      // Servido desde public/ por scripts/copy-pdf-worker.mjs (postinstall):
+      // Turbopack no emite el worker si se referencia con new URL(...) sobre un
+      // specifier de paquete — quedaba en 404 y pdfjs colgaba sin lanzar error.
+      pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       return pdfjs;
     });
   }
@@ -39,7 +43,7 @@ export async function generatePdfPreview(
   const fileUrl = URL.createObjectURL(file);
 
   try {
-    const loadingTask = getDocument(fileUrl);
+    const loadingTask = getDocument({ url: fileUrl });
     const pdf = await loadingTask.promise;
     const pageCount = pdf.numPages;
     const page = await pdf.getPage(1);
@@ -72,7 +76,7 @@ export async function generatePdfPreviewFromUrl(
     fetchUrl = `/api/cors-proxy?url=${encodeURIComponent(url)}`;
   }
 
-  const loadingTask = getDocument(fetchUrl);
+  const loadingTask = getDocument({ url: fetchUrl });
   const pdf = await loadingTask.promise;
   const pageCount = pdf.numPages;
   const page = await pdf.getPage(1);
@@ -103,7 +107,7 @@ export async function renderPdfPagesFitWidth(
     fetchUrl = `/api/cors-proxy?url=${encodeURIComponent(url)}`;
   }
 
-  const loadingTask = getDocument(fetchUrl);
+  const loadingTask = getDocument({ url: fetchUrl });
   const pdf = await loadingTask.promise;
   const safeWidth = Math.max(maxWidth, 280);
   const pages: string[] = [];

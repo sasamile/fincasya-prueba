@@ -127,6 +127,14 @@ function ownerPhoneOf(b: Booking) {
   return b.property?.propietarioTelefono?.trim() || '';
 }
 
+/** Celular usable en WhatsApp (misma regla que toWhatsAppPhone: ≥10 dígitos). */
+function chatPhoneOf(b: Booking, audience: 'guest' | 'owner'): string | null {
+  const raw =
+    audience === 'guest' ? b.celular?.trim() || '' : ownerPhoneOf(b);
+  if (!raw) return null;
+  return toWhatsAppPhone(raw);
+}
+
 function abonoPropietarioOf(b: Booking) {
   const op = b.ownerPayout ?? {};
   const fromList = (op.abonos ?? []).reduce(
@@ -175,19 +183,27 @@ export function CheckinTool({
       .sort((a, b) => a.fechaEntrada - b.fechaEntrada);
   }, [data]);
 
-  const pendingGuests = useMemo(
-    () => upcoming.filter((b) => !b.checkinCompleted).slice(0, 40),
-    [upcoming],
-  );
+  const pendingGuests = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayMs = todayStart.getTime();
+    return upcoming
+      .filter((b) => !b.checkinCompleted && b.fechaEntrada >= todayMs)
+      .slice(0, 40);
+  }, [upcoming]);
 
   /** Propietarios a notificar: próxima llegada y aún sin marcar envío del link. */
-  const pendingOwners = useMemo(
-    () =>
-      upcoming
-        .filter((b) => ownerPhoneOf(b) && !b.ownerPortalSentAt)
-        .slice(0, 40),
-    [upcoming],
-  );
+  const pendingOwners = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayMs = todayStart.getTime();
+    return upcoming
+      .filter(
+        (b) =>
+          ownerPhoneOf(b) && !b.ownerPortalSentAt && b.fechaEntrada >= todayMs,
+      )
+      .slice(0, 40);
+  }, [upcoming]);
 
   const list = audience === 'guest' ? pendingGuests : pendingOwners;
 
@@ -397,11 +413,25 @@ export function CheckinTool({
 
   function selectBooking(b: Booking) {
     setSelectedId(b._id);
-    if (audience === 'guest' && b.celular) onOpenChat?.(b.celular);
-    if (audience === 'owner') {
-      const phone = ownerPhoneOf(b);
-      if (phone) onOpenChat?.(phone);
+    const waPhone = chatPhoneOf(b, audience);
+    if (waPhone) {
+      // Abrir chat con dígitos normalizados (57…), no el string crudo de la reserva.
+      void onOpenChat?.(waPhone);
+      return;
     }
+    const raw =
+      audience === 'guest' ? b.celular?.trim() || '' : ownerPhoneOf(b);
+    if (!raw) {
+      toast.message(
+        audience === 'guest'
+          ? 'Esta reserva no tiene celular. Puedes copiar el link o editar el número en Reservas.'
+          : 'Esta finca no tiene teléfono de propietario.',
+      );
+      return;
+    }
+    toast.error('Número inválido para WhatsApp', {
+      description: `«${raw}» no tiene al menos 10 dígitos. Corrígelo en la reserva para poder abrir el chat.`,
+    });
   }
 
   const requiresGuestList =
@@ -836,11 +866,11 @@ export function CheckinTool({
             {list.map((b) => {
               const d = dayLabel(b.fechaEntrada);
               const isSelected = selectedBooking?._id === b._id;
+              const waPhone = chatPhoneOf(b, audience);
               const matchesChat =
                 conversation?.phone &&
-                (audience === 'guest'
-                  ? b.celular && phonesMatch(conversation.phone, b.celular)
-                  : phonesMatch(conversation.phone, ownerPhoneOf(b)));
+                waPhone &&
+                phonesMatch(conversation.phone, waPhone);
               const title =
                 audience === 'guest'
                   ? b.nombreCompleto || 'Sin nombre'
@@ -885,12 +915,24 @@ export function CheckinTool({
                           · este chat
                         </span>
                       ) : null}
+                      {!waPhone ? (
+                        <span className="ml-1 text-[10px] font-bold text-orange-500">
+                          · sin celular
+                        </span>
+                      ) : null}
                     </p>
                     <p className="truncate text-[11px] text-muted-foreground">
                       {subtitle}
                     </p>
                   </div>
-                  <MessageCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <MessageCircle
+                    className={cn(
+                      'h-4 w-4 shrink-0',
+                      waPhone
+                        ? 'text-muted-foreground'
+                        : 'text-orange-500/70',
+                    )}
+                  />
                 </button>
               );
             })}

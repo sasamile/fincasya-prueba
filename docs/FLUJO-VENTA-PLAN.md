@@ -33,16 +33,12 @@ El flujo descrito **ya existe casi completo** en `saleLinks` (`packages/backend/
 
 ## Fase 1 — Reordenar: previsualización del contrato antes de pagar
 
+**Estado: implementado (2026-07-16).**
+
+Flujo portal: `datos` → `preview` (borrador PDF) → `pago`.
+`POST /api/sale-links/{token}/generate-contract` con `{ mode: "preview" }` no exige pago ni persiste; `mode: "final"` sigue igual post-validación.
+
 **Objetivo:** el cliente lee el contrato completo, en solo lectura y sin numeración, y solo después decide pagar.
-
-1. `apps/web/src/app/api/sale-links/[token]/generate-contract/route.ts` — separar en dos modos:
-   - `preview`: no exige `paymentValidated`, solo `clientData.nombre`. Renderiza el PDF con `contractNumber` vacío o marca de agua "BORRADOR — SIN VALOR CONTRACTUAL". **No** sube a S3, **no** llama `attachContract`. Devuelve el PDF en memoria.
-   - `final`: comportamiento actual (exige `paymentValidated`, numera, sube a S3, `attachContract`).
-2. `lib/server/contract-values.ts` (`buildContractWordValues`) — aceptar `draft: boolean` para omitir numeración.
-3. Nuevo paso en el portal: `features/ventas/components/step-contrato-preview.tsx`, visor PDF de solo lectura + "Continuar con el proceso".
-4. `saleLinks.clientStep` / `clientDraftPhase` (`schema.ts`) — insertar la fase `preview` entre `datos` y `pago`. Revisar todos los saltos de step en `venta-page-content.tsx`.
-
-**Riesgo:** el orden de steps está cableado en varios sitios. Auditar `clientStep` de punta a punta antes de tocar.
 
 ## Fase 2 — Estado "pre-reserva" y alertas internas
 

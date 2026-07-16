@@ -4,23 +4,41 @@ import { getConvexHttpClient, api } from "@/lib/convex-server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+type ClientSnapshot = {
+  nombre?: string;
+  cedula?: string;
+  email?: string;
+  telefono?: string;
+  ciudad?: string;
+  direccion?: string;
+};
+
+type Body = {
+  mode?: "preview" | "final";
+  client?: ClientSnapshot;
+};
+
 /**
  * POST /api/sale-links/{token}/generate-contract
  *
- * Genera el contrato del link de venta desde la plantilla QUINTA OLAYA y lo
- * adjunta al link para que el cliente lo descargue en su portal. Corre del lado
- * del servidor (confiable, sin depender del navegador del asesor): reutiliza los
- * endpoints ya existentes (direct-booking-contract → PDF, admin/upload → S3) y
- * la mutation saleLinks.attachContract.
- *
- * Idempotente: si el link ya tiene contrato, lo devuelve sin regenerar.
+ * - mode=final (default): exige pago validado, sube a S3 y adjunta al link.
+ * - mode=preview: borrador solo lectura (sin numeración), no persiste en S3.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
-  const origin = new URL(_request.url).origin;
+  const origin = new URL(request.url).origin;
+
+  let body: Body = {};
+  try {
+    body = (await request.json()) as Body;
+  } catch {
+    body = {};
+  }
+  const mode = body.mode === "preview" ? "preview" : "final";
+  const isPreview = mode === "preview";
 
   try {
     const convex = getConvexHttpClient();
@@ -29,19 +47,29 @@ export async function POST(
     if (!link) {
       return NextResponse.json({ error: "Link no encontrado." }, { status: 404 });
     }
-    if (link.contractUrl) {
+
+    if (!isPreview && link.contractUrl) {
       return NextResponse.json({ ok: true, contractUrl: link.contractUrl });
     }
-    if (!link.paymentValidated) {
+    if (!isPreview && !link.paymentValidated) {
       return NextResponse.json(
         { error: "El pago aún no está validado." },
         { status: 409 },
       );
     }
-    const client = link.clientData;
-    if (!client?.nombre) {
+
+    const stored = link.clientData;
+    const client = {
+      nombre: body.client?.nombre?.trim() || stored?.nombre || "",
+      cedula: body.client?.cedula?.trim() || stored?.cedula || "",
+      email: body.client?.email?.trim() || stored?.email || "",
+      telefono: body.client?.telefono?.trim() || stored?.telefono || "",
+      ciudad: body.client?.ciudad?.trim() || stored?.ciudad || "",
+      direccion: body.client?.direccion?.trim() || stored?.direccion || "",
+    };
+    if (!client.nombre) {
       return NextResponse.json(
-        { error: "El cliente aún no ha enviado sus datos." },
+        { error: "Completa tus datos antes de ver el contrato." },
         { status: 409 },
       );
     }
@@ -56,7 +84,6 @@ export async function POST(
         day: "2-digit",
       }).format(new Date(ms));
 
-    // 1) Generar el PDF desde la plantilla (endpoint existente).
     const genRes = await fetch(
       `${origin}/api/fincas/${link.property?.id ?? ""}/direct-booking-contract`,
       {
@@ -64,15 +91,16 @@ export async function POST(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           propertyId: link.property?.id,
-          contractNumber: link.contractCode ?? "",
+          draft: isPreview,
+          contractNumber: isPreview ? "" : (link.contractCode ?? ""),
           nightlyPrice: String(nightlyPrice),
           totalPrice: String(link.rentalValue || nightlyPrice * nights),
           clientName: client.nombre,
-          clientId: client.cedula ?? "",
-          clientEmail: client.email ?? "",
-          clientPhone: client.telefono ?? "",
-          clientCity: client.ciudad ?? "",
-          clientAddress: client.direccion ?? "",
+          clientId: client.cedula,
+          clientEmail: client.email,
+          clientPhone: client.telefono,
+          clientCity: client.ciudad,
+          clientAddress: client.direccion,
           checkInDate: ymd(link.checkIn),
           checkOutDate: ymd(link.checkOut),
           checkInTime: link.checkInTime ?? "",
@@ -100,7 +128,18 @@ export async function POST(
       );
     }
 
-    // 2) Subir el PDF a S3 (endpoint existente).
+    if (isPreview) {
+      return NextResponse.json({
+        ok: true,
+        mode: "preview",
+        fileBase64: genData.fileBase64,
+        filename:
+          genData.filename ||
+          `Borrador_Contrato_${link.contractCode ?? "FincasYa"}.pdf`,
+        mimeType: genData.mimeType || "application/pdf",
+      });
+    }
+
     const bytes = Buffer.from(genData.fileBase64, "base64");
     const mime = genData.mimeType || "application/pdf";
     const filename =
@@ -123,7 +162,6 @@ export async function POST(
       );
     }
 
-    // 3) Adjuntar al link (visible para el cliente).
     const attach = (await convex.mutation(api.saleLinks.attachContract, {
       token,
       contractUrl: upData.url,
@@ -135,7 +173,7 @@ export async function POST(
       );
     }
 
-    return NextResponse.json({ ok: true, contractUrl: upData.url });
+    return NextResponse.json({ ok: true, mode: "final", contractUrl: upData.url });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Error generando el contrato.";

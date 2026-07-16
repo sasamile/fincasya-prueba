@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import {
   buildStopWords,
+  candidatePropertiesForEvent,
   parseClientNameFromTitle,
   suggestPropertyForEvent,
   type PropertyForMatch,
@@ -92,4 +93,28 @@ test('nombre del cliente: títulos sin cliente → null (lo escribe el operador)
   expect(parseClientNameFromTitle('CHIMBI OCUPADA')).toBeNull();
   expect(parseClientNameFromTitle('TOCAIMA OCUPADA')).toBeNull();
   expect(parseClientNameFromTitle('Cita laboratorios 8 AM')).toBeNull();
+});
+
+// ── candidatePropertiesForEvent (retención para el bot) ──
+
+const candidates = (s: string) => candidatePropertiesForEvent(s, PROPS, stop);
+
+test('municipio solo ("TOCAIMA OCUPADA") → retiene TODAS las fincas de ese municipio', () => {
+  expect(candidates('TOCAIMA OCUPADA')).toEqual(['p_rojas']);
+});
+
+test('empate de nombre → retiene todas las alternativas', () => {
+  const c = candidates('2653 NICOL ANDREA TRIVIÑO, PREMIUM DOS NOCHES');
+  expect(c).toContain('p_prem1');
+  expect(c).toContain('p_prem2');
+});
+
+test('match de confianza baja (apellido ≈ finca) → se retiene por si acaso', () => {
+  const c = candidates('-A0542 CAROL VANESA ROJAS, TOCAIMA UNA NOCHE');
+  expect(c).toContain('p_rojas');
+});
+
+test('título sin pista utilizable → sin candidatas (no se puede retener nada)', () => {
+  expect(candidates('2583 JEYSON HERNANDEZ, LA DIANA 02 NOCHES')).toEqual([]);
+  expect(candidates('Cita laboratorios 8 AM')).toEqual([]);
 });

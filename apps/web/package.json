@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/copy-pdf-worker.mjs",
+    "copy-pdf-worker": "node scripts/copy-pdf-worker.mjs",
     "dev": "next dev -p 3789",
     "build": "next build",
     "start": "next start -p 3789",
@@ -53,6 +55,8 @@
     "embla-carousel-react": "^8.6.0",
     "exceljs": "^4.4.0",
     "framer-motion": "^12.42.2",
+    "heic-convert": "^2.1.0",
+    "heic-to": "^1.5.2",
     "html-to-docx": "^1.8.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",

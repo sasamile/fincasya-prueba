@@ -16,6 +16,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { randomUUID } from 'crypto';
+import {
+  convertHeicBufferToJpeg,
+  looksLikeHeic,
+} from '@/lib/heic-server';
 
 export const runtime = 'nodejs';
 /** Videos de fincas pueden pesar bastante; margen amplio. */
@@ -50,7 +54,7 @@ const FOLDERS: Record<string, { accept: (type: string, ext: string) => boolean; 
     accept: (type, ext) =>
       type === 'application/pdf' ||
       type.startsWith('image/') ||
-      ['pdf', 'doc', 'docx'].includes(ext),
+      ['pdf', 'doc', 'docx', 'heic', 'heif'].includes(ext),
     maxBytes: 25 * 1024 * 1024,
   },
 };
@@ -82,7 +86,15 @@ export async function POST(req: NextRequest) {
   }
 
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
-  const contentType = file.type || 'application/octet-stream';
+  let contentType = file.type || 'application/octet-stream';
+  // HEIC a veces llega como octet-stream; aceptar por extensión.
+  if (
+    (ext === 'heic' || ext === 'heif') &&
+    !contentType.startsWith('image/') &&
+    contentType !== 'application/pdf'
+  ) {
+    contentType = ext === 'heif' ? 'image/heif' : 'image/heic';
+  }
   if (!folderCfg.accept(contentType, ext)) {
     return NextResponse.json(
       { error: `Tipo de archivo no permitido para ${folder}: ${contentType}` },
@@ -96,8 +108,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const key = `${folder}/${randomUUID()}.${ext}`;
-  const body = Buffer.from(await file.arrayBuffer());
+  let body = Buffer.from(await file.arrayBuffer());
+  let outExt = ext;
+  let outType = contentType;
+
+  if (looksLikeHeic(body, contentType, ext)) {
+    try {
+      body = Buffer.from(await convertHeicBufferToJpeg(body));
+      outExt = 'jpg';
+      outType = 'image/jpeg';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error desconocido';
+      return NextResponse.json(
+        { error: `No se pudo convertir la foto HEIC a JPG: ${message}` },
+        { status: 422 },
+      );
+    }
+  }
+
+  const key = `${folder}/${randomUUID()}.${outExt}`;
 
   try {
     await s3.send(
@@ -105,9 +134,9 @@ export async function POST(req: NextRequest) {
         Bucket: BUCKET,
         Key: key,
         Body: body,
-        ContentType: contentType,
+        ContentType: outType,
         // PDFs se abren en el navegador; el resto se sirve como recurso normal.
-        ContentDisposition: contentType === 'application/pdf' ? 'inline' : undefined,
+        ContentDisposition: outType === 'application/pdf' ? 'inline' : undefined,
       }),
     );
   } catch (error) {

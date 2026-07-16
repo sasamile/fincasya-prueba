@@ -22,6 +22,10 @@ export interface SaleLink {
   petDeposit?: number;
   petSurcharge?: number;
   petCount?: number;
+  advancePaymentAmount?: number;
+  boldPaymentUrl?: string;
+  boldPaymentAmount?: number;
+  boldSurchargePercent?: number;
   selectedBankAccountIds: string[];
   notes?: string;
   clientStep: number;
@@ -31,6 +35,7 @@ export interface SaleLink {
     cedula: string;
     email: string;
     telefono: string;
+    telefonoRespaldo?: string;
     direccion: string;
     ciudad?: string;
     fechaNacimiento?: string;
@@ -90,9 +95,24 @@ export interface CreateSaleLinkPayload {
   petDeposit?: number;
   petSurcharge?: number;
   petCount?: number;
+  /** Abono que debe pagar el cliente (editable; no siempre 50%). */
+  advancePaymentAmount: number;
+  /** Recargo % informativo/cobrado en Bold (ej. 5). */
+  boldSurchargePercent?: number;
+  /** Si true, genera el link Bold al crear. */
+  generateBoldLink?: boolean;
   selectedBankAccountIds: string[];
   notes?: string;
 }
+
+export type CreateSaleLinkResult = {
+  id: string;
+  token: string;
+  contractCode?: string;
+  boldPaymentUrl?: string;
+  boldPaymentAmount?: number;
+  boldError?: string;
+};
 
 async function resolveCreatedBy(): Promise<{
   createdBy: string;
@@ -119,15 +139,41 @@ export async function listSaleLinks(filters?: {
 
 export async function createSaleLink(
   payload: CreateSaleLinkPayload,
-): Promise<{ id: string; token: string }> {
+): Promise<CreateSaleLinkResult> {
   const { createdBy, createdByName } = await resolveCreatedBy();
-  const result = await convex.mutation(api.saleLinks.create, {
-    ...payload,
+  const generateBoldLink = payload.generateBoldLink !== false;
+  const result = await convex.action(api.saleLinks.createWithBold, {
     propertyId: payload.propertyId as Id<'properties'>,
+    contractCode: payload.contractCode,
     createdBy,
     createdByName,
+    checkIn: payload.checkIn,
+    checkOut: payload.checkOut,
+    nights: payload.nights,
+    guests: payload.guests,
+    checkInTime: payload.checkInTime,
+    checkOutTime: payload.checkOutTime,
+    totalValue: payload.totalValue,
+    rentalValue: payload.rentalValue,
+    depositAmount: payload.depositAmount,
+    cleaningFee: payload.cleaningFee,
+    petDeposit: payload.petDeposit,
+    petSurcharge: payload.petSurcharge,
+    petCount: payload.petCount,
+    advancePaymentAmount: payload.advancePaymentAmount,
+    boldSurchargePercent: payload.boldSurchargePercent,
+    generateBoldLink,
+    selectedBankAccountIds: payload.selectedBankAccountIds,
+    notes: payload.notes,
   });
-  return { id: String(result.id), token: result.token };
+  return {
+    id: String(result.id),
+    token: result.token,
+    contractCode: result.contractCode,
+    boldPaymentUrl: result.boldPaymentUrl,
+    boldPaymentAmount: result.boldPaymentAmount,
+    boldError: result.boldError,
+  };
 }
 
 export async function updateSaleLink(
