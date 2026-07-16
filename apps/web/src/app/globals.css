@@ -293,9 +293,24 @@ body {
 .wa-chip:hover {
   background: var(--accent);
 }
-.wa-chip[data-active='true'] {
+.wa-chip[data-active='true']:not(.wa-chip-escalated) {
   background: color-mix(in srgb, var(--primary) 22%, transparent);
   color: #7fe6a8;
+}
+
+/* Escalados → humano: ámbar (no verde), siempre gana al chip activo genérico */
+.wa-chip.wa-chip-escalated {
+  color: #e0b88a;
+  background: rgb(212 165 116 / 0.14);
+}
+.wa-chip.wa-chip-escalated:hover {
+  color: #edc99a;
+  background: rgb(212 165 116 / 0.2);
+}
+.wa-chip.wa-chip-escalated[data-active='true'] {
+  color: #f2d4a8;
+  background: rgb(212 165 116 / 0.28);
+  box-shadow: inset 0 0 0 1px rgb(212 165 116 / 0.5);
 }
 
 /* Toggle */

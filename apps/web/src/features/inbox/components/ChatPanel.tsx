@@ -614,12 +614,19 @@ export function ChatPanel({
   const fileAudioRef = useRef<HTMLInputElement>(null);
 
   const quickReplies = useQuery(api.quickReplies.listQuickReplies);
-  // Sugerencias de respuesta rápida cuando el borrador empieza con "/".
+  // Sugerencias cuando el borrador termina en un atajo "/" (inicio o tras espacio).
+  const slashQuery = useMemo(() => {
+    const m = draft.match(/(?:^|[\s\n])\/([^\s]*)$/);
+    if (!m) return null;
+    return m[1]!.toLowerCase();
+  }, [draft]);
   const quickMatches = useMemo(() => {
-    if (!draft.startsWith('/')) return [];
-    const q = draft.slice(1).toLowerCase();
-    return (quickReplies ?? []).filter((r) => r.shortcut.startsWith(q)).slice(0, 6);
-  }, [draft, quickReplies]);
+    if (slashQuery === null) return [];
+    return (quickReplies ?? [])
+      .filter((r) => r.shortcut.startsWith(slashQuery))
+      .slice(0, 8);
+  }, [slashQuery, quickReplies]);
+  const showQuickMenu = slashQuery !== null && quickReplies !== undefined;
 
   const botEnabled = conv.status === 'ai';
   const canEnableBot = eligibility?.manualAllowed ?? conv.status !== 'resolved';
@@ -721,7 +728,13 @@ export function ChatPanel({
   }
 
   function applyQuickReply(message: string) {
-    setDraft(message);
+    setDraft((d) => {
+      const m = d.match(/(?:^|[\s\n])\/([^\s]*)$/);
+      if (!m || m.index === undefined) return message;
+      const slashAt = m.index + (m[0].startsWith('/') ? 0 : 1);
+      const prefix = d.slice(0, slashAt).replace(/\s+$/, '');
+      return prefix ? `${prefix} ${message}` : message;
+    });
     draftRef.current?.focus();
   }
 
@@ -1164,22 +1177,36 @@ export function ChatPanel({
                 {showEmoji && <EmojiPicker onPick={insertEmoji} onClose={() => setShowEmoji(false)} />}
               </div>
               <div className="relative flex min-h-full min-w-0 flex-1 items-stretch">
-                {quickMatches.length > 0 && (
-                  <div className="absolute bottom-full left-0 mb-2 w-full max-w-md overflow-hidden rounded-xl border border-border bg-card py-1 shadow-2xl">
+                {showQuickMenu && (
+                  <div className="absolute bottom-full left-0 z-50 mb-2 w-full max-w-md overflow-hidden rounded-xl border border-border bg-card py-1 shadow-2xl">
                     <p className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                       Respuestas rápidas
                     </p>
-                    {quickMatches.map((r) => (
+                    {quickMatches.length > 0 ? (
+                      quickMatches.map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => applyQuickReply(r.message)}
+                          className="block w-full px-3 py-2 text-left transition-colors hover:bg-muted"
+                        >
+                          <span className="text-[14px] font-medium">/{r.shortcut}</span>
+                          <span className="block truncate text-[13px] text-muted-foreground">
+                            {r.message}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
                       <button
-                        key={r.id}
                         type="button"
-                        onClick={() => applyQuickReply(r.message)}
-                        className="block w-full px-3 py-2 text-left transition-colors hover:bg-muted"
+                        onClick={() => setShowQuickReplyMgr(true)}
+                        className="block w-full px-3 py-2.5 text-left text-[13px] text-muted-foreground hover:bg-muted"
                       >
-                        <span className="text-[14px] font-medium">/{r.shortcut}</span>
-                        <span className="block truncate text-[13px] text-muted-foreground">{r.message}</span>
+                        {slashQuery
+                          ? `Ninguna coincide con “/${slashQuery}”. Crear respuesta…`
+                          : 'Aún no hay respuestas. Crear una…'}
                       </button>
-                    ))}
+                    )}
                   </div>
                 )}
                 <textarea

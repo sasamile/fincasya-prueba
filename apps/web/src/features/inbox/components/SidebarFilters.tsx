@@ -13,11 +13,12 @@ import type { Filter } from '@/features/inbox/types';
 
 type Label = { id: Id<'labels'>; name: string; color: string; emoji: string | null };
 
-const PRIMARY: Array<{ id: Filter; label: string }> = [
+const PRIMARY: Array<{ id: Filter; label: string; title?: string }> = [
   { id: 'todas', label: 'Todos' },
   { id: 'unread', label: 'No leídos' },
   { id: 'ai', label: 'Bot' },
-  { id: 'human', label: 'Humano' },
+  { id: 'human', label: 'HM', title: 'Humano' },
+  { id: 'escalated', label: 'Escalados' },
 ];
 const PALETTE = [
   '#21c063', '#009de2', '#ec6a9c', '#e0a24e', '#9d8bf0',
@@ -66,12 +67,16 @@ export function SidebarFilters({
         <button
           key={c.id}
           type="button"
+          title={c.title}
           onClick={() => {
             setFilter(c.id);
             setLabelFilter(null);
           }}
           data-active={!labelFilter && filter === c.id}
-          className="wa-chip shrink-0 px-3 py-1 text-[13px] font-medium"
+          className={cn(
+            'wa-chip shrink-0 px-2.5 py-1 text-[11px] font-medium',
+            c.id === 'escalated' && 'wa-chip-escalated',
+          )}
         >
           {c.label}
         </button>
@@ -99,11 +104,7 @@ export function SidebarFilters({
         type="button"
         onClick={() => setOpen((o) => !o)}
         data-active={
-          !labelFilter &&
-          (filter === 'escalated' ||
-            filter === 'whatsapp' ||
-            filter === 'web' ||
-            filter === 'nuevas')
+          !labelFilter && (filter === 'whatsapp' || filter === 'web' || filter === 'nuevas')
         }
         className="wa-chip ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
         title="Más filtros y listas"
@@ -113,26 +114,6 @@ export function SidebarFilters({
 
       {open && (
         <div className="absolute right-3 top-full z-50 mt-1 w-56 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-2xl">
-          <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Estado
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              setFilter('escalated');
-              setLabelFilter(null);
-              setOpen(false);
-            }}
-            className={cn(
-              'flex w-full items-center px-3 py-1.5 text-left text-[14px] hover:bg-muted/60',
-              !labelFilter && filter === 'escalated' && 'bg-muted/40 font-medium',
-            )}
-          >
-            Escalados
-            <span className="ml-auto text-[11px] text-muted-foreground">bot → humano</span>
-          </button>
-
-          <div className="my-1 border-t border-border/70" />
           <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             Canales
           </p>

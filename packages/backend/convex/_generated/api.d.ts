@@ -30,6 +30,7 @@ import type * as checkoutPortal from "../checkoutPortal.js";
 import type * as contactNotes from "../contactNotes.js";
 import type * as contactTimeline from "../contactTimeline.js";
 import type * as contacts from "../contacts.js";
+import type * as contactsImport from "../contactsImport.js";
 import type * as contractAi from "../contractAi.js";
 import type * as contractCodeHistory from "../contractCodeHistory.js";
 import type * as contractFillTokens from "../contractFillTokens.js";
@@ -149,6 +150,7 @@ declare const fullApi: ApiFromModules<{
   contactNotes: typeof contactNotes;
   contactTimeline: typeof contactTimeline;
   contacts: typeof contacts;
+  contactsImport: typeof contactsImport;
   contractAi: typeof contractAi;
   contractCodeHistory: typeof contractCodeHistory;
   contractFillTokens: typeof contractFillTokens;
