@@ -746,6 +746,7 @@ export function CreateSaleLinkModal({
         advancePaymentAmount: values.advancePaymentAmount,
         boldSurchargePercent: values.boldSurchargePercent || undefined,
         generateBoldLink: values.generateBoldLink,
+        portalOrigin: window.location.origin,
         selectedBankAccountIds: values.selectedBankAccountIds,
         notes: values.notes || undefined,
       });

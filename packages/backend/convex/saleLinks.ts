@@ -17,6 +17,39 @@ import { checkinGuestValidator } from './lib/checkinGuest';
 import { verifyCedulaPhoto, decideCedulaVerdict } from './lib/cedulaAi';
 import { verifyPaymentReceiptPhoto } from './lib/receiptAi';
 
+/**
+ * URL de retorno tras pagar en Bold.
+ * Prioridad: origen del navegador que creó el link (mismo host).
+ * Bold exige https:// — en localhost http no se envía callback.
+ */
+function resolveBoldCallbackUrl(
+  token: string,
+  portalOrigin?: string | null,
+): string | undefined {
+  const fromClient = String(portalOrigin ?? '')
+    .trim()
+    .replace(/\/$/, '');
+  const fallback = (
+    process.env.SITE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    ''
+  ).replace(/\/$/, '');
+
+  const base = fromClient || fallback;
+  if (!base) return undefined;
+
+  try {
+    const url = new URL(base);
+    // Solo https (requisito Bold). No usar un SITE_URL distinto al origen
+    // del cliente si el cliente ya mandó uno válido.
+    if (url.protocol !== 'https:') return undefined;
+    return `${url.origin}/venta/${encodeURIComponent(token)}?bold=return`;
+  } catch {
+    return undefined;
+  }
+}
+
 type ProvisionFromSaleLinkResult =
   | { ok: true; bookingId: Id<'bookings'>; reference: string }
   | { ok: false; reason: string };
@@ -412,6 +445,12 @@ export const createWithBold = action({
     generateBoldLink: v.boolean(),
     selectedBankAccountIds: v.array(v.string()),
     notes: v.optional(v.string()),
+    /**
+     * Origen del portal desde el que se creó el link
+     * (ej. https://fincasya.com, http://localhost:3789).
+     * Bold solo acepta https en callback_url.
+     */
+    portalOrigin: v.optional(v.string()),
   },
   handler: async (
     ctx,
@@ -424,7 +463,12 @@ export const createWithBold = action({
     boldPaymentAmount?: number;
     boldError?: string;
   }> => {
-    const { generateBoldLink, boldSurchargePercent, ...createArgs } = args;
+    const {
+      generateBoldLink,
+      boldSurchargePercent,
+      portalOrigin,
+      ...createArgs
+    } = args;
     const created = await ctx.runMutation(api.saleLinks.create, createArgs);
 
     if (!generateBoldLink) {
@@ -450,21 +494,13 @@ export const createWithBold = action({
 
     try {
       const { createBoldPaymentLink } = await import('./lib/bold');
-      const siteBase = (
-        process.env.SITE_URL?.trim() ||
-        process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-        process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-        'https://fincasya.com'
-      ).replace(/\/$/, '');
-      const callbackUrl = `${siteBase}/venta/${created.token}?bold=return`;
+      const callbackUrl = resolveBoldCallbackUrl(created.token, portalOrigin);
 
       const bold = await createBoldPaymentLink({
         amountCop: boldAmount,
         description: `Abono ${created.contractCode} · FincasYa`.slice(0, 100),
         reference: `SL-${created.token.slice(0, 10)}-${Date.now()}`.slice(0, 60),
-        callbackUrl: callbackUrl.startsWith('https://')
-          ? callbackUrl
-          : undefined,
+        callbackUrl,
       });
 
       await ctx.runMutation(internal.saleLinks._setBoldPaymentLink, {

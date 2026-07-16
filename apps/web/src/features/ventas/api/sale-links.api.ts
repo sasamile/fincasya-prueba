@@ -103,6 +103,11 @@ export interface CreateSaleLinkPayload {
   boldSurchargePercent?: number;
   /** Si true, genera el link Bold al crear. */
   generateBoldLink?: boolean;
+  /**
+   * Origen actual del panel (window.location.origin) para el callback de Bold.
+   * Ej: https://fincasya.com · https://www.fincasya.com · http://localhost:3789
+   */
+  portalOrigin?: string;
   selectedBankAccountIds: string[];
   notes?: string;
 }
@@ -144,6 +149,9 @@ export async function createSaleLink(
 ): Promise<CreateSaleLinkResult> {
   const { createdBy, createdByName } = await resolveCreatedBy();
   const generateBoldLink = payload.generateBoldLink !== false;
+  const portalOrigin =
+    payload.portalOrigin?.trim() ||
+    (typeof window !== 'undefined' ? window.location.origin : undefined);
   const result = await convex.action(api.saleLinks.createWithBold, {
     propertyId: payload.propertyId as Id<'properties'>,
     contractCode: payload.contractCode,
@@ -165,6 +173,7 @@ export async function createSaleLink(
     advancePaymentAmount: payload.advancePaymentAmount,
     boldSurchargePercent: payload.boldSurchargePercent,
     generateBoldLink,
+    portalOrigin,
     selectedBankAccountIds: payload.selectedBankAccountIds,
     notes: payload.notes,
   });

@@ -90,8 +90,12 @@ export async function createBoldPaymentLink(
     expiration_date: expirationNanos(input.expiresInDays ?? 7),
   };
 
-  if (input.callbackUrl?.startsWith('https://')) {
-    body.callback_url = input.callbackUrl;
+  if (input.callbackUrl) {
+    const trimmed = input.callbackUrl.trim();
+    // Bold exige https. No forzar un dominio de env: el caller decide el origen.
+    if (trimmed.startsWith('https://')) {
+      body.callback_url = trimmed;
+    }
   }
 
   const res = await fetch(`${BOLD_BASE}/online/link/v1`, {
