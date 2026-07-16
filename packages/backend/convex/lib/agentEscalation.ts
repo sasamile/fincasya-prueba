@@ -19,6 +19,44 @@ export function isPriceDeflection(text: string): boolean {
   return refersFicha && !COP_PRICE.test(text);
 }
 
+/** Pregunta del cliente: signo de interrogación o arranque interrogativo típico. */
+const QUESTION_START =
+  /^(que|cual(es)?|cuant[oa]s?|como|donde|cuando|quien(es)?|hay|tiene[ns]?|incluye|puedo|podemos|se\s+puede|es\s+posible|aceptan|permiten|cuenta[ns]?\s+con|manejan|ofrecen)\b/;
+
+export function isClientQuestion(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (t.includes('?') || t.includes('¿')) return true;
+  const norm = t.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  return QUESTION_START.test(norm);
+}
+
+/**
+ * INTERROGATORIO LARGO: si el bot ya respondió varias preguntas del cliente
+ * (threshold) y llega OTRA pregunta, se corta con cortesía ("Listo, Sr./Sra. X,
+ * te escalamos con un Experto…") y se escala — atención personalizada en vez
+ * de un ping-pong infinito con el bot.
+ */
+export function detectQuestionOverload(
+  history: Array<{ sender: 'user' | 'assistant'; content: string }>,
+  lastUserContent: string,
+  threshold = 3,
+): string | null {
+  if (!isClientQuestion(lastUserContent)) return null;
+  // Preguntas previas del cliente que el bot YA respondió (hubo respuesta
+  // del asistente después de cada una).
+  let answered = 0;
+  for (let i = 0; i < history.length; i++) {
+    const m = history[i];
+    if (m.sender !== 'user' || !isClientQuestion(m.content)) continue;
+    if (history.slice(i + 1).some((x) => x.sender === 'assistant')) answered++;
+  }
+  if (answered >= threshold) {
+    return `cliente lleva ${answered} preguntas respondidas y sigue preguntando — continuar con atención personalizada de un experto`;
+  }
+  return null;
+}
+
 /**
  * Escala a humano si el cliente pide precio y el bot no responde con cifra:
  * - repite la pregunta de precio tras catálogo, o

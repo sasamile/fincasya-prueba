@@ -37,7 +37,12 @@ import {
   stripRedundantHolaPrefix,
 } from './lib/copys';
 import { isAppAutoReply } from './lib/appAutoReply';
-import { detectPriceLoopEscalation, isPriceDeflection, isPriceQuestion } from './lib/agentEscalation';
+import {
+  detectPriceLoopEscalation,
+  detectQuestionOverload,
+  isPriceDeflection,
+  isPriceQuestion,
+} from './lib/agentEscalation';
 import { detectPuenteFestivo, humanHolidayEs } from './lib/colombiaPublicHolidays';
 import {
   isCoastalProperty,
@@ -1104,6 +1109,43 @@ export const runAgentTurn = internalAction({
         wamid: handoffWamid,
       });
       console.log('[agent] escalado por bucle de precio', { conversationId, priceLoopMotivo });
+      return;
+    }
+
+    // INTERROGATORIO LARGO (candado determinista): si el bot ya respondió
+    // varias preguntas y el cliente sigue preguntando, se corta con cortesía
+    // y se escala — la atención personalizada la continúa un Experto.
+    const overloadMotivo = detectQuestionOverload(context.history, last.content);
+    if (overloadMotivo) {
+      const formal = formalSalutationName(context.contactName ?? undefined);
+      const overloadText = formal
+        ? `¡Listo, ${formal}! Para brindarte una atención más personalizada, te vamos a escalar con un Experto del equipo para que continúe contigo y resuelva todas tus dudas 🤝✨`
+        : `¡Listo! Para brindarte una atención más personalizada, te vamos a escalar con un Experto del equipo para que continúe contigo y resuelva todas tus dudas 🤝✨`;
+      let overloadWamid: string | undefined;
+      if (context.contactPhone) {
+        try {
+          const sent = await sendWhatsappText({
+            to: context.contactPhone,
+            text: overloadText,
+          });
+          overloadWamid = sent.wamid;
+        } catch (err) {
+          console.error('[agent] fallo el envio de escalacion por interrogatorio', err);
+        }
+      }
+      await ctx.runMutation(internal.agent.saveAssistantMessage, {
+        conversationId,
+        content: overloadText,
+        wamid: overloadWamid,
+      });
+      await ctx.runMutation(internal.agent.toolEscalar, {
+        conversationId,
+        motivo: overloadMotivo,
+      });
+      console.log('[agent] escalado por interrogatorio largo', {
+        conversationId,
+        overloadMotivo,
+      });
       return;
     }
 
