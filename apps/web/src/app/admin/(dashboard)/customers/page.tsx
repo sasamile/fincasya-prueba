@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ContactTagsCell } from "@/features/admin/components/crm/contact-tags-cell";
+import { ImportVcfButton } from "@/features/admin/components/crm/import-vcf-button";
 import {
   Dialog,
   DialogContent,
@@ -357,6 +358,12 @@ export default function CustomersPage() {
           </p>
         </div>
         <div className="flex flex-col sm:flex-row flex-wrap gap-2 w-full sm:w-auto">
+          <ImportVcfButton
+            onDone={() => {
+              void refetch();
+              queryClient.invalidateQueries({ queryKey: ["admin-contacts"] });
+            }}
+          />
           <Button
             variant="outline"
             className="h-11 w-full sm:w-auto rounded-xl font-bold gap-2"
