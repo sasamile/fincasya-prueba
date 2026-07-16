@@ -25,6 +25,7 @@ export const getMessageForMedia = internalQuery({
       type: m.type ?? 'text',
       mediaUrl: m.mediaUrl ?? null,
       content: m.content,
+      transcription: m.transcription ?? null,
     };
   },
 });
@@ -67,6 +68,32 @@ export const transcribeMessageAudio = action({
     } catch (err) {
       console.error('[media] transcripción bajo demanda falló', err);
       return { ok: false, motivo: err instanceof Error ? err.message : 'Error al transcribir' };
+    }
+  },
+});
+
+/**
+ * Transcribe una nota de voz AUTOMÁTICAMENTE (asesor desde el teléfono o el
+ * panel, o cliente cuando ya lo atiende un humano) y la guarda en
+ * `transcription`, SIN disparar turno del agente. Idempotente: si ya está
+ * transcrita, no re-transcribe. Así el RAG (curación nocturna) también aprende
+ * de las respuestas por audio del equipo.
+ */
+export const autoTranscribeAudio = internalAction({
+  args: { messageId: v.id('messages') },
+  handler: async (ctx, { messageId }): Promise<void> => {
+    const msg = await ctx.runQuery(internal.media.getMessageForMedia, { messageId });
+    if (!msg || msg.type !== 'audio' || !msg.mediaUrl) return;
+    if (msg.transcription && msg.transcription.trim()) return; // ya transcrito
+    try {
+      const text = (await transcribeAudio(msg.mediaUrl)).trim();
+      if (!text) return;
+      await ctx.runMutation(internal.media.patchMessageTranscription, {
+        messageId,
+        transcription: text,
+      });
+    } catch (err) {
+      console.error('[media] auto-transcripción falló', err);
     }
   },
 });
@@ -173,6 +200,11 @@ export const processInboundMedia = internalAction({
             await ctx.runMutation(internal.media.patchMessageContent, {
               messageId,
               content: `🎙️ ${text}`,
+            });
+            // También en `transcription` para que la curación (RAG) lo lea.
+            await ctx.runMutation(internal.media.patchMessageTranscription, {
+              messageId,
+              transcription: text.trim(),
             });
           }
         } else if (message.type === 'image') {

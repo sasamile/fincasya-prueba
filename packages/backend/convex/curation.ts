@@ -118,7 +118,9 @@ export const getMessagesForConversations = internalQuery({
           .filter((m) => !m.deletedAt)
           .map((m) => ({
             sender: m.sender,
-            content: m.content,
+            // Nota de voz → usamos su transcripción (así el RAG aprende del
+            // texto real; sin ella, el placeholder "[nota de voz]" se descarta).
+            content: m.transcription?.trim() || m.content,
             humanAuthored: Boolean(m.sentByUserId),
           })),
       });

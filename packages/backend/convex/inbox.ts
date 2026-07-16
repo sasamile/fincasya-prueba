@@ -815,6 +815,13 @@ export const sendAdvisorMedia = mutation({
       mimeType,
       caption: cap,
     });
+    // Nota de voz del Experto desde el panel → transcribir para que el RAG
+    // aprenda también de las respuestas por audio (no dispara turno del agente).
+    if (kind === 'audio') {
+      await ctx.scheduler.runAfter(0, internal.media.autoTranscribeAudio, {
+        messageId,
+      });
+    }
     return { messageId };
   },
 });

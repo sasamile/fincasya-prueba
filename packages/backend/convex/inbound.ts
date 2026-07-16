@@ -242,7 +242,7 @@ export const ingestAdvisorAppMessage = internalMutation({
     // el bot.
     const autoReply = args.msgType === 'text' && isAppAutoReply(args.content);
 
-    await ctx.db.insert('messages', {
+    const advisorMessageId = await ctx.db.insert('messages', {
       conversationId: conversation._id,
       sender: 'assistant',
       content: args.content,
@@ -257,6 +257,14 @@ export const ingestAdvisorAppMessage = internalMutation({
       },
       createdAt: now,
     });
+
+    // Nota de voz del Experto desde el teléfono → transcribir para que el RAG
+    // aprenda también de las respuestas por audio (no dispara turno del agente).
+    if (args.msgType === 'audio' && args.mediaUrl) {
+      await ctx.scheduler.runAfter(0, internal.media.autoTranscribeAudio, {
+        messageId: advisorMessageId,
+      });
+    }
 
     // Un humano del equipo escribió desde el teléfono: el bot se detiene.
     // (Las respuestas automáticas de la app NO cuentan como humano.)
@@ -439,6 +447,19 @@ export const ingestInboundMessage = internalMutation({
       inboxUnreadCount: (conversation.inboxUnreadCount ?? 0) + 1,
       ...(conversation.archived ? { archived: false } : {}),
     });
+
+    // Nota de voz del cliente cuando ya lo atiende un HUMANO (status !== 'ai'):
+    // el bot no corre, así que processInboundMedia no la transcribe. La
+    // transcribimos aquí para que el RAG también aprenda del par voz→respuesta.
+    if (
+      args.msgType === 'audio' &&
+      args.mediaUrl &&
+      conversation.status !== 'ai'
+    ) {
+      await ctx.scheduler.runAfter(0, internal.media.autoTranscribeAudio, {
+        messageId,
+      });
+    }
 
     // EMERGENCIA (regex determinística, 24/7): escala DURO a humano con
     // prioridad urgente sin pasar por el agente. La respuesta al cliente y el
