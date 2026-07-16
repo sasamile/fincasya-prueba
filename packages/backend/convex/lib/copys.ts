@@ -120,6 +120,20 @@ export function respectfulGreetingName(
   return `${hon} ${first}`;
 }
 
+/**
+ * Nombre e identidad del bot (Santiago, 16-jul): el asistente se llama *Naya*,
+ * la asesora virtual de FincasYa.com. FUENTE ÚNICA — cualquier copy o prompt
+ * que la nombre interpola estas constantes.
+ * OJO: "asesora virtual" es exclusivo de Naya; a los humanos del equipo
+ * SIEMPRE se les dice "Experto" (nunca "asesor").
+ */
+export const BOT_NAME = 'Naya';
+export const BOT_ROLE = 'asesora virtual de FincasYa.com';
+/** Presentación para el saludo corto ("Soy *Naya*, tu asesora virtual de..."). */
+export const BOT_INTRO = `Soy *${BOT_NAME}*, tu ${BOT_ROLE}`;
+/** Presentación sin marca: la plantilla de bienvenida ya nombra FINCASYA.COM. */
+export const BOT_INTRO_SHORT = `Soy *${BOT_NAME}*, tu asesora virtual`;
+
 const BOGOTA_TZ = 'America/Bogota';
 
 type TimeSlot = 'morning' | 'afternoon' | 'night';
@@ -153,13 +167,14 @@ function timeOfDayCourtesyPhrase(
   _gender: 'male' | 'female' | null,
 ): string {
   // Tuteo + titulo (Norma "Apertura unica" v2, 14-jul): prohibido el usted.
+  // La presentacion de Naya va en la apertura (Santiago, 16-jul).
   if (slot === 'morning') {
-    return 'gusto saludarte ☺️ ¿En qué te podemos ayudar? ✅';
+    return `gusto saludarte ☺️ ${BOT_INTRO}. ¿En qué te podemos ayudar? ✅`;
   }
   if (slot === 'afternoon') {
-    return 'gusto saludarte ☺️ ¿En qué te podemos colaborar? ✅';
+    return `gusto saludarte ☺️ ${BOT_INTRO}. ¿En qué te podemos colaborar? ✅`;
   }
-  return 'gusto saludarte ☺️ Estamos atentos para ayudarte ✅';
+  return `gusto saludarte ☺️ ${BOT_INTRO}. Estamos atentos para ayudarte ✅`;
 }
 
 /**
@@ -209,7 +224,7 @@ export function buildWelcomeMessage(
       ? `¡Hola! ${effectiveGender === 'female' ? 'Sra.' : 'Sr.'} ${fullName}. ${timeGreeting}, ${saludarte} ☺️✅`
       : `¡Hola! ${timeGreeting}, ${saludarte} ☺️✅`;
   return `${opener}
-Gracias por comunicarte con *FINCASYA.COM*®️ 💻 En breve te brindaremos atención personalizada, para agilizar tu proceso indícanos por favor la siguiente información:
+${BOT_INTRO_SHORT} 💻 Gracias por comunicarte con *FINCASYA.COM*®️ En breve te brindaremos atención personalizada, para agilizar tu proceso indícanos por favor la siguiente información:
 
 📅 Fecha probable de ingreso y salida
 👥 Número de personas entre adultos y niños

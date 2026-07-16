@@ -7,8 +7,19 @@ import { v } from 'convex/values';
 import { action, internalMutation } from './_generated/server';
 import { internal } from './_generated/api';
 import { sendDocumentToYcloud } from './lib/ycloud/senders';
+import { normalizePhone } from './lib/ycloud';
 
 const ADVISOR_SENDER_ID = 'panel-Experto';
+
+function guessMime(filename: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.docx')) {
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  }
+  if (lower.endsWith('.doc')) return 'application/msword';
+  return 'application/octet-stream';
+}
 
 /** Registra el mensaje saliente y devuelve el teléfono del contacto. */
 export const recordOutgoingDocument = internalMutation({
@@ -28,12 +39,15 @@ export const recordOutgoingDocument = internalMutation({
     if (!contact?.phone) return null;
 
     const now = Date.now();
+    const safeName = filename.trim() || 'documento.pdf';
     const messageId = await ctx.db.insert('messages', {
       conversationId,
       sender: 'assistant',
-      content: caption?.trim() || filename,
+      content: caption?.trim() || safeName,
       type: 'document',
       mediaUrl: documentUrl,
+      mediaFilename: safeName,
+      mediaMime: guessMime(safeName),
       sentByUserId: ADVISOR_SENDER_ID,
       createdAt: now,
     });
@@ -43,7 +57,7 @@ export const recordOutgoingDocument = internalMutation({
       lastMessageAt: now,
       aiManualOverride: false,
     });
-    return { messageId: String(messageId), phone: contact.phone };
+    return { messageId: String(messageId), phone: normalizePhone(contact.phone) };
   },
 });
 
@@ -56,9 +70,25 @@ export const sendDocumentToConversation = action({
     caption: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ ok: boolean; error?: string }> => {
+    // WhatsApp acepta PDF de forma fiable; .docx suele fallar en el cliente.
+    const filename = args.filename.trim() || 'contrato.pdf';
+    if (!/\.pdf$/i.test(filename)) {
+      return {
+        ok: false,
+        error:
+          'WhatsApp requiere PDF para el contrato. Convierte a PDF antes de enviar (usa «Ver y enviar»).',
+      };
+    }
+
     const rec: { messageId: string; phone: string } | null =
-      await ctx.runMutation(internal.advisorDocuments.recordOutgoingDocument, args);
+      await ctx.runMutation(internal.advisorDocuments.recordOutgoingDocument, {
+        ...args,
+        filename,
+      });
     if (!rec) return { ok: false, error: 'Conversación o teléfono no encontrado.' };
+    if (!rec.phone || rec.phone.length < 10) {
+      return { ok: false, error: 'El contacto no tiene un teléfono válido.' };
+    }
 
     let wamid: string | undefined;
     let failed = false;
@@ -67,7 +97,7 @@ export const sendDocumentToConversation = action({
       const sent = await sendDocumentToYcloud({
         to: rec.phone,
         documentUrl: args.documentUrl,
-        filename: args.filename,
+        filename,
         caption: args.caption,
       });
       wamid = sent.wamid;

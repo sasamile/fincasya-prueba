@@ -156,6 +156,22 @@ export const unblockProperty = mutation({
         'Ese bloqueo viene de una reserva; gestiónalo desde la reserva, no aquí.',
       );
     }
+    // Si el bloqueo vino de un evento de Google, se VETA el evento: sin esto,
+    // el auto-import horario lo volvería a crear a la hora siguiente.
+    if (b.googleEventId) {
+      const eventId = b.googleEventId;
+      const skip = await ctx.db
+        .query('googleCalendarEventSkips')
+        .withIndex('by_google_event', (q) => q.eq('googleEventId', eventId))
+        .first();
+      if (!skip) {
+        await ctx.db.insert('googleCalendarEventSkips', {
+          googleEventId: eventId,
+          summary: b.reason,
+          createdAt: Date.now(),
+        });
+      }
+    }
     await ctx.db.delete(blockId);
     return { ok: true };
   },

@@ -3,8 +3,10 @@
  *
  * El equipo escribe títulos libres ("2666 JAIME CASTILLO, MONTEBELLO 04 NOCHES",
  * "CHIMBI OCUPADA", "OLYMPOOCUPADA"), así que esto produce SUGERENCIAS con un
- * nivel de confianza — NUNCA se importa a ciegas: el operador confirma en la
- * pantalla de revisión.
+ * nivel de confianza. Los matches de confianza ALTA/MEDIA se auto-importan como
+ * bloqueos por cron (googleCalendar.autoImportHighConfidence); los de BAJA y
+ * los ambiguos solo entran cuando el operador los confirma en la pantalla de
+ * revisión.
  *
  * Trampa real de los datos: el APELLIDO del cliente choca con nombres de finca
  * ("CAROL VANESA ROJAS, TOCAIMA" emparejaba con la finca "CASA ROJAS"). Por eso

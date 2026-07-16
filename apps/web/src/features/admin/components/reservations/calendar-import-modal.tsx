@@ -9,8 +9,11 @@
  * libres: "CHIMBI OCUPADA", "2666 JAIME CASTILLO, MONTEBELLO 04 NOCHES"), el
  * operador confirma o corrige, y al guardar se crean los bloqueos.
  *
- * Nunca se importa a ciegas: emparejar por título acierta ~65% y el apellido
- * del cliente choca con nombres de finca ("CAROL ROJAS" vs finca "Casa Rojas").
+ * Los matches de confianza alta/media los importa SOLO el cron
+ * (googleCalendar.autoImportHighConfidence); aquí aterrizan los dudosos: el
+ * apellido del cliente choca con nombres de finca ("CAROL ROJAS" vs finca
+ * "Casa Rojas"). Los VETADOS (el operador borró un bloqueo que vino de Google)
+ * se marcan: el cron no los trae, pero cargarlos a mano levanta el veto.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
@@ -29,6 +32,7 @@ type Candidate = {
   confidence: "alta" | "media" | "baja" | "ninguna";
   matchedOn: string | null;
   alreadyImported: boolean;
+  skipped: boolean;
 };
 
 function fmt(ms: number): string {
@@ -76,6 +80,7 @@ export function CalendarImportModal({
         const initial: Record<string, string> = {};
         for (const c of list) {
           if (c.alreadyImported) continue;
+          if (c.skipped) continue; // el operador lo descartó: no re-seleccionar
           if (c.confidence === "alta" && c.suggestedPropertyId) {
             initial[c.id] = c.suggestedPropertyId;
           }
@@ -192,15 +197,29 @@ export function CalendarImportModal({
                           {fmt(c.startMs)} → {fmt(c.endMs)}
                         </p>
                       </div>
-                      <span
-                        className={cn(
-                          "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-                          badge.cls,
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {c.skipped && (
+                          <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold uppercase text-rose-700">
+                            Vetado
+                          </span>
                         )}
-                      >
-                        {badge.label}
-                      </span>
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
+                            badge.cls,
+                          )}
+                        >
+                          {badge.label}
+                        </span>
+                      </div>
                     </div>
+                    {c.skipped && (
+                      <p className="mt-1 text-xs text-rose-600">
+                        Se borró el bloqueo de este evento, así que la carga
+                        automática lo ignora. Si eliges una finca y guardas, se
+                        vuelve a bloquear.
+                      </p>
+                    )}
                     <select
                       value={picks[c.id] ?? ""}
                       onChange={(e) =>

@@ -512,6 +512,49 @@ export const toolCatalogPick = internalQuery({
   },
 });
 
+/** Guarda los filtros del último catálogo (prefill del modal del Experto). */
+export const saveCatalogSearch = internalMutation({
+  args: {
+    conversationId: v.id('conversations'),
+    location: v.optional(v.string()),
+    fechaEntradaMs: v.optional(v.number()),
+    fechaSalidaMs: v.optional(v.number()),
+    minCapacity: v.optional(v.number()),
+    hasPets: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const conv = await ctx.db.get(args.conversationId);
+    if (!conv) return;
+    const prev = conv.lastCatalogSearch;
+    const fe =
+      typeof args.fechaEntradaMs === 'number' && args.fechaEntradaMs > 0
+        ? args.fechaEntradaMs
+        : prev?.fechaEntrada;
+    const fs =
+      typeof args.fechaSalidaMs === 'number' && args.fechaSalidaMs > 0
+        ? args.fechaSalidaMs
+        : prev?.fechaSalida;
+    if (!fe || !fs) return;
+    const location = (args.location ?? conv.lastRequestedZone ?? prev?.location ?? '').trim();
+    await ctx.db.patch(args.conversationId, {
+      lastCatalogSearch: {
+        location,
+        fechaEntrada: fe,
+        fechaSalida: fs,
+        minCapacity:
+          typeof args.minCapacity === 'number' && args.minCapacity > 0
+            ? args.minCapacity
+            : prev?.minCapacity,
+        hasPets: args.hasPets === true || prev?.hasPets === true ? true : undefined,
+        sortByPrice: prev?.sortByPrice,
+      },
+      ...(args.location?.trim()
+        ? { lastRequestedZone: args.location.trim() }
+        : {}),
+    });
+  },
+});
+
 /** Registra las fichas enviadas: mensajes tipo product + memoria de paginacion. */
 export const recordCatalogSend = internalMutation({
   args: {
@@ -1639,6 +1682,16 @@ export const runAgentTurn = internalAction({
                 }
               }
               if (sent.length > 0) {
+                await ctx.runMutation(internal.agent.saveCatalogSearch, {
+                  conversationId,
+                  location: effectiveZona,
+                  fechaEntradaMs: feMs,
+                  fechaSalidaMs: fsMs,
+                  minCapacity:
+                    typeof args.personas === 'number' ? args.personas : undefined,
+                  hasPets:
+                    typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
+                });
                 result = {
                   enviadas: sent.map((s) => s.title),
                   nota: zonaAmpliada

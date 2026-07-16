@@ -1,5 +1,6 @@
 import { v } from 'convex/values';
 import {
+  action,
   internalMutation,
   internalQuery,
   mutation,
@@ -13,6 +14,7 @@ import {
   resolveSaleLinkReference,
 } from './lib/saleLinkReference';
 import { checkinGuestValidator } from './lib/checkinGuest';
+import { verifyCedulaPhoto } from './lib/cedulaAi';
 
 type ProvisionFromSaleLinkResult =
   | { ok: true; bookingId: Id<'bookings'>; reference: string }
@@ -638,6 +640,94 @@ export const getByToken = internalQuery({
 });
 
 // ---------------------------------------------------------------------------
+// Verificación de cédula
+// ---------------------------------------------------------------------------
+
+export const _saveCedulaCheck = internalMutation({
+  args: {
+    token: v.string(),
+    check: v.object({
+      photoUrl: v.string(),
+      allow: v.boolean(),
+      needsReview: v.boolean(),
+      reason: v.optional(v.string()),
+      isCedula: v.optional(v.boolean()),
+      number: v.optional(v.string()),
+      name: v.optional(v.string()),
+      confidence: v.optional(v.number()),
+      note: v.optional(v.string()),
+      checkedAt: v.number(),
+    }),
+  },
+  handler: async (ctx, { token, check }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return;
+    await ctx.db.patch(link._id, { cedulaCheck: check, updatedAt: Date.now() });
+  },
+});
+
+/**
+ * Verifica la foto de cédula recién subida. La llama el portal antes de dejar
+ * pasar al cliente al paso de pago. El veredicto queda guardado en el link para
+ * que submitClientData lo haga cumplir aunque el portal se lo salte.
+ */
+export const verifyCedula = action({
+  args: {
+    token: v.string(),
+    photoUrl: v.string(),
+    typedCedula: v.string(),
+  },
+  handler: async (
+    ctx,
+    { token, photoUrl, typedCedula },
+  ): Promise<{
+    allow: boolean;
+    needsReview: boolean;
+    reason?: string;
+    aiNumber?: string;
+  }> => {
+    const link = await ctx.runQuery(internal.saleLinks.getByToken, { token });
+    if (!link) return { allow: false, needsReview: true, reason: 'not_found' };
+    if (link.status !== 'active') {
+      return { allow: false, needsReview: true, reason: 'inactive' };
+    }
+
+    const verdict = await verifyCedulaPhoto(photoUrl, typedCedula);
+
+    await ctx.runMutation(internal.saleLinks._saveCedulaCheck, {
+      token,
+      check: {
+        photoUrl,
+        allow: verdict.allow,
+        needsReview: verdict.needsReview,
+        reason: verdict.reason,
+        isCedula:
+          verdict.check && verdict.check.cedulaProbability >= 0.5
+            ? true
+            : verdict.check
+              ? false
+              : undefined,
+        number: verdict.check?.number,
+        name: verdict.check?.name,
+        confidence: verdict.check?.cedulaProbability,
+        note: verdict.check?.note,
+        checkedAt: Date.now(),
+      },
+    });
+
+    return {
+      allow: verdict.allow,
+      needsReview: verdict.needsReview,
+      reason: verdict.reason,
+      aiNumber: verdict.check?.number,
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Public mutations (llamados desde el portal cliente, sin auth)
 // ---------------------------------------------------------------------------
 
@@ -747,6 +837,19 @@ export const submitClientData = mutation({
     if (link.paymentValidated) return { ok: false, reason: 'already_validated' };
     if (link.clientStep >= 4) return { ok: false, reason: 'past_payment_step' };
 
+    // La foto de cédula es obligatoria. El cliente puede reenviar comprobantes
+    // sin volver a subirla, por eso vale la que ya esté guardada en el link.
+    const cedulaPhotoUrl =
+      args.cedulaPhotoUrl?.trim() || link.clientData?.cedulaPhotoUrl?.trim();
+    if (!cedulaPhotoUrl) return { ok: false, reason: 'missing_cedula' };
+    const reusedStoredPhoto = !args.cedulaPhotoUrl?.trim();
+
+    // Si la IA ya juzgó ESTA foto y la rechazó, no se pasa por encima.
+    const check = link.cedulaCheck;
+    if (check && check.photoUrl === cedulaPhotoUrl && !check.allow) {
+      return { ok: false, reason: check.reason || 'cedula_rejected' };
+    }
+
     const now = Date.now();
     const fechaNacimiento = normalizeBirthdate(args.fechaNacimiento);
     const newProof: PaymentProofRecord = {
@@ -768,9 +871,13 @@ export const submitClientData = mutation({
         direccion: args.direccion,
         ciudad: args.ciudad,
         fechaNacimiento,
-        cedulaPhotoUrl: args.cedulaPhotoUrl,
-        cedulaPhotoFileName: args.cedulaPhotoFileName,
-        cedulaPhotoMimeType: args.cedulaPhotoMimeType,
+        cedulaPhotoUrl,
+        cedulaPhotoFileName: reusedStoredPhoto
+          ? link.clientData?.cedulaPhotoFileName
+          : args.cedulaPhotoFileName,
+        cedulaPhotoMimeType: reusedStoredPhoto
+          ? link.clientData?.cedulaPhotoMimeType
+          : args.cedulaPhotoMimeType,
         filledAt: link.clientData?.filledAt ?? now,
       },
       paymentProofUrl: args.paymentProofUrl,

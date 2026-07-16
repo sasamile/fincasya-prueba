@@ -20,8 +20,10 @@ import {
   Search,
   Send,
   Smile,
+  AudioLines,
   Sparkles,
   UserRound,
+  Wand2,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -42,6 +44,8 @@ import { MessageMenu } from '@/features/inbox/components/MessageMenu';
 import { SwipeToReply } from '@/features/inbox/components/SwipeToReply';
 import { LabelPicker } from '@/features/inbox/components/LabelPicker';
 import { QuickReplyManager } from '@/features/inbox/components/QuickReplyManager';
+import { AdvisorAssistPanel } from '@/features/inbox/components/AdvisorAssistPanel';
+import { useComposerDictation } from '@/features/inbox/hooks/useComposerDictation';
 import { ASESOR_TOOLS, type AsesorTool } from '@/features/inbox/components/IconRail';
 import { SharedMedia } from '@/features/inbox/components/SharedMedia';
 import {
@@ -75,6 +79,26 @@ function formatDocMeta(
   const ext = docExt(filename, mime);
   const sz = formatBytes(size);
   return sz ? `${sz} • ${ext}` : ext;
+}
+
+/** Descarga fiable (S3 cross-origin ignora el atributo `download` del <a>). */
+async function downloadChatFile(url: string, filename: string) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const obj = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = obj;
+    a.download = filename || 'documento';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(obj), 1500);
+  } catch {
+    // Fallback: abrir en pestaña (el usuario puede guardar desde ahí).
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
 }
 
 /** Ícono de documento coloreado por tipo con esquina doblada, réplica de WhatsApp. */
@@ -495,12 +519,18 @@ function MessageBubble({
                   /\.pdf$/i.test(message.mediaFilename ?? '')) && (
                   <PdfThumbnail url={message.mediaUrl} />
                 )}
-                <a
-                  href={message.mediaUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download={message.mediaFilename ?? undefined}
-                  className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-black/5 dark:hover:bg-white/6"
+                <button
+                  type="button"
+                  onClick={() =>
+                    void downloadChatFile(
+                      message.mediaUrl!,
+                      message.mediaFilename ||
+                        (message.mediaMime?.includes('pdf')
+                          ? 'documento.pdf'
+                          : 'documento.docx'),
+                    )
+                  }
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-black/5 dark:hover:bg-white/6"
                 >
                   <DocThumbIcon
                     filename={message.mediaFilename}
@@ -519,7 +549,7 @@ function MessageBubble({
                     </span>
                   </span>
                   <Download className="h-4 w-4 shrink-0 opacity-60" />
-                </a>
+                </button>
               </div>
             )}
             {/* El audio muestra su propia transcripción; el placeholder
@@ -589,6 +619,7 @@ export function ChatPanel({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [improving, setImproving] = useState(false);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
 
   async function handleImprove() {
     const text = draft.trim();
@@ -616,13 +647,17 @@ export function ChatPanel({
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
+  const [showAssist, setShowAssist] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const dictation = useComposerDictation((text) => {
+    setDraft(text);
+    draftRef.current?.focus();
+  });
   const [linkPreview, setLinkPreview] = useState<LinkPreviewData | null>(null);
   const [linkPreviewLoading, setLinkPreviewLoading] = useState(false);
   const [linkPreviewDismissed, setLinkPreviewDismissed] = useState<string | null>(null);
   const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const draftRef = useRef<HTMLTextAreaElement>(null);
   const flashTimerRef = useRef<number | null>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const fileDocRef = useRef<HTMLInputElement>(null);
@@ -758,6 +793,16 @@ export function ChatPanel({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'instant' as ScrollBehavior });
   }, [messages?.length, conv.conversationId]);
+
+  // Al cambiar de chat, limpia borrador y cierra el asistente.
+  useEffect(() => {
+    setDraft('');
+    setReplyingTo(null);
+    setShowAssist(false);
+    setBotError(null);
+    dictation.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conv.conversationId]);
 
   useEffect(() => {
     return () => {
@@ -1081,6 +1126,47 @@ export function ChatPanel({
 
         {/* Composer — píldora unificada estilo WhatsApp */}
         <footer className="wa-composer-footer relative">
+          <AdvisorAssistPanel
+            conversationId={conv.conversationId}
+            open={showAssist}
+            onClose={() => setShowAssist(false)}
+            onUseSuggestion={(text) => {
+              setDraft(text);
+              draftRef.current?.focus();
+            }}
+          />
+          {(dictation.listening || dictation.error) && (
+            <div
+              className={cn(
+                'mb-1.5 flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-[12px]',
+                dictation.listening
+                  ? 'border-primary/30 bg-primary/10'
+                  : 'border-destructive/30 bg-destructive/10',
+              )}
+            >
+              <span
+                className={
+                  dictation.listening
+                    ? 'font-medium text-primary'
+                    : 'text-destructive'
+                }
+              >
+                {dictation.listening
+                  ? 'Dictando… habla y el texto va al input'
+                  : dictation.error}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  dictation.stop();
+                  dictation.clearError();
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           {attachNotice && (
             <div className="absolute -top-11 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-muted px-3 py-1.5 text-[12px] text-foreground shadow-lg">
               {attachNotice}
@@ -1274,10 +1360,48 @@ export function ChatPanel({
                   {improving ? (
                     <Spinner className="h-5 w-5" />
                   ) : (
-                    <Sparkles className="h-6 w-6" strokeWidth={1.5} />
+                    <Wand2 className="h-5 w-5" strokeWidth={1.5} />
                   )}
                 </button>
               )}
+              {/* IA: sugiere respuesta según el chat */}
+              <button
+                type="button"
+                className={cn(
+                  'wa-composer-icon select-none touch-manipulation',
+                  showAssist && 'text-primary',
+                )}
+                title="IA: sugiere qué responder"
+                aria-label="Asistente IA"
+                onClick={() => {
+                  dictation.stop();
+                  setShowAssist((v) => !v);
+                  setShowAttach(false);
+                  setShowEmoji(false);
+                }}
+              >
+                <Sparkles className="h-6 w-6" strokeWidth={1.5} />
+              </button>
+              {/* Dictado: habla → texto en el input */}
+              <button
+                type="button"
+                className={cn(
+                  'wa-composer-icon select-none touch-manipulation',
+                  dictation.listening && 'text-primary',
+                )}
+                title={
+                  dictation.listening
+                    ? 'Detener dictado'
+                    : 'Dictar: habla y se escribe en el input'
+                }
+                aria-label={dictation.listening ? 'Detener dictado' : 'Dictar'}
+                onClick={() => {
+                  setShowAssist(false);
+                  dictation.toggle(draft);
+                }}
+              >
+                <AudioLines className="h-6 w-6" strokeWidth={1.5} />
+              </button>
               {draft.trim() ? (
                 <button
                   type="button"
@@ -1295,16 +1419,18 @@ export function ChatPanel({
                   className="wa-composer-icon select-none touch-manipulation"
                   title="Grabar audio"
                   aria-label="Grabar audio"
-                  // En móvil el long-press dispara selección de texto; arrancamos
-                  // al toque y bloqueamos el menú nativo.
                   onContextMenu={(e) => e.preventDefault()}
                   onPointerDown={(e) => {
                     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
                     e.preventDefault();
                     e.stopPropagation();
+                    dictation.stop();
                     setRecording(true);
                   }}
-                  onClick={() => setRecording(true)}
+                  onClick={() => {
+                    dictation.stop();
+                    setRecording(true);
+                  }}
                 >
                   <Mic className="h-6 w-6" strokeWidth={1.5} />
                 </button>

@@ -1486,7 +1486,7 @@ export const suggestCommentReply = action({
   handler: async (_ctx, args): Promise<{ suggestions: string[]; error?: string }> => {
     try {
       const { chatCompletion } = await import('./lib/openai');
-      const system = `Eres la asistente virtual de FincasYa.com respondiendo comentarios públicos en Facebook o Instagram.
+      const system = `Te llamas Naya y eres la asesora virtual de FincasYa.com, respondiendo comentarios públicos en Facebook o Instagram.
 Genera exactamente 3 respuestas distintas, cortas (máximo 280 caracteres), cálidas, en español colombiano, tuteando al cliente.
 Una puede invitar a WhatsApp https://wa.me/573157773937; otra puede pedir fechas y número de personas si preguntan precio o capacidad.
 No uses markdown. Responde SOLO JSON válido: {"suggestions":["respuesta1","respuesta2","respuesta3"]}`;
@@ -2397,7 +2397,7 @@ export const suggestDmReply = action({
       const { chatCompletion } = await import('./lib/openai');
       const channel =
         args.platform === 'instagram' ? 'Instagram Direct' : 'Facebook Messenger';
-      const system = `Eres la asistente virtual de FincasYa.com respondiendo mensajes privados en ${channel}.
+      const system = `Te llamas Naya y eres la asesora virtual de FincasYa.com, respondiendo mensajes privados en ${channel}.
 Genera exactamente 3 respuestas distintas, cortas (máximo 280 caracteres), cálidas, en español colombiano, tuteando al cliente.
 Una puede invitar a WhatsApp https://wa.me/573157773937; otra puede pedir fechas y número de personas si preguntan precio o capacidad.
 No uses markdown. Responde SOLO JSON válido: {"suggestions":["respuesta1","respuesta2","respuesta3"]}`;

@@ -15,7 +15,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +41,7 @@ import {
   materializeProofFile,
   saveVentaCedulaFile,
   loadVentaCedulaFile,
+  clearVentaCedulaFile,
   type VentaDraftPhase,
 } from "@/features/ventas/utils/venta-draft-storage";
 import { syncVentaDraftToServer } from "@/features/ventas/utils/venta-server-draft";
@@ -143,6 +144,7 @@ export function StepDatosContrato({
   readOnly,
 }: Props) {
   const submitClientData = useMutation(api.saleLinks.submitClientData);
+  const verifyCedula = useAction(api.saleLinks.verifyCedula);
   const [phase, setPhase] = useState<VentaDraftPhase>("datos");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingCedulaFile, setPendingCedulaFile] = useState<File | null>(null);
@@ -713,6 +715,45 @@ export function StepDatosContrato({
     try {
       const cedula = await resolveCedulaUpload();
 
+      // Sin cédula no se envía. Antes esto seguía en silencio y la venta
+      // entraba sin documento.
+      if (!cedula) {
+        showError(
+          "La foto de tu cédula ya no está disponible. Vuelve a adjuntarla para continuar.",
+        );
+        setPendingCedulaFile(null);
+        setHasStoredCedulaFile(false);
+        void clearVentaCedulaFile(data.token);
+        setPhase("datos");
+        return;
+      }
+
+      // La IA confirma que sea un documento real y que el número coincida.
+      // Solo frena si está confiada; ante la duda pasa y el asesor revisa.
+      const verdict = await verifyCedula({
+        token: data.token,
+        photoUrl: cedula.cedulaPhotoUrl,
+        typedCedula: values.cedula,
+      });
+
+      if (!verdict.allow) {
+        const messages: Record<string, string> = {
+          not_a_document:
+            "La imagen que adjuntaste no parece un documento de identidad. Sube una foto de tu cédula.",
+          number_mismatch: `El número de la cédula que adjuntaste${
+            verdict.aiNumber ? ` (${verdict.aiNumber})` : ""
+          } no coincide con el que escribiste. Revisa ambos.`,
+          inactive: "Este link ya no está activo. Contacta a tu asesor.",
+          not_found: "El link ya no existe.",
+        };
+        showError(
+          messages[String(verdict.reason)] ??
+            "No pudimos validar tu cédula. Intenta con otra foto.",
+        );
+        setPhase("datos");
+        return;
+      }
+
       let appended = isAmending;
       for (const proofFile of proofFiles) {
         const proof = await uploadDocument(proofFile);
@@ -739,6 +780,11 @@ export function StepDatosContrato({
             inactive: "Este link ya no está activo. Contacta a tu asesor.",
             already_validated: "El pago ya fue validado.",
             past_payment_step: "Esta etapa ya fue completada.",
+            missing_cedula: "Adjunta la foto de tu cédula para continuar.",
+            not_a_document:
+              "La imagen que adjuntaste no parece un documento de identidad. Sube una foto de tu cédula.",
+            number_mismatch:
+              "El número de la cédula que adjuntaste no coincide con el que escribiste.",
           };
           const msg = reasons[String(result.reason)] ?? "No se pudo enviar.";
           setSubmitMessage({ type: "error", text: msg });

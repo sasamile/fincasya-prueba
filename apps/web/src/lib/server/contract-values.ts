@@ -309,7 +309,11 @@ export type ContractDto = Record<string, unknown> & {
   nightlyPrice?: string;
   totalPrice?: string;
   clientName?: string;
+  clientFirstName?: string;
+  clientLastName?: string;
   clientId?: string;
+  clientDocType?: string;
+  clientDocIssuedAt?: string;
   clientEmail?: string;
   clientPhone?: string;
   clientCity?: string;
@@ -395,12 +399,17 @@ export function buildContractWordValues(
       : unitPriceNum * totalDays;
 
   const petCount = Number(dto.petCount) || 0;
+  // Política: 1ª-2ª → depósito 100k c/u; desde la 3ª → 30k ingreso c/u + 70k aseo (único).
   const petSurchargeRefundable = Math.min(petCount, 2) * 100000;
   const petSurchargeNonRefundable = Math.max(0, petCount - 2) * 30000;
+  const petCleaningFee = petCount >= 3 ? 70000 : 0;
   const serviceStaffFee = Number(dto.serviceStaffFee) || 0;
   if (isNaN(providedTotal) || providedTotal <= 0) {
     totalPriceNum +=
-      petSurchargeRefundable + petSurchargeNonRefundable + serviceStaffFee;
+      petSurchargeRefundable +
+      petSurchargeNonRefundable +
+      petCleaningFee +
+      serviceStaffFee;
   }
 
   const totalPriceText = numberToSpanishText(totalPriceNum).toUpperCase();
@@ -517,17 +526,27 @@ export function buildContractWordValues(
     horaSalida: dto.checkOutTime || "04:00 PM",
     ciudadCliente: dto.clientCity || "",
     direccionCliente: dto.clientAddress || "",
-    clienteNombre: dto.clientName || "",
+    // Nombre siempre en mayúsculas en el Word.
+    clienteNombre: String(dto.clientName || "").trim().toUpperCase(),
+    clienteNombres: String(dto.clientFirstName || "").trim().toUpperCase(),
+    clienteApellidos: String(dto.clientLastName || "").trim().toUpperCase(),
     clienteCedula: dto.clientId || "",
     clienteId: dto.clientId || "",
     clienteIdentificacion: dto.clientId || "",
+    tipoDocumento: String(dto.clientDocType || "CC").trim().toUpperCase(),
+    clienteTipoDocumento: String(dto.clientDocType || "CC").trim().toUpperCase(),
+    fechaExpedicion: dto.clientDocIssuedAt || "",
+    fechaExpedicionCedula: dto.clientDocIssuedAt || "",
     clientCorreo: dto.clientEmail || "",
     clienteCelular: dto.clientPhone || "",
     firmaCliente: dto.signature ?? "",
     numeroMascotas: String(petCount),
     depositoMascotas: String(petSurchargeRefundable),
     cargoMascotas: String(petSurchargeNonRefundable),
-    totalMascotas: String(petSurchargeRefundable + petSurchargeNonRefundable),
+    aseoMascotas: String(petCleaningFee),
+    totalMascotas: String(
+      petSurchargeRefundable + petSurchargeNonRefundable + petCleaningFee,
+    ),
     nombreFinca: finca.title || "",
     municipioFinca: finca.location || "",
     capacidadDePersonas: String(finca.capacity || 0),
@@ -542,7 +561,7 @@ export function buildContractWordValues(
     adminCiudad: (dto.adminCity?.trim() || contractAdmin.adminCity || "").trim(),
   };
 
-  const cleaningFeeCop = Number(dto.cleaningFee) || 0;
+  const cleaningFeeCop = (Number(dto.cleaningFee) || 0) + petCleaningFee;
   const refundableDepositCop = Number(dto.refundableDeposit) || 0;
   const aseoFinalLabel = resolveContractMoneyLabel(
     cleaningFeeCop,

@@ -6,7 +6,7 @@
  * fases — ver memoria inbox-asesor-roadmap. Los botones marcados "Fase 1/2" aún
  * no ejecutan.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAction, useMutation, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { toast } from 'sonner';
@@ -32,6 +32,10 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { computePetFees } from '@/lib/pet-fees';
+import {
+  CopMoneyInput,
+} from '@/features/admin/components/contracts/cop-money-input';
 import {
   getContractSettingsSnapshot,
   useContractSettingsStore,
@@ -61,8 +65,13 @@ type ContractDraft = {
   refundableDeposit: string;
   manillaCondominio: string;
   otherCharges: string;
+  /** Nombre completo (se arma con nombres + apellidos, siempre mayúsculas al generar). */
   clientName: string;
+  clientFirstName: string;
+  clientLastName: string;
+  clientDocType: string;
   clientCedula: string;
+  clientDocIssuedAt: string;
   clientPhone: string;
   clientEmail: string;
   clientCity: string;
@@ -86,13 +95,31 @@ const EMPTY_DRAFT: ContractDraft = {
   manillaCondominio: '',
   otherCharges: '',
   clientName: '',
+  clientFirstName: '',
+  clientLastName: '',
+  clientDocType: 'CC',
   clientCedula: '',
+  clientDocIssuedAt: '',
   clientPhone: '',
   clientEmail: '',
   clientCity: '',
   clientAddress: '',
   notes: '',
 };
+
+const DOC_TYPES = [
+  { value: 'CC', label: 'Cédula de ciudadanía' },
+  { value: 'CE', label: 'Cédula de extranjería' },
+  { value: 'TI', label: 'Tarjeta de identidad' },
+  { value: 'RC', label: 'Registro civil' },
+  { value: 'PA', label: 'Pasaporte' },
+  { value: 'NIT', label: 'NIT' },
+] as const;
+
+function fullClientName(d: Pick<ContractDraft, 'clientFirstName' | 'clientLastName' | 'clientName'>) {
+  const assembled = `${d.clientFirstName} ${d.clientLastName}`.trim();
+  return (assembled || d.clientName).trim().toUpperCase();
+}
 
 const TOOL_META: Record<
   AsesorTool,
@@ -162,6 +189,10 @@ type FincaOption = {
   code?: string;
   location?: string;
   images?: string[];
+  priceBase?: number;
+  depositoAseo?: number;
+  depositoDanosReembolsable?: number;
+  manillaCondominio?: number;
 };
 
 type BankAccount = {
@@ -182,7 +213,7 @@ function FincaPicker({
 }: {
   fincas: FincaOption[] | undefined;
   value: string;
-  onChange: (id: string, title: string) => void;
+  onChange: (finca: FincaOption) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -257,7 +288,7 @@ function FincaPicker({
                   key={f._id}
                   type="button"
                   onClick={() => {
-                    onChange(f._id, f.title);
+                    onChange(f);
                     setOpen(false);
                     setQuery('');
                   }}
@@ -452,29 +483,125 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const set =
     (k: keyof ContractDraft) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-      setDraft((d) => ({ ...d, [k]: e.target.value }));
+      setDraft((d) => {
+        const next = { ...d, [k]: e.target.value };
+        if (k === 'clientFirstName' || k === 'clientLastName') {
+          next.clientName = fullClientName(next);
+        }
+        return next;
+      });
+
+  const petFees = useMemo(
+    () => computePetFees(Number(draft.petCount) || 0),
+    [draft.petCount],
+  );
+
+  /** Noches + desglose de lo que se le cobra al cliente (como en admin). */
+  const chargeSummary = useMemo(() => {
+    const a = new Date(`${draft.checkIn}T12:00:00`).getTime();
+    const b = new Date(`${draft.checkOut}T12:00:00`).getTime();
+    const nights =
+      Number.isFinite(a) && Number.isFinite(b) && b > a
+        ? Math.max(1, Math.round((b - a) / 86400000))
+        : 0;
+    const perNight = Number(draft.pricePerNight) || 0;
+    const stay = nights > 0 ? perNight * nights : 0;
+    const cleaningFee = Number(draft.cleaningFee) || 0;
+    const refundableDeposit = Number(draft.refundableDeposit) || 0;
+    const manillaCondominio = Number(draft.manillaCondominio) || 0;
+    const otherCharges = Number(draft.otherCharges) || 0;
+    const total =
+      stay +
+      petFees.deposit +
+      petFees.serviceFee +
+      petFees.cleaningFee +
+      cleaningFee +
+      refundableDeposit +
+      manillaCondominio +
+      otherCharges;
+    return {
+      nights,
+      stay,
+      cleaningFee,
+      refundableDeposit,
+      manillaCondominio,
+      otherCharges,
+      total,
+    };
+  }, [
+    draft.checkIn,
+    draft.checkOut,
+    draft.pricePerNight,
+    draft.cleaningFee,
+    draft.refundableDeposit,
+    draft.manillaCondominio,
+    draft.otherCharges,
+    petFees,
+  ]);
+
+  const moneyCop = (n: number) =>
+    `$ ${Math.round(n).toLocaleString('es-CO')}`;
+
+  function applyFinca(f: FincaOption) {
+    setDraft((d) => ({
+      ...d,
+      fincaId: f._id,
+      fincaTitle: f.title,
+      pricePerNight:
+        f.priceBase != null && f.priceBase > 0
+          ? String(Math.round(f.priceBase))
+          : d.pricePerNight,
+      cleaningFee:
+        f.depositoAseo != null && f.depositoAseo > 0
+          ? String(Math.round(f.depositoAseo))
+          : d.cleaningFee,
+      refundableDeposit:
+        f.depositoDanosReembolsable != null && f.depositoDanosReembolsable > 0
+          ? String(Math.round(f.depositoDanosReembolsable))
+          : d.refundableDeposit,
+      manillaCondominio:
+        f.manillaCondominio != null && f.manillaCondominio > 0
+          ? String(Math.round(f.manillaCondominio))
+          : d.manillaCondominio,
+    }));
+  }
 
   async function handleAnalyze() {
     if (!conversation) return;
     setAnalyzing(true);
     try {
       const r = await extract({ conversationId: conversation.conversationId });
-      setDraft((d) => ({
-        ...d,
-        fincaId: r.finca?.id ?? d.fincaId,
-        fincaTitle: r.finca?.title ?? r.fincaGuess ?? d.fincaTitle,
-        contractCode: r.contractCode || d.contractCode,
-        checkIn: r.checkIn || d.checkIn,
-        checkOut: r.checkOut || d.checkOut,
-        guests: r.guests ? String(r.guests) : d.guests,
-        pricePerNight: r.pricePerNight ? String(r.pricePerNight) : d.pricePerNight,
-        clientName: r.client.name || d.clientName,
-        clientCedula: r.client.cedula || d.clientCedula,
-        clientPhone: r.client.phone || d.clientPhone,
-        clientEmail: r.client.email || d.clientEmail,
-        clientCity: r.client.city || d.clientCity,
-        clientAddress: r.client.address || d.clientAddress,
-      }));
+      setDraft((d) => {
+        const name = (r.client.name || d.clientName).trim();
+        const parts = name.split(/\s+/).filter(Boolean);
+        const first =
+          parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || d.clientFirstName;
+        const last = parts.length > 1 ? parts[parts.length - 1]! : d.clientLastName;
+        const next: ContractDraft = {
+          ...d,
+          fincaId: r.finca?.id ?? d.fincaId,
+          fincaTitle: r.finca?.title ?? r.fincaGuess ?? d.fincaTitle,
+          contractCode: r.contractCode || d.contractCode,
+          checkIn: r.checkIn || d.checkIn,
+          checkOut: r.checkOut || d.checkOut,
+          guests: r.guests ? String(r.guests) : d.guests,
+          pricePerNight: r.pricePerNight ? String(r.pricePerNight) : d.pricePerNight,
+          clientName: name.toUpperCase(),
+          clientFirstName: first.toUpperCase(),
+          clientLastName: last.toUpperCase(),
+          clientCedula: r.client.cedula || d.clientCedula,
+          clientPhone: r.client.phone || d.clientPhone,
+          clientEmail: r.client.email || d.clientEmail,
+          clientCity: r.client.city || d.clientCity,
+          clientAddress: r.client.address || d.clientAddress,
+        };
+        return next;
+      });
+      // Si la IA matcheó finca, trae depósitos/precio de la finca real.
+      if (r.finca?.id && fincas) {
+        const f = fincas.find((x) => x._id === r.finca!.id);
+        if (f) applyFinca(f);
+      }
       toast.success(
         r.finca
           ? 'Datos extraídos del chat. Revísalos antes de generar.'
@@ -500,6 +627,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         : 1;
     })();
     const perNight = Number(draft.pricePerNight) || 0;
+    const clientName = fullClientName(draft);
     setGenerating(true);
     try {
       const res = await fetch(
@@ -508,12 +636,17 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            outputFormat: 'docx',
             propertyId: draft.fincaId,
             contractNumber: draft.contractCode,
             nightlyPrice: String(perNight),
             totalPrice: String(perNight * nights),
-            clientName: draft.clientName,
+            clientName,
+            clientFirstName: draft.clientFirstName.trim().toUpperCase(),
+            clientLastName: draft.clientLastName.trim().toUpperCase(),
             clientId: draft.clientCedula,
+            clientDocType: draft.clientDocType,
+            clientDocIssuedAt: draft.clientDocIssuedAt,
             clientEmail: draft.clientEmail,
             clientPhone: draft.clientPhone,
             clientCity: draft.clientCity,
@@ -544,10 +677,11 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
       }
       downloadBase64(
         data.fileBase64,
-        data.filename || 'contrato',
-        data.mimeType || 'application/pdf',
+        data.filename || 'contrato.docx',
+        data.mimeType ||
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       );
-      toast.success('Contrato generado y descargado.');
+      toast.success('Contrato Word generado y descargado.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al generar.');
     } finally {
@@ -564,11 +698,29 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
     <div>
       <label className={fl}>{label}</label>
       <input
-        className={input}
+        className={cn(
+          input,
+          (key === 'clientFirstName' ||
+            key === 'clientLastName' ||
+            key === 'clientName') &&
+            'uppercase',
+        )}
         type={type}
         value={draft[key]}
         onChange={set(key)}
         placeholder={placeholder}
+      />
+    </div>
+  );
+
+  const moneyField = (label: string, key: keyof ContractDraft) => (
+    <div>
+      <label className={fl}>{label}</label>
+      <CopMoneyInput
+        value={draft[key]}
+        onChange={(digits) => setDraft((d) => ({ ...d, [key]: digits }))}
+        className={cn(input, 'pl-9')}
+        placeholder="0"
       />
     </div>
   );
@@ -597,9 +749,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             <FincaPicker
               fincas={fincas}
               value={draft.fincaId}
-              onChange={(id, title) =>
-                setDraft((d) => ({ ...d, fincaId: id, fincaTitle: title }))
-              }
+              onChange={applyFinca}
             />
             {draft.fincaTitle && !draft.fincaId ? (
               <p className="mt-1 text-[11px] font-medium text-amber-600">
@@ -609,23 +759,181 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           </div>
           <div className="grid grid-cols-2 gap-3">
             {field('Código contrato', 'contractCode', 'Ej. CR 2041')}
-            {field('Valor / noche', 'pricePerNight', '$ 0')}
+            {moneyField('Valor / noche', 'pricePerNight')}
             {field('Entrada', 'checkIn', '', 'date')}
             {field('Salida', 'checkOut', '', 'date')}
             {field('Hora entrada', 'checkInTime')}
             {field('Hora salida', 'checkOutTime')}
             {field('Personas', 'guests', '0')}
-            {field('N° mascotas', 'petCount', '0')}
+            <div>
+              <label className={fl}>N° mascotas</label>
+              <input
+                className={input}
+                type="number"
+                min={0}
+                step={1}
+                value={draft.petCount}
+                onChange={set('petCount')}
+                placeholder="0"
+              />
+            </div>
           </div>
+          {petFees.count > 0 ? (
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-[12px]">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-bold text-emerald-700 dark:text-emerald-400">
+                  {petFees.count === 1
+                    ? '1 mascota'
+                    : `${petFees.count} mascotas`}
+                </p>
+                <p className="text-[14px] font-black tabular-nums text-emerald-700 dark:text-emerald-400">
+                  {moneyCop(petFees.total)}
+                </p>
+              </div>
+              <ul className="mt-1.5 space-y-0.5 text-[11px] text-muted-foreground">
+                {petFees.deposit > 0 ? (
+                  <li className="flex justify-between gap-2">
+                    <span>
+                      Depósito reembolsable
+                      {petFees.count >= 2 ? ' (máx. 2 × $100.000)' : ' ($100.000)'}
+                    </span>
+                    <span className="font-medium tabular-nums text-foreground">
+                      {moneyCop(petFees.deposit)}
+                    </span>
+                  </li>
+                ) : null}
+                {petFees.serviceFee > 0 ? (
+                  <li className="flex justify-between gap-2">
+                    <span>
+                      Ingreso desde la 3ª ($30.000 c/u)
+                    </span>
+                    <span className="font-medium tabular-nums text-foreground">
+                      {moneyCop(petFees.serviceFee)}
+                    </span>
+                  </li>
+                ) : null}
+                {petFees.cleaningFee > 0 ? (
+                  <li className="flex justify-between gap-2">
+                    <span>Aseo mascotas (desde 3ª)</span>
+                    <span className="font-medium tabular-nums text-foreground">
+                      {moneyCop(petFees.cleaningFee)}
+                    </span>
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              Al poner mascotas (ej. 3) verás el valor al instante: depósito
+              $100.000 c/u (máx. 2), y desde la 3ª +$30.000 ingreso + $70.000
+              aseo.
+            </p>
+          )}
         </div>
       </Section>
 
       <Section title="Cargos y depósitos">
         <div className="grid grid-cols-2 gap-3">
-          {field('Aseo final', 'cleaningFee', '$ 0')}
-          {field('Depósito garantía', 'refundableDeposit', '$ 0')}
-          {field('Manilla / condominio', 'manillaCondominio', '$ 0')}
-          {field('Otros cobros', 'otherCharges', '$ 0')}
+          {moneyField('Aseo final', 'cleaningFee')}
+          {moneyField('Depósito garantía', 'refundableDeposit')}
+          {moneyField('Manilla / condominio', 'manillaCondominio')}
+          {moneyField('Otros cobros', 'otherCharges')}
+        </div>
+      </Section>
+
+      <Section
+        title="Resumen de cobro"
+        hint={
+          chargeSummary.nights > 0
+            ? chargeSummary.nights === 1
+              ? '1 noche'
+              : `${chargeSummary.nights} noches`
+            : 'Pon fechas'
+        }
+      >
+        <div className="space-y-1 text-[12px]">
+          <div className="flex items-center justify-between gap-2 border-b border-dashed border-border/60 py-1.5">
+            <span className="text-muted-foreground">
+              Finca
+              {chargeSummary.nights > 0
+                ? ` (${chargeSummary.nights === 1 ? '1 noche' : `${chargeSummary.nights} noches`} × valor/noche)`
+                : ''}
+            </span>
+            <span className="font-semibold tabular-nums">
+              {moneyCop(chargeSummary.stay)}
+            </span>
+          </div>
+          {petFees.deposit > 0 ? (
+            <div className="flex items-center justify-between gap-2 border-b border-dashed border-border/60 py-1.5">
+              <span className="text-emerald-600">Depósito mascotas</span>
+              <span className="font-semibold tabular-nums text-emerald-600">
+                + {moneyCop(petFees.deposit)}
+              </span>
+            </div>
+          ) : null}
+          {petFees.serviceFee > 0 ? (
+            <div className="flex items-center justify-between gap-2 border-b border-dashed border-border/60 py-1.5">
+              <span className="text-muted-foreground">
+                Ingreso mascotas (3ª+)
+              </span>
+              <span className="font-semibold tabular-nums">
+                + {moneyCop(petFees.serviceFee)}
+              </span>
+            </div>
+          ) : null}
+          {petFees.cleaningFee > 0 ? (
+            <div className="flex items-center justify-between gap-2 border-b border-dashed border-border/60 py-1.5">
+              <span className="text-muted-foreground">Aseo mascotas (3+)</span>
+              <span className="font-semibold tabular-nums">
+                + {moneyCop(petFees.cleaningFee)}
+              </span>
+            </div>
+          ) : null}
+          {chargeSummary.cleaningFee > 0 ? (
+            <div className="flex items-center justify-between gap-2 border-b border-dashed border-border/60 py-1.5">
+              <span className="text-muted-foreground">Aseo final</span>
+              <span className="font-semibold tabular-nums">
+                + {moneyCop(chargeSummary.cleaningFee)}
+              </span>
+            </div>
+          ) : null}
+          {chargeSummary.refundableDeposit > 0 ? (
+            <div className="flex items-center justify-between gap-2 border-b border-dashed border-border/60 py-1.5">
+              <span className="text-muted-foreground">Depósito garantía</span>
+              <span className="font-semibold tabular-nums">
+                + {moneyCop(chargeSummary.refundableDeposit)}
+              </span>
+            </div>
+          ) : null}
+          {chargeSummary.manillaCondominio > 0 ? (
+            <div className="flex items-center justify-between gap-2 border-b border-dashed border-border/60 py-1.5">
+              <span className="text-muted-foreground">Manilla / condominio</span>
+              <span className="font-semibold tabular-nums">
+                + {moneyCop(chargeSummary.manillaCondominio)}
+              </span>
+            </div>
+          ) : null}
+          {chargeSummary.otherCharges > 0 ? (
+            <div className="flex items-center justify-between gap-2 border-b border-dashed border-border/60 py-1.5">
+              <span className="text-muted-foreground">Otros cobros</span>
+              <span className="font-semibold tabular-nums">
+                + {moneyCop(chargeSummary.otherCharges)}
+              </span>
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <span className="text-[13px] font-black uppercase tracking-wide">
+              Total a cobrar
+            </span>
+            <span className="text-[15px] font-black tabular-nums text-primary">
+              {moneyCop(chargeSummary.total)}
+            </span>
+          </div>
+          <p className="pt-1 text-[10px] text-muted-foreground">
+            En el Word, el “valor del contrato” es el arriendo (noches × noche).
+            Aseo, depósitos y mascotas van desglosados aparte; aquí ves el total
+            que paga el cliente.
+          </p>
         </div>
       </Section>
 
@@ -777,29 +1085,38 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
 
       <Section title="Cliente">
         <div className="grid grid-cols-2 gap-3">
-          {field('Nombre', 'clientName', 'Nombre completo')}
-          {field('Cédula', 'clientCedula', '—')}
+          {field('Nombres', 'clientFirstName', 'NOMBRES')}
+          {field('Apellidos', 'clientLastName', 'APELLIDOS')}
+          <div>
+            <label className={fl}>Tipo documento</label>
+            <select
+              className={input}
+              value={draft.clientDocType}
+              onChange={set('clientDocType')}
+            >
+              {DOC_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {field('N° documento', 'clientCedula', '—')}
+          {field('Fecha expedición', 'clientDocIssuedAt', '', 'date')}
+          {field('Ciudad expedición', 'clientCity', 'Ej. Bogotá')}
           {field('Teléfono', 'clientPhone', '—')}
           {field('Correo', 'clientEmail', '—')}
-          {field('Ciudad', 'clientCity', '—')}
-          {field('Dirección', 'clientAddress', '—')}
+          <div className="col-span-2">{field('Dirección', 'clientAddress', '—')}</div>
         </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          En el contrato el nombre sale en mayúsculas:{' '}
+          <span className="font-semibold text-foreground">
+            {fullClientName(draft) || '—'}
+          </span>
+        </p>
       </Section>
 
       <div className="sticky bottom-0 -mx-4 mt-auto flex items-center gap-2 border-t border-border bg-background/90 px-4 py-3 backdrop-blur">
-        <button
-          type="button"
-          onClick={() => void handleGenerate()}
-          disabled={generating || !draft.fincaId}
-          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
-        >
-          {generating ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <FileText className="h-4 w-4" />
-          )}
-          Generar contrato
-        </button>
         <button
           type="button"
           onClick={() =>
@@ -808,15 +1125,31 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
               : toast.error('Selecciona la finca.')
           }
           disabled={!draft.fincaId}
-          className="flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-50"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
         >
           <FileText className="h-4 w-4" /> Ver y enviar
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleGenerate()}
+          disabled={generating || !draft.fincaId}
+          className="flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-50"
+        >
+          {generating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <FileText className="h-4 w-4" />
+          )}
+          Generar contrato
         </button>
       </div>
 
       {showPreview ? (
         <ContractPreviewModal
-          draft={draft}
+          draft={{
+            ...draft,
+            clientName: fullClientName(draft),
+          }}
           selectedBankIds={selectedBankIds}
           conversation={conversation}
           onClose={() => setShowPreview(false)}

@@ -31,7 +31,11 @@ export type PreviewDraft = {
   manillaCondominio: string;
   otherCharges: string;
   clientName: string;
+  clientFirstName?: string;
+  clientLastName?: string;
+  clientDocType?: string;
   clientCedula: string;
+  clientDocIssuedAt?: string;
   clientPhone: string;
   clientEmail: string;
   clientCity: string;
@@ -94,8 +98,12 @@ export function ContractPreviewModal({
               contractNumber: draft.contractCode,
               nightlyPrice: String(perNight),
               totalPrice: String(perNight * nights),
-              clientName: draft.clientName,
+              clientName: String(draft.clientName || '').trim().toUpperCase(),
+              clientFirstName: String(draft.clientFirstName || '').trim().toUpperCase(),
+              clientLastName: String(draft.clientLastName || '').trim().toUpperCase(),
               clientId: draft.clientCedula,
+              clientDocType: draft.clientDocType || 'CC',
+              clientDocIssuedAt: draft.clientDocIssuedAt || '',
               clientEmail: draft.clientEmail,
               clientPhone: draft.clientPhone,
               clientCity: draft.clientCity,
@@ -194,12 +202,16 @@ export function ContractPreviewModal({
     if (!ready) return;
     setBusy('docx');
     try {
-      const sd = superdocRef.current;
-      await sd.export({
-        exportType: ['docx'],
-        exportedName: baseName,
-        triggerDownload: true,
-      });
+      const blob = await exportEditedDocx();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      toast.success('Word descargado.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al descargar.');
     } finally {

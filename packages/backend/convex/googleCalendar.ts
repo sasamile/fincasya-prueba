@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { action, internalAction, internalQuery, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import {
   buildStopWords,
   parseClientNameFromTitle,
@@ -433,7 +434,7 @@ export const listExternalEvents = action({
   },
 });
 
-/** Fincas + eventos ya importados, para armar las sugerencias de la revisión. */
+/** Fincas + eventos ya importados/vetados, para armar la revisión. */
 export const getImportContext = internalQuery({
   args: {},
   handler: async (
@@ -441,9 +442,11 @@ export const getImportContext = internalQuery({
   ): Promise<{
     props: Array<{ id: string; title: string; code: string | null; location: string }>;
     importedEventIds: string[];
+    skippedEventIds: string[];
   }> => {
     const props = await ctx.db.query("properties").collect();
     const blocks = await ctx.db.query("propertyAvailability").collect();
+    const skips = await ctx.db.query("googleCalendarEventSkips").collect();
     return {
       props: props
         .filter((p) => p.active !== false)
@@ -456,6 +459,7 @@ export const getImportContext = internalQuery({
       importedEventIds: blocks
         .map((b) => b.googleEventId)
         .filter((id): id is string => typeof id === "string" && id.length > 0),
+      skippedEventIds: skips.map((s) => s.googleEventId),
     };
   },
 });
@@ -468,6 +472,8 @@ export type ImportCandidate = ExternalCalendarEvent & {
   alternatives: string[];
   matchedOn: string | null;
   alreadyImported: boolean;
+  /** Vetado: el operador borró su bloqueo → el auto-import no lo vuelve a traer. */
+  skipped: boolean;
 };
 
 /**
@@ -482,12 +488,13 @@ export const listImportCandidates = action({
       api.googleCalendar.listExternalEvents,
       { timeMinMs: args.timeMinMs, timeMaxMs: args.timeMaxMs },
     );
-    const { props, importedEventIds } = await ctx.runQuery(
+    const { props, importedEventIds, skippedEventIds } = await ctx.runQuery(
       internal.googleCalendar.getImportContext,
       {},
     );
     const stop = buildStopWords(props);
     const imported = new Set(importedEventIds);
+    const skipped = new Set(skippedEventIds);
 
     return events.map((e) => {
       const s = suggestPropertyForEvent(e.summary, props, stop);
@@ -499,6 +506,7 @@ export const listImportCandidates = action({
         alternatives: s.alternatives,
         matchedOn: s.matchedOn,
         alreadyImported: imported.has(e.id),
+        skipped: skipped.has(e.id),
       };
     });
   },
@@ -520,8 +528,10 @@ export const importEventsAsBlocks = mutation({
         summary: v.string(),
       }),
     ),
+    /** true cuando llama el cron de auto-import (respeta los eventos vetados). */
+    auto: v.optional(v.boolean()),
   },
-  handler: async (ctx, { items }) => {
+  handler: async (ctx, { items, auto }) => {
     let creados = 0;
     let omitidos = 0;
 
@@ -533,6 +543,19 @@ export const importEventsAsBlocks = mutation({
       if (existing) {
         omitidos++;
         continue;
+      }
+      // Evento vetado (el operador borró un bloqueo auto-importado): el cron lo
+      // respeta; una importación MANUAL desde la revisión levanta el veto.
+      const skip = await ctx.db
+        .query("googleCalendarEventSkips")
+        .withIndex("by_google_event", (q) => q.eq("googleEventId", item.eventId))
+        .first();
+      if (skip) {
+        if (auto) {
+          omitidos++;
+          continue;
+        }
+        await ctx.db.delete(skip._id);
       }
       const prop = await ctx.db.get(item.propertyId);
       if (!prop) {
@@ -550,12 +573,90 @@ export const importEventsAsBlocks = mutation({
         fechaEntrada: item.fechaEntrada,
         fechaSalida,
         blocked: true,
-        reason: `Google Calendar: ${item.summary.slice(0, 120)}`,
+        reason: `Google Calendar${auto ? " (auto)" : ""}: ${item.summary.slice(0, 120)}`,
         googleEventId: item.eventId,
       });
       creados++;
     }
     return { creados, omitidos };
+  },
+});
+
+/**
+ * AUTO-IMPORT (cron horario): convierte en bloqueos los eventos externos del
+ * Google Calendar cuyo título matchea una finca con confianza ALTA (el token
+ * está en la zona de la finca, después de la coma) o MEDIA (título sin zona de
+ * cliente, ej. "CHIMBI OCUPADA"). Los de confianza BAJA (posible choque con el
+ * apellido del cliente) y los ambiguos quedan para la revisión manual.
+ * Idempotente (index by_google_event) y respeta los eventos vetados
+ * (googleCalendarEventSkips).
+ */
+export const autoImportHighConfidence = internalAction({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{ creados: number; omitidos: number; candidatos: number }> => {
+    const gc = await ctx.runQuery(internal.googleCalendar.getForSync, {});
+    if (!gc?.connected || !gc.refreshToken) {
+      return { creados: 0, omitidos: 0, candidatos: 0 };
+    }
+
+    // Ventanas de 30 días (listExternalEvents trae máx. 250 eventos por
+    // llamada): desde hace una semana (estadías en curso) hasta ~6 meses.
+    const DAY = 24 * 60 * 60 * 1000;
+    const from = Date.now() - 7 * DAY;
+    const byId = new Map<string, ExternalCalendarEvent>();
+    for (let i = 0; i < 6; i++) {
+      const chunk: ExternalCalendarEvent[] = await ctx.runAction(
+        api.googleCalendar.listExternalEvents,
+        { timeMinMs: from + i * 30 * DAY, timeMaxMs: from + (i + 1) * 30 * DAY },
+      );
+      for (const e of chunk) byId.set(e.id, e); // dedup: eventos que cruzan ventanas
+    }
+    if (byId.size === 0) return { creados: 0, omitidos: 0, candidatos: 0 };
+
+    const { props, importedEventIds, skippedEventIds } = await ctx.runQuery(
+      internal.googleCalendar.getImportContext,
+      {},
+    );
+    const stop = buildStopWords(props);
+    const imported = new Set(importedEventIds);
+    const skipped = new Set(skippedEventIds);
+
+    const items: Array<{
+      eventId: string;
+      propertyId: Id<"properties">;
+      fechaEntrada: number;
+      fechaSalida: number;
+      summary: string;
+    }> = [];
+    for (const e of byId.values()) {
+      if (imported.has(e.id) || skipped.has(e.id)) continue;
+      const s = suggestPropertyForEvent(e.summary, props, stop);
+      if (!s.propertyId) continue;
+      if (s.confidence !== "alta" && s.confidence !== "media") continue;
+      items.push({
+        eventId: e.id,
+        propertyId: s.propertyId as Id<"properties">,
+        fechaEntrada: e.startMs,
+        fechaSalida: e.endMs,
+        summary: e.summary,
+      });
+    }
+    if (items.length === 0) {
+      return { creados: 0, omitidos: 0, candidatos: 0 };
+    }
+
+    const res: { creados: number; omitidos: number } = await ctx.runMutation(
+      api.googleCalendar.importEventsAsBlocks,
+      { items, auto: true },
+    );
+    if (res.creados > 0) {
+      console.log(
+        `[googleCalendar] auto-import: ${res.creados} bloqueos nuevos (${res.omitidos} omitidos de ${items.length} candidatos)`,
+      );
+    }
+    return { ...res, candidatos: items.length };
   },
 });
 

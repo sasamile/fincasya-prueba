@@ -826,6 +826,15 @@ export default defineSchema(
       // importar dos veces el mismo evento.
       .index('by_google_event', ['googleEventId']),
 
+    // Eventos de Google que el operador DESCARTÓ (borró el bloqueo que había
+    // creado el auto-import): el cron no los vuelve a importar. Importarlo a
+    // mano desde la pantalla de revisión levanta el veto.
+    googleCalendarEventSkips: defineTable({
+      googleEventId: v.string(),
+      summary: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index('by_google_event', ['googleEventId']),
+
 
     globalPricing: defineTable({
       nombre: v.string(),

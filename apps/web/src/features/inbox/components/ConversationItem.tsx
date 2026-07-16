@@ -123,10 +123,10 @@ export function ConversationItem({
         'flex w-full select-none items-start gap-3 border-b border-border/40 px-4 py-3 text-left transition-colors',
         '[-webkit-touch-callout:none] [-webkit-user-select:none]',
         isEscalated
-          ? 'bg-[#504437] hover:bg-[#5c4e40]'
+          ? 'bg-[#504437]/55 hover:bg-[#504437]/50'
           : 'hover:bg-muted',
         !isEscalated && conv.pinned && 'bg-muted/30',
-        active && (isEscalated ? 'bg-[#5c4e40]' : 'bg-accent'),
+        active && (isEscalated ? 'bg-[#504437]/75' : 'bg-accent'),
         selectMode && selected && 'bg-primary/10',
       )}
     >

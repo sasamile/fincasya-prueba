@@ -21,4 +21,15 @@ crons.interval(
   {},
 );
 
+// Cada hora: los eventos externos del Google Calendar con match de finca
+// confiable (alta/media) se convierten SOLOS en bloqueos → el bot deja de
+// ofrecer esas fincas sin esperar la revisión del operador. Los dudosos
+// (confianza baja/ambiguos) siguen entrando solo por la pantalla de revisión.
+crons.interval(
+  'auto-import bloqueos Google Calendar',
+  { hours: 1 },
+  internal.googleCalendar.autoImportHighConfidence,
+  {},
+);
+
 export default crons;
