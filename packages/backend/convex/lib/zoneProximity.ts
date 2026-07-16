@@ -65,3 +65,43 @@ export function propertyMatchesZone(
   const depts = (departamentos ?? []).map(norm);
   return keywords.some((k) => loc.includes(k) || depts.some((d) => d.includes(k)));
 }
+
+// ---------------------------------------------------------------------------
+// COSTA — regla comercial: los destinos de costa (Santa Marta, Cartagena,
+// Islas del Rosario…) SOLO se envían si el turista los pide explícitamente.
+// Jamás se mezclan en las favoritas sin zona ni en ampliaciones de búsqueda.
+// ---------------------------------------------------------------------------
+
+/** Frases del cliente que SÍ son una petición explícita de costa. */
+const COAST_REQUEST_KEYWORDS = [
+  'santa marta', 'cartagena', 'rosario', 'baru', 'isla', 'costa', 'playa',
+  'caribe', 'covenas', 'tolu', 'magdalena', 'bolivar', 'tierra bomba',
+];
+
+/** Ubicaciones/departamentos de finca que cuentan como costa. */
+const COASTAL_LOCATION_KEYWORDS = [
+  'santa marta', 'cartagena', 'rosario', 'baru', 'tierra bomba', 'covenas', 'tolu',
+];
+const COASTAL_DEPARTMENTS = [
+  'magdalena', 'bolivar', 'atlantico', 'sucre', 'cordoba', 'guajira',
+];
+
+/** ¿La zona pedida por el cliente ES costa (petición explícita)? */
+export function zoneRequestsCoast(zonaRaw?: string | null): boolean {
+  const z = norm(zonaRaw ?? '');
+  if (!z) return false;
+  return COAST_REQUEST_KEYWORDS.some((k) => z.includes(k));
+}
+
+/** ¿La finca está en la costa? (por municipio o departamento). */
+export function isCoastalProperty(
+  location: string,
+  departamentos?: string[],
+): boolean {
+  const loc = norm(location);
+  const depts = (departamentos ?? []).map(norm);
+  return (
+    COASTAL_LOCATION_KEYWORDS.some((k) => loc.includes(k)) ||
+    COASTAL_DEPARTMENTS.some((d) => depts.some((x) => x.includes(d)))
+  );
+}

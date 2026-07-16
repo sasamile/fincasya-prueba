@@ -38,7 +38,12 @@ import {
 import { isAppAutoReply } from './lib/appAutoReply';
 import { detectPriceLoopEscalation, isPriceDeflection, isPriceQuestion } from './lib/agentEscalation';
 import { detectPuenteFestivo, humanHolidayEs } from './lib/colombiaPublicHolidays';
-import { propertyMatchesZone, resolveZoneKeywords } from './lib/zoneProximity';
+import {
+  isCoastalProperty,
+  propertyMatchesZone,
+  resolveZoneKeywords,
+  zoneRequestsCoast,
+} from './lib/zoneProximity';
 import { sendWhatsappText } from './lib/ycloud';
 import {
   BETWEEN_CATALOG_SENDS_MS,
@@ -356,6 +361,12 @@ export const toolCatalogPick = internalQuery({
     // Palabra clave "principal" (para el tier de coincidencia exacta del orden).
     const zonaLower = zonaTrim?.toLowerCase();
 
+    // COSTA SOLO SI LA PIDEN (regla comercial): Santa Marta, Cartagena, Islas
+    // del Rosario… jamás se mezclan en las favoritas sin zona ni en la
+    // ampliación a municipios cercanos — solo salen cuando la zona pedida por
+    // el cliente ES costa.
+    const clienteQuiereCosta = zoneRequestsCoast(zonaTrim);
+
     const base = all
       .filter((p) => !exclude.has(String(p._id)))
       // El bot SOLO envía fincas habilitadas (active), visibles en catálogo
@@ -366,6 +377,9 @@ export const toolCatalogPick = internalQuery({
           p.active !== false &&
           p.visible !== false &&
           p.visibleInWhatsAppCatalog !== false,
+      )
+      .filter(
+        (p) => clienteQuiereCosta || !isCoastalProperty(p.location, p.departamentos),
       )
       .filter((p) => propertyMatchesZone(p.location, p.departamentos, zoneKw))
       .filter((p) => (mascotas ? p.allowsPets === true : true));
