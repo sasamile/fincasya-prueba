@@ -304,6 +304,22 @@ export const MASCOTAS_POLITICA = `✨🐶 Tus mascotas son bienvenidas en la may
 ❗Recuerda: El incumplimiento de estas normas puede generar descuentos en el depósito de garantía. ¡Gracias por cuidar la propiedad mientras disfrutas con tus peluditos! 💚`;
 
 /**
+ * Mensaje oficial del PROCESO DE RESERVA (verbatim del equipo). Se envia TAL
+ * CUAL con la tool enviar_proceso_reserva cuando el cliente pregunta como se
+ * reserva/separa — y como promete que un experto continua, la tool escala en
+ * el mismo turno.
+ */
+export const PROCESO_RESERVA_MSG = `🏡 Reservar con FincasYa es fácil y seguro.
+
+La reserva se realiza previa validación de la documentación y firma del contrato. El pago corresponde al 50% de anticipo y el saldo se cancela al llegar a la propiedad, antes de disfrutar de tu estadía.
+
+📋 El contrato y el enlace oficial para realizar la reserva solo pueden ser generados por uno de nuestros expertos.
+
+⏳ En unos momentos uno de nuestros expertos continuará tu atención. El tiempo de respuesta puede tomar algunos minutos, ya que brindamos una atención personalizada a cada cliente.
+
+¡Gracias por confiar en FincasYa! 😊`;
+
+/**
  * Mensaje oficial que ACOMPAÑA las fichas del catalogo (verbatim del equipo,
  * version Camilo 15-jul). Saluda con Sr./Sra. + nombre cuando se conoce. Ya
  * incluye la aclaracion de valor por noche y la invitacion a elegir / ver mas

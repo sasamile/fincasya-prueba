@@ -32,6 +32,7 @@ import {
   formalSalutationName,
   getUserBurstSinceLastBot,
   MASCOTAS_POLITICA,
+  PROCESO_RESERVA_MSG,
   prependGreetingIfNeeded,
   stripRedundantHolaPrefix,
 } from './lib/copys';
@@ -837,6 +838,15 @@ const TOOL_DEFS: ToolDef[] = [
       name: 'enviar_politica_mascotas',
       description:
         'Envia al cliente el mensaje OFICIAL de mascotas del equipo (deposito de la primera, tarifas desde la 2da, recomendaciones) TAL CUAL, como mensaje aparte. Usala la PRIMERA vez que el cliente pregunte por mascotas o confirme que lleva. NO reemplaza el catalogo: si ya tienes fechas + personas, llama TAMBIEN enviar_catalogo (con mascotas:true) EN ESTE MISMO TURNO — las mascotas NUNCA frenan el envio de opciones. No la repitas si ya se envio en esta conversacion.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'enviar_proceso_reserva',
+      description:
+        'Envia al cliente el mensaje OFICIAL del proceso de reserva TAL CUAL (validacion de documentos, contrato, 50% de anticipo, el experto genera el link) y ESCALA a un experto en el mismo turno. Usala cuando el cliente pregunte como reservar, como separar, los pasos, el proceso, el anticipo o como se paga. PROHIBIDO redactar el proceso tu mismo o dar medios de pago/numeros de cuenta.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -1689,6 +1699,34 @@ export const runAgentTurn = internalAction({
                 nota: 'El mensaje oficial de mascotas YA se envio TAL CUAL como mensaje aparte. NO repitas la politica ni sus cifras ni sus recomendaciones. LIMITE OFICIAL: maximo 2 mascotas de raza pequeña — si el cliente menciono 3 o mas mascotas (o razas grandes), NO prometas cupo ni envies catalogo: di que un experto revisa su caso y llama escalar_a_humano AHORA (motivo: "N mascotas — validar excepcion"). Con 1-2 mascotas pequeñas continua el flujo: si ya tienes fechas + personas y no has enviado catalogo, llama enviar_catalogo (mascotas:true) AHORA MISMO; si falta un dato, pidelo en una linea corta. PROHIBIDO decir "pet friendly".',
               };
             }
+          } else if (call.function.name === 'enviar_proceso_reserva') {
+            let procesoWamid: string | undefined;
+            try {
+              const sentProceso = await sendWhatsappText({
+                to: context.contactPhone,
+                text: PROCESO_RESERVA_MSG,
+              });
+              procesoWamid = sentProceso.wamid;
+            } catch (err) {
+              console.error('[agent] fallo el envio del proceso de reserva', err);
+            }
+            await ctx.runMutation(internal.agent.saveAssistantMessage, {
+              conversationId,
+              content: PROCESO_RESERVA_MSG,
+              wamid: procesoWamid,
+            });
+            await ctx.runMutation(internal.agent.toolEscalar, {
+              conversationId,
+              motivo:
+                'cliente pregunta el proceso de reserva — experto genera contrato y link oficial',
+            });
+            escalated = true;
+            skipFinalReply = true;
+            result = {
+              enviado: true,
+              escalado: true,
+              nota: 'El mensaje oficial del proceso de reserva YA se envio TAL CUAL y la conversacion fue escalada a un experto. NO escribas texto final — el mensaje oficial ya cubre todo.',
+            };
           } else if (call.function.name === 'iniciar_reserva') {
             const handoffText = buildPropertySelectionHandoff(
               context.contactName,
