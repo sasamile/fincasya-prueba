@@ -1362,7 +1362,13 @@ export const buildCatalogCardsForSelection = internalQuery({
         ok: true;
         to: string;
         catalogMetaId: string;
-        cards: Array<{ propertyId: Id<'properties'>; title: string; retailerId: string; bodyText: string }>;
+        cards: Array<{
+          propertyId: Id<'properties'>;
+          title: string;
+          retailerId: string;
+          bodyText: string;
+          alternateRetailerIds?: string[];
+        }>;
       }
   > => {
     const conversation = await ctx.db.get(conversationId);
@@ -1382,6 +1388,7 @@ export const buildCatalogCardsForSelection = internalQuery({
       title: string;
       retailerId: string;
       bodyText: string;
+      alternateRetailerIds?: string[];
     }> = [];
     for (const propertyId of propertyIds) {
       const p = await ctx.db.get(propertyId);
@@ -1405,6 +1412,7 @@ export const buildCatalogCardsForSelection = internalQuery({
         title: p.title,
         retailerId: mapping.productRetailerId,
         bodyText: parts.join(' · '),
+        alternateRetailerIds: p.code?.trim() ? [p.code.trim()] : undefined,
       });
     }
     if (cards.length === 0)
@@ -1418,6 +1426,7 @@ const catalogQueueCard = v.object({
   title: v.string(),
   retailerId: v.string(),
   bodyText: v.string(),
+  alternateRetailerIds: v.optional(v.array(v.string())),
 });
 
 const webFichaQueueCard = v.object({
@@ -1445,7 +1454,11 @@ export const deliverCatalogStep = internalAction({
     const row = await sendCatalogCard({
       to,
       catalogId: catalogMetaId,
-      card: { productRetailerId: card.retailerId, bodyText: card.bodyText },
+      card: {
+        productRetailerId: card.retailerId,
+        bodyText: card.bodyText,
+        alternateRetailerIds: card.alternateRetailerIds,
+      },
     });
 
     let nextOk = okCount;

@@ -38,6 +38,11 @@ export type CatalogCard = {
   productRetailerId: string;
   /** Cuerpo de la ficha (ej. "💰 Desde $850.000 por noche · hasta 12 personas"). */
   bodyText: string;
+  /**
+   * IDs alternativos a probar si Meta responde 131009 con el principal
+   * (ej. código de finca VLL#004 cuando el Content ID en Meta no es el _id).
+   */
+  alternateRetailerIds?: string[];
 };
 
 export type CatalogSendRow = {
@@ -64,12 +69,25 @@ function isInvalidCatalogError(status: number, text: string): boolean {
   return status === 400 && /invalid.*catalog|131009/i.test(text);
 }
 
+function uniqueRetailerIds(primary: string, alternates?: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of [primary, ...(alternates ?? [])]) {
+    const id = String(raw ?? '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 async function postCatalogCard(args: {
   apiKey: string;
   wabaNumber: string;
   to: string;
   catalogId: string;
-  card: CatalogCard;
+  productRetailerId: string;
+  bodyText: string;
 }): Promise<{ ok: boolean; status: number; text: string }> {
   const res = await fetch(SEND_DIRECTLY, {
     method: 'POST',
@@ -83,11 +101,11 @@ async function postCatalogCard(args: {
       type: 'interactive',
       interactive: {
         type: 'product',
-        body: { text: args.card.bodyText },
+        body: { text: args.bodyText },
         footer: { text: 'FincasYa' },
         action: {
           catalog_id: args.catalogId,
-          product_retailer_id: args.card.productRetailerId,
+          product_retailer_id: args.productRetailerId,
         },
       },
     }),
@@ -102,48 +120,70 @@ export async function sendCatalogCard(args: {
   card: CatalogCard;
 }): Promise<CatalogSendRow> {
   const { apiKey, wabaNumber } = requireYcloudEnv();
-  let catalogId = args.catalogId;
+  const retailerCandidates = uniqueRetailerIds(
+    args.card.productRetailerId,
+    args.card.alternateRetailerIds,
+  );
+  const catalogCandidates = [args.catalogId, FALLBACK_CATALOG_ID].filter(
+    (id, i, arr) => id && arr.indexOf(id) === i,
+  );
 
-  let result = await postCatalogCard({
-    apiKey,
-    wabaNumber,
-    to: args.to,
-    catalogId,
-    card: args.card,
-  });
+  let lastFail: { status: number; text: string; catalogId: string; retailerId: string } | null =
+    null;
 
-  // Igual que new: si el producto no esta en el catalogo principal, probar fallback.
-  if (
-    !result.ok &&
-    isInvalidCatalogError(result.status, result.text) &&
-    catalogId !== FALLBACK_CATALOG_ID
-  ) {
-    catalogId = FALLBACK_CATALOG_ID;
-    result = await postCatalogCard({
-      apiKey,
-      wabaNumber,
-      to: args.to,
-      catalogId,
-      card: args.card,
-    });
-  }
+  for (const catalogId of catalogCandidates) {
+    for (const productRetailerId of retailerCandidates) {
+      const result = await postCatalogCard({
+        apiKey,
+        wabaNumber,
+        to: args.to,
+        catalogId,
+        productRetailerId,
+        bodyText: args.card.bodyText,
+      });
 
-  if (result.ok) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(result.text);
-    } catch {
-      parsed = undefined;
+      if (result.ok) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(result.text);
+        } catch {
+          parsed = undefined;
+        }
+        if (
+          productRetailerId !== args.card.productRetailerId ||
+          catalogId !== args.catalogId
+        ) {
+          console.log(
+            `[catalog] ficha OK con fallback retailer=${productRetailerId} catalog=${catalogId} (pedido ${args.card.productRetailerId} / ${args.catalogId})`,
+          );
+        }
+        return {
+          productRetailerId,
+          wamid: wamidFrom(parsed),
+          ok: true,
+          catalogIdUsed: catalogId,
+        };
+      }
+
+      lastFail = {
+        status: result.status,
+        text: result.text,
+        catalogId,
+        retailerId: productRetailerId,
+      };
+
+      // Solo tiene sentido probar otro retailer/catalog si es 131009 / catalog inválido.
+      if (!isInvalidCatalogError(result.status, result.text)) {
+        console.error(
+          `[catalog] ficha ${productRetailerId} catalog=${catalogId} fallo — se omite: ${result.status} ${result.text.slice(0, 220)}`,
+        );
+        return { productRetailerId: args.card.productRetailerId, ok: false };
+      }
     }
-    return {
-      productRetailerId: args.card.productRetailerId,
-      wamid: wamidFrom(parsed),
-      ok: true,
-      catalogIdUsed: catalogId,
-    };
   }
+
   console.error(
-    `[catalog] ficha ${args.card.productRetailerId} fallo — se omite: ${result.status} ${result.text.slice(0, 220)}`,
+    `[catalog] ficha ${args.card.productRetailerId} fallo — se omite: ${lastFail?.status ?? '?'} catalog=${lastFail?.catalogId ?? args.catalogId} tried=${retailerCandidates.join(',')} ${lastFail?.text.slice(0, 180) ?? ''}`,
   );
   return { productRetailerId: args.card.productRetailerId, ok: false };
 }

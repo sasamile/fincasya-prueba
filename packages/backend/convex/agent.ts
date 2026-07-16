@@ -101,6 +101,8 @@ type CatalogPickResult =
         retailerId: string;
         title: string;
         bodyText: string;
+        /** Códigos / IDs alternativos si Meta no reconoce el retailer principal. */
+        alternateRetailerIds?: string[];
       }>;
     };
 
@@ -476,6 +478,7 @@ export const toolCatalogPick = internalQuery({
         retailerId: mapping.productRetailerId,
         title: p.title,
         bodyText: parts.join(' · '),
+        alternateRetailerIds: p.code?.trim() ? [p.code.trim()] : undefined,
       });
     }
     return { ok: true, catalogMetaId: catalog.whatsappCatalogId, items };
@@ -1542,6 +1545,7 @@ export const runAgentTurn = internalAction({
                   card: {
                     productRetailerId: item.retailerId,
                     bodyText: item.bodyText,
+                    alternateRetailerIds: item.alternateRetailerIds,
                   },
                 });
                 if (row.ok) {

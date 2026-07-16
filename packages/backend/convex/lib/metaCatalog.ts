@@ -26,9 +26,13 @@ export function normalizeRetailerId(raw: string): string {
   return String(raw ?? '').trim();
 }
 
-/** IDs internos de Meta Graph (`id`) — distintos del retailer_id del feed. */
+/**
+ * IDs internos de Meta Graph (`id` del producto) — numéricos largos.
+ * NO confundir con Convex `_id` / Content ID del feed (ej. `js70sv…`): esos
+ * SÍ son `retailer_id` válidos en FincasYa y WhatsApp los acepta tal cual.
+ */
 export function isMetaGraphProductId(id: string): boolean {
-  return /^js[a-z0-9]{20,}$/i.test(normalizeRetailerId(id));
+  return /^\d{10,}$/.test(normalizeRetailerId(id));
 }
 
 /** Mapeo inválido: productRetailerId vacío o finca inexistente (no confundir con id=propertyId — eso es correcto en fincasya). */
