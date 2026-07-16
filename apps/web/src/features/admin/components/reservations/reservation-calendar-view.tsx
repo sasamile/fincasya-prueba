@@ -82,6 +82,14 @@ function bookingColor(b: CalendarBooking): {
   text: string;
   dot: string;
 } {
+  // Evento que vive en el Google Calendar conectado (no es una reserva de
+  // FincasYa): gris, para diferenciarlo del semáforo de estados.
+  if (b.isExternal === true)
+    return {
+      bar: "bg-slate-400/25 hover:bg-slate-400/35 border-l-2 border-slate-500 border-dashed",
+      text: "text-slate-900",
+      dot: "bg-slate-400",
+    };
   const s = (b.paymentStatus || b.status || "").toUpperCase();
   if (s === "CANCELLED")
     return {
@@ -117,6 +125,8 @@ function bookingColor(b: CalendarBooking): {
 }
 
 function bookingLabel(b: CalendarBooking): string {
+  // El evento de Google ya trae su título completo tal como está en el calendario.
+  if (b.isExternal === true) return b.nombreCompleto || "(sin título)";
   const code = b.reference || b.calendarLabel || "";
   const name = b.nombreCompleto || "Reserva";
   return code ? `${code} · ${name}` : name;
@@ -801,6 +811,12 @@ export function ReservationCalendarView(props: Props) {
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-red-500" /> Cancelada
         </span>
+        {props.bookings.some((b: CalendarBooking) => b.isExternal === true) && (
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-slate-400" /> En Google
+            Calendar (no está en FincasYa)
+          </span>
+        )}
       </div>
     </div>
     </MenuContext.Provider>

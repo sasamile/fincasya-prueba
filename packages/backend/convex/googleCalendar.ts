@@ -305,6 +305,129 @@ export const exchangeCodeForTokens = action({
   },
 });
 
+/** Ids de eventos de Google que YA creó FincasYa (para no mostrarlos dos veces). */
+export const listOwnGoogleEventIds = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<string[]> => {
+    const bookings = await ctx.db.query("bookings").collect();
+    return bookings
+      .map((b) => b.googleEventId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+  },
+});
+
+export type ExternalCalendarEvent = {
+  id: string;
+  summary: string;
+  startMs: number;
+  endMs: number;
+  allDay: boolean;
+  htmlLink: string | null;
+  location: string | null;
+};
+
+/** "2026-07-16" (all-day de Google) → ms en medianoche de Colombia. */
+function colombiaDateToMs(ymd: string): number {
+  return new Date(`${ymd}T00:00:00-05:00`).getTime();
+}
+
+/**
+ * Lee los eventos que YA existen en el Google Calendar conectado dentro de un
+ * rango (el mes que se ve en el panel). Excluye los que creó FincasYa — solo
+ * devuelve los "externos" (los que el equipo tenía anotados en su calendario).
+ * Es SOLO LECTURA: no crea, no modifica y no borra nada.
+ */
+export const listExternalEvents = action({
+  args: { timeMinMs: v.number(), timeMaxMs: v.number() },
+  handler: async (ctx, args): Promise<ExternalCalendarEvent[]> => {
+    const gc = await ctx.runQuery(internal.googleCalendar.getForSync, {});
+    if (!gc?.connected || !gc.refreshToken) return [];
+
+    let accessToken = gc.accessToken;
+    if (!accessToken || (gc.expiresAt && gc.expiresAt < Date.now() + 60 * 1000)) {
+      const refreshed = await refreshGoogleToken(gc.refreshToken);
+      if (refreshed?.access_token) {
+        accessToken = refreshed.access_token;
+        await ctx.runMutation(api.googleCalendar.saveTokens, {
+          accessToken: refreshed.access_token,
+          expiresAt: Date.now() + (refreshed.expires_in || 3600) * 1000,
+        });
+      } else {
+        if (refreshed?.error === "invalid_grant") {
+          await ctx.runMutation(api.googleCalendar.setNeedsReauth, {
+            needsReauth: true,
+          });
+        }
+        return [];
+      }
+    }
+
+    const calendarId = gc.calendarId ?? "primary";
+    const params = new URLSearchParams({
+      timeMin: new Date(args.timeMinMs).toISOString(),
+      timeMax: new Date(args.timeMaxMs).toISOString(),
+      singleEvents: "true", // expande eventos recurrentes
+      orderBy: "startTime",
+      maxResults: "250",
+    });
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+        calendarId,
+      )}/events?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) {
+      console.error("[googleCalendar] error leyendo eventos:", res.status, await res.text());
+      return [];
+    }
+
+    const data = (await res.json()) as {
+      items?: Array<{
+        id?: string;
+        status?: string;
+        summary?: string;
+        htmlLink?: string;
+        location?: string;
+        start?: { dateTime?: string; date?: string };
+        end?: { dateTime?: string; date?: string };
+      }>;
+    };
+    const ownIds = new Set(
+      await ctx.runQuery(internal.googleCalendar.listOwnGoogleEventIds, {}),
+    );
+
+    const out: ExternalCalendarEvent[] = [];
+    for (const ev of data.items ?? []) {
+      if (!ev.id || ev.status === "cancelled") continue;
+      if (ownIds.has(ev.id)) continue; // evento creado por FincasYa → ya está en la grilla
+      const allDay = Boolean(ev.start?.date);
+      const startMs = ev.start?.dateTime
+        ? new Date(ev.start.dateTime).getTime()
+        : ev.start?.date
+          ? colombiaDateToMs(ev.start.date)
+          : null;
+      // En all-day, Google da `end.date` EXCLUSIVO → restamos un día para que
+      // el rango entrada→salida (inclusivo) pinte los días correctos.
+      const endMs = ev.end?.dateTime
+        ? new Date(ev.end.dateTime).getTime()
+        : ev.end?.date
+          ? colombiaDateToMs(ev.end.date) - 24 * 60 * 60 * 1000
+          : null;
+      if (startMs == null || endMs == null) continue;
+      out.push({
+        id: ev.id,
+        summary: (ev.summary ?? "(sin título)").trim(),
+        startMs,
+        endMs: Math.max(endMs, startMs),
+        allDay,
+        htmlLink: ev.htmlLink ?? null,
+        location: ev.location ?? null,
+      });
+    }
+    return out;
+  },
+});
+
 export const syncBookingToCalendar = internalAction({
   args: {
     bookingId: v.id("bookings"),

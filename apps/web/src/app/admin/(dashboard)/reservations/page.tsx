@@ -142,6 +142,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  useExternalCalendarEvents,
   useReservationsList,
   useCalendarStatus,
   usePropertiesSimple,
@@ -551,6 +552,38 @@ export default function ReservationsPage() {
       router.replace("/admin/reservations");
     }
   }, [searchParams, router, isLoadingStatus, calendarStatus?.connected]);
+
+  // Eventos que YA existían en el Google Calendar conectado (solo lectura): se
+  // pintan junto a las reservas de FincasYa para ver el calendario completo.
+  // Rango = el período visible (mes, o el año en vista "meses").
+  const externalRange = useMemo(() => {
+    const start = groupBy === "months" ? startOfYear(date) : startOfMonth(date);
+    const end = groupBy === "months" ? endOfYear(date) : endOfMonth(date);
+    return { startMs: start.getTime(), endMs: end.getTime() };
+  }, [date, groupBy]);
+
+  const { data: externalEvents } = useExternalCalendarEvents(
+    externalRange.startMs,
+    externalRange.endMs,
+    Boolean(calendarStatus?.connected),
+  );
+
+  /** Reservas de FincasYa + eventos del Google Calendar conectado (externos). */
+  const calendarBookings = useMemo(
+    () =>
+      [
+        ...((reservations as unknown as CalendarBooking[]) ?? []),
+        ...externalEvents.map((e) => ({
+          _id: `gcal:${e.id}`,
+          nombreCompleto: e.summary,
+          fechaEntrada: e.startMs,
+          fechaSalida: e.endMs,
+          isExternal: true as const,
+          htmlLink: e.htmlLink,
+        })),
+      ] as unknown as CalendarBooking[],
+    [reservations, externalEvents],
+  );
 
   // Desglose de precio de la reserva seleccionada — Convex directo, reactivo.
   const {
@@ -2161,20 +2194,30 @@ export default function ReservationsPage() {
                   (Convex) directo, sin depender de conectar Google. */}
               <div className="px-3 pb-4 pt-1 md:px-4">
                 <ReservationCalendarView
-                  bookings={reservations as unknown as CalendarBooking[]}
+                  bookings={calendarBookings}
                   currentDate={date}
                   view={calendarView}
                   onNavigate={setDate}
                   onViewChange={setCalendarView}
                   onSelectBooking={(b) => {
+                    // Evento del Google Calendar (no es una reserva de FincasYa):
+                    // no hay ficha que abrir — se abre en Google.
+                    if (b.isExternal) {
+                      if (b.htmlLink) window.open(b.htmlLink, "_blank");
+                      return;
+                    }
                     setSelectedBooking(b);
                     setDetailTab("resumen");
                   }}
                   onEditBooking={(b) => {
+                    if (b.isExternal) return;
                     setEditingBooking(b);
                     setIsEditModalOpen(true);
                   }}
-                  onDeleteBooking={handleContextDeleteBooking}
+                  onDeleteBooking={(b) => {
+                    if (b.isExternal) return;
+                    handleContextDeleteBooking(b);
+                  }}
                 />
               </div>
               {false && (

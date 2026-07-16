@@ -8,10 +8,61 @@
  * para que los componentes portados no cambien su uso; `refetch` es no-op (Convex
  * ya es reactivo) pero resuelve con `{ data }` para compat con quien lea el retorno.
  */
-import { useCallback, useMemo, useRef } from 'react';
-import { useQuery as useConvexQuery } from 'convex/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery as useConvexQuery, useAction } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
+
+export type ExternalCalendarEvent = {
+  id: string;
+  summary: string;
+  startMs: number;
+  endMs: number;
+  allDay: boolean;
+  htmlLink: string | null;
+  location: string | null;
+};
+
+/**
+ * Eventos que YA existían en el Google Calendar conectado, dentro del rango
+ * visible. SOLO LECTURA: se pintan junto a las reservas de FincasYa para que el
+ * equipo vea su calendario completo. Excluye los eventos creados por FincasYa
+ * (esos ya vienen de la base). Si no hay calendario conectado, devuelve [].
+ */
+export function useExternalCalendarEvents(
+  rangeStartMs: number,
+  rangeEndMs: number,
+  enabled: boolean,
+) {
+  const listEvents = useAction(api.googleCalendar.listExternalEvents);
+  const [data, setData] = useState<ExternalCalendarEvent[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) {
+      setData([]);
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    listEvents({ timeMinMs: rangeStartMs, timeMaxMs: rangeEndMs })
+      .then((events) => {
+        if (!cancelled) setData(events as ExternalCalendarEvent[]);
+      })
+      .catch((err) => {
+        console.error('[calendar] no se pudieron leer los eventos de Google', err);
+        if (!cancelled) setData([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [listEvents, rangeStartMs, rangeEndMs, enabled]);
+
+  return { data, isLoading };
+}
 
 /** Reservas del mes (o año en vista "meses"). Reactivo: se actualiza solo. */
 export function useReservationsList(args: { month?: string; year?: string }) {
