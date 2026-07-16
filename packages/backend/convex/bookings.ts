@@ -1708,6 +1708,129 @@ export const remove = mutation({
   },
 });
 
+/**
+ * Borra TODAS las reservas excepto la que se conserva por código (reference /
+ * calendarLabel) y, opcionalmente, por nombre. Limpia pagos + disponibilidad
+ * igual que `remove`. Usar con dryRun:true primero.
+ */
+export const purgeAllExcept = mutation({
+  args: {
+    keepReference: v.string(),
+    keepNameIncludes: v.optional(v.string()),
+    dryRun: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const keepRef = args.keepReference.trim();
+    const nameNeedle = (args.keepNameIncludes ?? '').trim().toUpperCase();
+    if (!keepRef) throw new Error('keepReference vacío');
+
+    const all = await ctx.db.query('bookings').collect();
+    const matchesKeep = (b: (typeof all)[number]) => {
+      const ref = String(b.reference ?? '').trim();
+      const cal = String(b.calendarLabel ?? '').trim();
+      const codeOk = ref === keepRef || cal === keepRef;
+      if (!codeOk) return false;
+      if (!nameNeedle) return true;
+      return String(b.nombreCompleto ?? '')
+        .toUpperCase()
+        .includes(nameNeedle);
+    };
+
+    const keep = all.filter(matchesKeep);
+    if (keep.length === 0) {
+      throw new Error(
+        `No encontré reserva con código "${keepRef}"` +
+          (nameNeedle ? ` y nombre que contenga "${nameNeedle}"` : ''),
+      );
+    }
+    if (keep.length > 1) {
+      throw new Error(
+        `Hay ${keep.length} reservas con código "${keepRef}"; aborto por seguridad. Ids: ${keep
+          .map((b) => b._id)
+          .join(', ')}`,
+      );
+    }
+
+    const keepBooking = keep[0]!;
+    const toDelete = all.filter((b) => b._id !== keepBooking._id);
+    const dryRun = args.dryRun !== false;
+
+    const sample = toDelete.slice(0, 12).map((b) => ({
+      id: b._id,
+      reference: b.reference ?? null,
+      calendarLabel: b.calendarLabel ?? null,
+      nombre: b.nombreCompleto,
+      status: b.status,
+    }));
+
+    if (dryRun) {
+      return {
+        dryRun: true,
+        keep: {
+          id: keepBooking._id,
+          reference: keepBooking.reference ?? null,
+          calendarLabel: keepBooking.calendarLabel ?? null,
+          nombre: keepBooking.nombreCompleto,
+          status: keepBooking.status,
+        },
+        wouldDelete: toDelete.length,
+        sample,
+      };
+    }
+
+    let deleted = 0;
+    let paymentsDeleted = 0;
+    let availabilityDeleted = 0;
+    for (const booking of toDelete) {
+      const payments = await ctx.db
+        .query('payments')
+        .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
+        .collect();
+      for (const p of payments) {
+        await ctx.db.delete(p._id);
+        paymentsDeleted++;
+      }
+
+      const availability = await ctx.db
+        .query('propertyAvailability')
+        .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
+        .collect();
+      for (const a of availability) {
+        await ctx.db.delete(a._id);
+        availabilityDeleted++;
+      }
+
+      if (booking.googleEventId) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.googleCalendar.deleteBookingFromCalendar,
+          {
+            googleEventId: booking.googleEventId,
+            googleCalendarId: booking.googleCalendarId,
+          },
+        );
+      }
+
+      await ctx.db.delete(booking._id);
+      deleted++;
+    }
+
+    return {
+      dryRun: false,
+      keep: {
+        id: keepBooking._id,
+        reference: keepBooking.reference ?? null,
+        calendarLabel: keepBooking.calendarLabel ?? null,
+        nombre: keepBooking.nombreCompleto,
+        status: keepBooking.status,
+      },
+      deleted,
+      paymentsDeleted,
+      availabilityDeleted,
+    };
+  },
+});
+
 
 export const appendMultimedia = mutation({
   args: {
