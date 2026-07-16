@@ -48,6 +48,16 @@ import {
 
 const ADVISOR_SENDER_ID = 'panel-Experto';
 
+/**
+ * Fuentes de mensajes AUTOMÁTICOS de ausencia / fuera de horario: cuando el
+ * cliente solo recibió una de estas plantillas, el chat sigue NO LEÍDO (nadie
+ * lo atendió de verdad). Ver el conteo de no leídos en `list`.
+ */
+const AUTO_AWAY_SOURCES = new Set<string | undefined>([
+  'out_of_hours',
+  'ycloud_smb_echo_auto',
+]);
+
 /** Registra un evento de auditoría de la conversación (trazabilidad multi-asesor). */
 async function audit(
   ctx: MutationCtx,
@@ -189,7 +199,14 @@ export const listConversations = query({
       const lastReadAt = c.inboxLastReadAt ?? 0;
       let unread = 0;
       for (const m of visible) {
-        if (m.sender === 'assistant') break;
+        if (m.sender === 'assistant') {
+          // Un mensaje AUTOMÁTICO de ausencia / fuera de horario NO cuenta como
+          // "atendido": el cliente escribió algo real y solo recibió una
+          // plantilla. Lo saltamos para que el chat siga como NO LEÍDO y un
+          // Experto lo tome. Una respuesta de verdad (bot o humano) sí corta.
+          if (AUTO_AWAY_SOURCES.has(m.metadata?.source)) continue;
+          break;
+        }
         if (m.sender === 'system') continue;
         if (m.createdAt <= lastReadAt) break;
         unread++;
