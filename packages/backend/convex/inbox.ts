@@ -46,6 +46,7 @@ import {
   isConversationEligibleForAi,
   isQuickEligibleForAi,
 } from './lib/agentEligibility';
+import { fetchPrimaryPropertyImageUrl } from './lib/propertyImages';
 
 const ADVISOR_SENDER_ID = 'panel-Experto';
 
@@ -125,16 +126,13 @@ async function buildProductCard(
   if (!pid) return null;
   const p = await ctx.db.get(pid);
   if (!p) return null;
-  const img = await ctx.db
-    .query('propertyImages')
-    .withIndex('by_property', (q) => q.eq('propertyId', pid!))
-    .first();
+  const image = await fetchPrimaryPropertyImageUrl(ctx, pid);
   const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
     (x): x is number => typeof x === 'number' && x > 0,
   );
   return {
     title: p.title,
-    image: img?.url ?? null,
+    image,
     priceFrom: prices.length > 0 ? Math.min(...prices) : 0,
     priceOriginal: p.priceOriginal ?? null,
     capacity: p.capacity,
@@ -545,11 +543,7 @@ export const getSharedMedia = query({
         const meta = (m.metadata ?? null) as { productRetailerId?: string } | null;
         const pid = meta?.productRetailerId ? retailerToProp?.get(meta.productRetailerId) : undefined;
         if (pid) {
-          const img = await ctx.db
-            .query('propertyImages')
-            .withIndex('by_property', (q) => q.eq('propertyId', pid))
-            .first();
-          thumb = img?.url ?? null;
+          thumb = await fetchPrimaryPropertyImageUrl(ctx, pid);
           const p = await ctx.db.get(pid);
           if (p) title = p.title;
         }
@@ -1408,16 +1402,12 @@ export const listCatalogProperties = query({
           !isInvalidCatalogMapping(mapping!.productRetailerId, String(p._id));
       }
 
-      const img = await ctx.db
-        .query('propertyImages')
-        .withIndex('by_property', (q) => q.eq('propertyId', p._id))
-        .first();
+      const imageUrl = await fetchPrimaryPropertyImageUrl(ctx, p._id);
 
       const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
         (x): x is number => typeof x === 'number' && x > 0,
       );
       const priceFrom = prices.length > 0 ? Math.min(...prices) : 0;
-      const imageUrl = img?.url ?? null;
 
       rows.push({
         propertyId: p._id,
@@ -1835,10 +1825,7 @@ export const _enrichCatalogPreviewItems = internalQuery({
     for (const propertyId of propertyIds) {
       const p = await ctx.db.get(propertyId);
       if (!p) continue;
-      const img = await ctx.db
-        .query('propertyImages')
-        .withIndex('by_property', (q) => q.eq('propertyId', p._id))
-        .first();
+      const image = await fetchPrimaryPropertyImageUrl(ctx, p._id);
       const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
         (n): n is number => typeof n === 'number' && n > 0,
       );
@@ -1848,7 +1835,7 @@ export const _enrichCatalogPreviewItems = internalQuery({
         location: p.location ?? '',
         capacity: p.capacity ?? 0,
         priceFrom: prices.length > 0 ? Math.min(...prices) : 0,
-        image: img?.url ?? null,
+        image,
         isFavorite: p.isFavorite === true,
       });
     }
@@ -2177,11 +2164,8 @@ export const buildWebFichasForSelection = internalQuery({
       const slug = p.slug?.trim();
       if (!slug) continue;
 
-      const img = await ctx.db
-        .query('propertyImages')
-        .withIndex('by_property', (q) => q.eq('propertyId', p._id))
-        .first();
-      if (!img?.url) continue;
+      const imageUrl = await fetchPrimaryPropertyImageUrl(ctx, p._id);
+      if (!imageUrl) continue;
 
       const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
         (x): x is number => typeof x === 'number' && x > 0,
@@ -2192,7 +2176,7 @@ export const buildWebFichasForSelection = internalQuery({
       cards.push({
         propertyId: p._id,
         title: p.title,
-        imageUrl: img.url,
+        imageUrl,
         url,
         caption: buildWebFichaCaption({
           title: p.title,

@@ -17,6 +17,7 @@ import { v } from 'convex/values';
 import { internalMutation, mutation, query } from './_generated/server';
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
+import { fetchPrimaryPropertyImageUrl } from './lib/propertyImages';
 
 /**
  * Enlaza una finca a su catálogo de WhatsApp al crearla/actualizarla, para que
@@ -126,10 +127,7 @@ export const getPropertyByRetailerId = query({
     const property = await ctx.db.get(propertyId);
     if (!property) return null;
 
-    const img = await ctx.db
-      .query('propertyImages')
-      .withIndex('by_property', (q) => q.eq('propertyId', propertyId!))
-      .first();
+    const image = await fetchPrimaryPropertyImageUrl(ctx, propertyId);
     const prices = [
       property.priceBase,
       property.priceBaja,
@@ -140,7 +138,7 @@ export const getPropertyByRetailerId = query({
     return {
       propertyId,
       title: property.title,
-      image: img?.url ?? null,
+      image,
       priceFrom: prices.length > 0 ? Math.min(...prices) : 0,
       priceOriginal: property.priceOriginal ?? null,
       capacity: property.capacity,
