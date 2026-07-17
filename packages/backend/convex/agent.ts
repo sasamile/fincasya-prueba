@@ -331,9 +331,13 @@ export const toolBuscarFincas = internalQuery({
   handler: async (ctx, { personas, zona }): Promise<FincaResult[]> => {
     const all = await ctx.db.query('properties').collect();
     const zoneKw = zona ? resolveZoneKeywords(zona).keywords : [];
+    // COSTA SOLO SI LA PIDEN: misma regla comercial que el catálogo — el bot
+    // hablaba de Santa Marta/Cartagena en TEXTO porque esta tool no filtraba.
+    const quiereCosta = zoneRequestsCoast(zona);
     const matches = all
       // No ofrecer fincas inhabilitadas (active) ni ocultas del catálogo (visible).
       .filter((p) => p.active !== false && p.visible !== false)
+      .filter((p) => quiereCosta || !isCoastalProperty(p.location, p.departamentos))
       .filter((p) => (personas ? (p.eventCapacity ?? p.capacity) >= personas : true))
       .filter((p) => propertyMatchesZone(p.location, p.departamentos, zoneKw))
       .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
@@ -1769,6 +1773,28 @@ export const runAgentTurn = internalAction({
             const fsMs = fechaSalidaEfectiva
               ? parseDateMs(fechaSalidaEfectiva)
               : undefined;
+            // CANDADO DE FECHAS: sin fechas válidas NO hay filtro de
+            // disponibilidad, y sin ese filtro se ofrecían fincas YA reservadas
+            // (queja real del equipo). El catálogo SOLO sale con fechas
+            // concretas — el modelo no puede saltarse la regla.
+            if (!feMs || !fsMs || fsMs <= feMs) {
+              result = {
+                enviadas: [],
+                error: 'faltan las fechas exactas de entrada y salida',
+                nota: 'NO se enviaron fichas: sin fechas exactas no se puede validar qué fincas están libres. Pide al cliente la fecha de entrada y la de salida (una pregunta corta y cálida) y cuando las tengas vuelve a llamar enviar_catalogo con fechaEntrada y fechaSalida (YYYY-MM-DD). PROHIBIDO decir que enviaste opciones.',
+              };
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: JSON.stringify(result),
+              });
+              console.log('[agent] catalogo bloqueado: sin fechas validas', {
+                conversationId,
+                fechaEntrada,
+                fechaSalida,
+              });
+              continue;
+            }
             let pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
               conversationId,
               personas: typeof args.personas === 'number' ? args.personas : undefined,
