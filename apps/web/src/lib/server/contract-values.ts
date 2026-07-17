@@ -278,7 +278,7 @@ export function formatFincaFeaturesPlain(
     .filter(Boolean);
   const featuredRank = new Map(featuredIds.map((id, i) => [id, i]));
 
-  const items = aggregatePropertyFeatureCounts(features || []).toSorted(
+  const items = [...aggregatePropertyFeatureCounts(features || [])].sort(
     (a, b) => {
       const rankA = a.iconIds.reduce(
         (best, id) =>
