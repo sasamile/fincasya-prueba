@@ -22,12 +22,23 @@ function wamidFromResponse(parsed: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Canal WEB: los contactos del widget usan un teléfono sintético "web:<id>".
+ * NO tienen WhatsApp, así que cualquier envío por YCloud a esos "números" se
+ * omite (el mensaje se guarda en la base igual y el widget lo lee). Así todo
+ * el flujo del agente sirve para web sin tocar sus 16 puntos de envío.
+ */
+export function isWebPhone(to: string | undefined | null): boolean {
+  return typeof to === 'string' && to.startsWith('web:');
+}
+
 export async function sendWhatsappText(args: {
   to: string;
   text: string;
   /** wamid del mensaje al que se responde (cita, estilo WhatsApp). */
   contextWamid?: string;
 }): Promise<{ wamid?: string }> {
+  if (isWebPhone(args.to)) return {}; // canal web: no se envía por WhatsApp
   const { apiKey, wabaNumber } = requireYcloudEnv();
   const res = await fetch('https://api.ycloud.com/v2/whatsapp/messages/sendDirectly', {
     method: 'POST',

@@ -343,6 +343,9 @@ export async function sendAudioToYcloud(args: {
   filename?: string;
   wamid?: string;
 }): Promise<{ wamid?: string; status?: string }> {
+  // Canal web: no hay WhatsApp; el mensaje de audio se guarda igual con su
+  // mediaUrl y el widget lo reproduce.
+  if (args.to.startsWith('web:')) return {};
   const { apiKey, wabaNumber } = requireYcloudEnv();
   const normalized = normalizeWhatsAppAudioMime(
     args.mimeType,

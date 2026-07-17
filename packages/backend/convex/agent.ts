@@ -52,6 +52,8 @@ import {
   isCoastalProperty,
   propertyMatchesZone,
   resolveZoneKeywords,
+  normZoneText,
+  splitZoneParts,
   zoneRequestsCoast,
 } from './lib/zoneProximity';
 import { sendWhatsappText } from './lib/ycloud';
@@ -62,6 +64,11 @@ import {
   MAX_CATALOG_CARDS,
   sendCatalogCard,
 } from './lib/catalogSend';
+import {
+  fetchPropertyImages,
+  getPrimaryPropertyImageUrl,
+  sortPropertyImages,
+} from './lib/propertyImages';
 
 const HISTORY_LIMIT = 24;
 const MAX_TOOL_ROUNDS = 4;
@@ -72,6 +79,9 @@ const MAX_TOOL_ROUNDS = 4;
  */
 type AgentContext = {
   status: 'ai' | 'human' | 'resolved';
+  /** 'whatsapp' o 'web' (widget del sitio). En web los envíos por YCloud se
+   * omiten y las fichas se guardan como fichas web para el widget. */
+  channel: 'whatsapp' | 'web';
   contactPhone: string;
   contactName: string;
   history: Array<{ sender: 'user' | 'assistant'; content: string }>;
@@ -134,6 +144,8 @@ type CatalogPickResult =
         retailerId: string;
         title: string;
         bodyText: string;
+        /** Imagen principal (para la ficha del widget web). */
+        image?: string | null;
         /** Códigos / IDs alternativos si Meta no reconoce el retailer principal. */
         alternateRetailerIds?: string[];
       }>;
@@ -273,6 +285,7 @@ export const getAgentContext = internalQuery({
     }
     return {
       status: conversation.status,
+      channel: conversation.channel,
       contactPhone: contact?.phone ?? '',
       contactName: contact?.baseName ?? contact?.name ?? '',
       history,
@@ -472,7 +485,10 @@ export const toolCatalogPick = internalQuery({
     const all = await ctx.db.query('properties').collect();
     const zonaTrim = zona?.trim() || undefined;
     const zoneKw = zonaTrim ? resolveZoneKeywords(zonaTrim).keywords : [];
-    // Palabra clave "principal" (para el tier de coincidencia exacta del orden).
+    // Municipios EXACTOS pedidos (para el tier 1 del orden). Soporta varios:
+    // "la Vega o Villeta" → ['la vega','villeta'] — antes se comparaba la
+    // frase completa y el tier nunca aplicaba con dos municipios.
+    const zonaParts = zonaTrim ? splitZoneParts(zonaTrim) : [];
     const zonaLower = zonaTrim?.toLowerCase();
 
     // COSTA SOLO SI LA PIDEN (regla comercial): Santa Marta, Cartagena, Islas
@@ -514,11 +530,18 @@ export const toolCatalogPick = internalQuery({
       matches = strict.length >= 6 ? strict : relaxed.length >= 4 ? relaxed : minOnly;
     }
 
-    // Orden por tiers (politica comercial del equipo).
+    // Orden por tiers (politica comercial del equipo). El tier 1 es el
+    // municipio EXACTO pedido (cualquiera de ellos si nombró varios), con
+    // comparación sin tildes ("Apicalá" vs "apicala").
+    const inExactZone = (location: string): boolean => {
+      if (zonaParts.length === 0) return false;
+      const loc = normZoneText(location);
+      return zonaParts.some((p) => loc.includes(p));
+    };
     matches = [...matches].sort((a, b) => {
-      if (zonaLower) {
-        const aExact = a.location.toLowerCase().includes(zonaLower) ? 0 : 1;
-        const bExact = b.location.toLowerCase().includes(zonaLower) ? 0 : 1;
+      if (zonaParts.length > 0) {
+        const aExact = inExactZone(a.location) ? 0 : 1;
+        const bExact = inExactZone(b.location) ? 0 : 1;
         if (aExact !== bExact) return aExact - bExact;
       }
       const aFav = a.isFavorite === true ? 0 : 1;
@@ -557,11 +580,16 @@ export const toolCatalogPick = internalQuery({
     }
 
     // FAVORITAS DE PRIMERAS (regla del equipo): sin romper la variedad/orden ya
-    // calculado, se llevan las favoritas al frente de la lista.
-    matches = [
-      ...matches.filter((p) => p.isFavorite === true),
-      ...matches.filter((p) => p.isFavorite !== true),
-    ];
+    // calculado, se llevan las favoritas al frente. SOLO sin zona: si el
+    // cliente pidió municipio(s), el municipio EXACTO manda sobre la favorita
+    // (queja real: pidió "la Vega o Villeta" y una favorita de Viotá salió
+    // antes que las fincas de Villeta).
+    if (zonaParts.length === 0) {
+      matches = [
+        ...matches.filter((p) => p.isFavorite === true),
+        ...matches.filter((p) => p.isFavorite !== true),
+      ];
+    }
 
     // ¿Filtramos por disponibilidad? Solo si vienen fechas válidas.
     const checkAvailability =
@@ -621,11 +649,15 @@ export const toolCatalogPick = internalQuery({
       if (desde > 0) parts.push(`💰 Desde ${formatCop(desde)} por noche`);
       parts.push(`👥 Hasta ${p.capacity} personas`);
       if (mascotas && p.allowsPets) parts.push('🐶 Pet friendly');
+      // Imagen principal (solo la usa el widget web; en WhatsApp la pone Meta).
+      const imgs = await fetchPropertyImages(ctx, p._id);
+      const image = getPrimaryPropertyImageUrl(sortPropertyImages(imgs));
       items.push({
         propertyId: String(p._id),
         retailerId: mapping.productRetailerId,
         title: p.title,
         bodyText: parts.join(' · '),
+        image,
         alternateRetailerIds: p.code?.trim() ? [p.code.trim()] : undefined,
       });
     }
@@ -688,6 +720,9 @@ export const recordCatalogSend = internalMutation({
         title: v.string(),
         retailerId: v.string(),
         wamid: v.optional(v.string()),
+        /** Ficha WEB: datos para renderizar la tarjeta en el widget. */
+        image: v.optional(v.union(v.string(), v.null())),
+        bodyText: v.optional(v.string()),
       }),
     ),
   },
@@ -703,7 +738,21 @@ export const recordCatalogSend = internalMutation({
         wamid: card.wamid,
         whatsappStatus: card.wamid ? 'sent' : undefined,
         sentByUserId,
-        metadata: { productRetailerId: card.retailerId, source },
+        metadata: {
+          productRetailerId: card.retailerId,
+          source,
+          // Solo el widget web usa esto (imagen/título/precio de la ficha).
+          ...(card.image !== undefined || card.bodyText !== undefined
+            ? {
+                webFicha: {
+                  title: card.title,
+                  image: card.image ?? null,
+                  bodyText: card.bodyText ?? '',
+                  retailerId: card.retailerId,
+                },
+              }
+            : {}),
+        },
         createdAt: now,
       });
     }
@@ -966,7 +1015,7 @@ const TOOL_DEFS: ToolDef[] = [
           zona: {
             type: 'string',
             description:
-              'Zona, municipio o departamento que pidio el cliente (ej. "cerca a bogota", "Melgar"). PERSISTENTE: si el cliente la dio ANTES en el chat, PASALA IGUAL aunque en este mensaje solo actualice fechas o personas — NO la omitas. Solo cambia si el cliente pide OTRA zona; si dice "cualquier lugar / donde sea", pasa exactamente eso.',
+              'Zona, municipio o departamento que pidio el cliente (ej. "cerca a bogota", "Melgar"). OBLIGATORIA siempre que el cliente haya NOMBRADO algun lugar en la conversacion — incluso si nombro VARIOS: pasa la frase tal cual ("la Vega o Villeta") y el sistema busca en todos. PERSISTENTE: si el cliente la dio ANTES en el chat, PASALA IGUAL aunque en este mensaje solo actualice fechas o personas — NO la omitas. Solo cambia si el cliente pide OTRA zona; si dice "cualquier lugar / donde sea", pasa exactamente eso.',
           },
           mascotas: {
             type: 'boolean',
@@ -1913,6 +1962,25 @@ export const runAgentTurn = internalAction({
                   await new Promise((r) => setTimeout(r, BETWEEN_CATALOG_SENDS_MS));
                 }
                 sentAny = true;
+                // WEB: no hay catálogo Meta; la ficha se guarda con imagen y
+                // precio para que el widget la pinte como tarjeta. WhatsApp:
+                // se envía el producto Meta como siempre.
+                if (context.channel === 'web') {
+                  okCount++;
+                  const card = {
+                    propertyId: item.propertyId as Id<'properties'>,
+                    title: item.title,
+                    retailerId: item.retailerId,
+                    image: item.image ?? null,
+                    bodyText: item.bodyText,
+                  };
+                  sent.push({ ...card, wamid: undefined });
+                  await ctx.runMutation(internal.agent.recordCatalogSend, {
+                    conversationId,
+                    sent: [card],
+                  });
+                  continue;
+                }
                 const row = await sendCatalogCard({
                   to: context.contactPhone,
                   catalogId: pick.catalogMetaId,

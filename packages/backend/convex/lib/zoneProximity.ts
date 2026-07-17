@@ -32,26 +32,57 @@ const MUNICIPALITY_TO_DEPT: Record<string, string> = {
   anapoima: 'cundinamarca', girardot: 'cundinamarca', 'la mesa': 'cundinamarca',
   tocaima: 'cundinamarca', villeta: 'cundinamarca', nilo: 'cundinamarca',
   ricaurte: 'cundinamarca', anolaima: 'cundinamarca', tenjo: 'cundinamarca',
-  viota: 'cundinamarca', apulo: 'cundinamarca',
+  viota: 'cundinamarca', apulo: 'cundinamarca', 'la vega': 'cundinamarca',
   melgar: 'tolima', flandes: 'tolima', 'carmen de apicala': 'tolima',
   'santa marta': 'magdalena', cartagena: 'bolivar', quimbaya: 'quindio',
 };
 
 export type ZoneResolution = { keywords: string[]; label: string };
 
-export function resolveZoneKeywords(zonaRaw: string): ZoneResolution {
-  const z = norm(zonaRaw);
-  if (!z) return { keywords: [], label: '' };
+/**
+ * Parte una frase de zona con VARIOS lugares en sus municipios:
+ * "la Vega o Villeta" → ['la vega', 'villeta']. Cubre "o", "y", "u", comas y
+ * barras. Con un solo lugar devuelve [esa zona normalizada].
+ */
+export function splitZoneParts(zonaRaw: string): string[] {
+  return norm(zonaRaw)
+    .split(/\s+o\s+|\s+u\s+|\s+y\s+|,|\//)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function resolveSingleZone(zNorm: string): ZoneResolution {
   for (const alias of ZONE_ALIASES) {
-    if (alias.match.test(z)) {
+    if (alias.match.test(zNorm)) {
       return { keywords: [...new Set(alias.keywords.map(norm))], label: alias.label };
     }
   }
   // Municipio conocido → incluir también su departamento.
-  const keywords = new Set<string>([z]);
-  const dept = MUNICIPALITY_TO_DEPT[z];
+  const keywords = new Set<string>([zNorm]);
+  const dept = MUNICIPALITY_TO_DEPT[zNorm];
   if (dept) keywords.add(dept);
-  return { keywords: [...keywords], label: zonaRaw.trim() };
+  return { keywords: [...keywords], label: zNorm };
+}
+
+export function resolveZoneKeywords(zonaRaw: string): ZoneResolution {
+  const parts = splitZoneParts(zonaRaw);
+  if (parts.length === 0) return { keywords: [], label: '' };
+  // "la Vega o Villeta": se unen las keywords de CADA municipio — antes se
+  // buscaba la frase completa como si fuera un solo pueblo y no coincidía con
+  // nada (queja real: había 4 fincas en Villeta y no salió ninguna).
+  const keywords = new Set<string>();
+  const labels: string[] = [];
+  for (const p of parts) {
+    const r = resolveSingleZone(p);
+    for (const k of r.keywords) keywords.add(k);
+    labels.push(r.label);
+  }
+  return { keywords: [...keywords], label: labels.join(' / ') || zonaRaw.trim() };
+}
+
+/** Normaliza texto de zona/ubicación (minúsculas, sin tildes). Para comparar. */
+export function normZoneText(s: string): string {
+  return norm(s);
 }
 
 /** ¿La finca coincide con alguna de las palabras clave de zona? */

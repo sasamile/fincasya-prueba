@@ -1699,6 +1699,19 @@ export default defineSchema(
     }).index('by_scope', ['scope']),
 
     /**
+     * WIDGET DE CHAT WEB (landing pública): singleton con el kill-switch.
+     * Default APAGADO: el widget muestra el placeholder ("pronto disponible")
+     * hasta que el admin lo active. No expone el chat al público mientras esté
+     * en false.
+     */
+    webChatSettings: defineTable({
+      scope: v.literal('global'),
+      enabled: v.boolean(),
+      updatedAt: v.number(),
+      updatedByUserId: v.optional(v.string()),
+    }).index('by_scope', ['scope']),
+
+    /**
      * AUDIOS DEL BOT (/admin/audios-bot): notas de voz pregrabadas que el bot
      * envía cuando la conversación cae en la situación descrita (ej. el
      * cliente pregunta "¿es seguro? ¿son confiables?"). El equipo crea casos,
