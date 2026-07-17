@@ -32,6 +32,10 @@ export interface SaleLink {
   checkinGuestListUnlocked?: boolean;
   checkinOwnerShareGuestList?: boolean;
   selectedBankAccountIds: string[];
+  /** Firmante elegido al crear (catálogo admin). */
+  firmanteId?: string;
+  /** URL de la firma del arrendador inyectada en preview/contrato. */
+  firmaArrendadorUrl?: string;
   notes?: string;
   clientStep: number;
   status: 'active' | 'completed' | 'cancelled';
@@ -116,6 +120,8 @@ export interface CreateSaleLinkPayload {
   checkinOwnerShareGuestList?: boolean;
   selectedBankAccountIds: string[];
   notes?: string;
+  firmanteId?: string;
+  firmaArrendadorUrl?: string;
 }
 
 export type CreateSaleLinkResult = {
@@ -182,6 +188,8 @@ export async function createSaleLink(
     portalOrigin,
     selectedBankAccountIds: payload.selectedBankAccountIds,
     notes: payload.notes,
+    firmanteId: payload.firmanteId,
+    firmaArrendadorUrl: payload.firmaArrendadorUrl,
     checkinClientPaymentProofUploadEnabled:
       payload.checkinClientPaymentProofUploadEnabled,
     checkinGuestListUnlocked: payload.checkinGuestListUnlocked,
@@ -276,6 +284,9 @@ export async function generateSaleLinkContract(
         otherCharges: 0,
         manillaCondominio: 0,
         bankAccountIds: link.selectedBankAccountIds,
+        ...(link.firmaArrendadorUrl
+          ? { firmaArrendadorUrl: link.firmaArrendadorUrl }
+          : {}),
       }),
     },
   );

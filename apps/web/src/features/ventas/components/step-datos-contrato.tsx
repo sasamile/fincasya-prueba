@@ -2216,35 +2216,6 @@ export function StepDatosContrato({
           }}
           className="space-y-4"
         >
-          <FormField
-            control={form.control}
-            name="paymentAmount"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Monto del anticipo enviado (COP)</FormLabel>
-                <FormControl>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="1.600.000"
-                    value={formatPriceInput(field.value ?? 0)}
-                    onChange={(e) =>
-                      field.onChange(parseCOP(e.target.value))
-                    }
-                  />
-                </FormControl>
-                <p className="text-xs text-muted-foreground">
-                  Anticipo sugerido:{" "}
-                  {formatCOP(
-                    data.advancePaymentAmount ??
-                      Math.round(data.totalValue / 2),
-                  )}
-                </p>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
           <div className="space-y-2">
             <label className="text-sm font-medium">
               {isAmending

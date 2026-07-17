@@ -454,6 +454,8 @@ export const create = mutation({
     boldSurchargePercent: v.optional(v.number()),
     selectedBankAccountIds: v.array(v.string()),
     notes: v.optional(v.string()),
+    firmanteId: v.optional(v.string()),
+    firmaArrendadorUrl: v.optional(v.string()),
     checkinClientPaymentProofUploadEnabled: v.optional(v.boolean()),
     checkinGuestListUnlocked: v.optional(v.boolean()),
     checkinOwnerShareGuestList: v.optional(v.boolean()),
@@ -558,6 +560,8 @@ export const createWithBold = action({
      * Bold solo acepta https en callback_url.
      */
     portalOrigin: v.optional(v.string()),
+    firmanteId: v.optional(v.string()),
+    firmaArrendadorUrl: v.optional(v.string()),
     checkinClientPaymentProofUploadEnabled: v.optional(v.boolean()),
     checkinGuestListUnlocked: v.optional(v.boolean()),
     checkinOwnerShareGuestList: v.optional(v.boolean()),
@@ -660,6 +664,8 @@ export const update = mutation({
     petCount: v.optional(v.number()),
     selectedBankAccountIds: v.optional(v.array(v.string())),
     notes: v.optional(v.string()),
+    firmanteId: v.optional(v.string()),
+    firmaArrendadorUrl: v.optional(v.string()),
     status: v.optional(v.union(v.literal('active'), v.literal('completed'), v.literal('cancelled'))),
     checkinClientPaymentProofUploadEnabled: v.optional(v.boolean()),
     checkinGuestListUnlocked: v.optional(v.boolean()),
@@ -2551,6 +2557,8 @@ export const getPublicByToken = query({
       boldPaymentStatus: link.boldPaymentStatus,
       bankAccounts,
       selectedBankAccountIds: link.selectedBankAccountIds,
+      firmanteId: link.firmanteId,
+      firmaArrendadorUrl: link.firmaArrendadorUrl,
       clientDataFilled: !!link.clientData,
       clientName: link.clientData?.nombre,
       clientData: link.clientData
@@ -2794,6 +2802,8 @@ export const getForPortal = internalQuery({
       boldPaymentStatus: link.boldPaymentStatus,
       bankAccounts,
       selectedBankAccountIds: link.selectedBankAccountIds,
+      firmanteId: link.firmanteId,
+      firmaArrendadorUrl: link.firmaArrendadorUrl,
       clientDataFilled: !!link.clientData,
       clientName: link.clientData?.nombre,
       clientData: link.clientData

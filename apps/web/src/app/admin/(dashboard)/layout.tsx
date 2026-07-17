@@ -11,6 +11,7 @@ import {
   Brain,
   GraduationCap,
   MessageSquare,
+  Mic,
   Users,
   Sparkles,
   Layers,
@@ -215,10 +216,16 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
       //  { label: "Playbook de Tono", href: "/admin/playbook", icon: GraduationCap },
       { label: "Reseñas de Google", href: "/admin/reviews", icon: Star },
       { label: "Notificaciones", href: "/admin/notifications", icon: Bell },
+      // Oculto: mensaje temporal WhatsApp (plantilla)
+      // {
+      //   label: "Mensaje temporal WhatsApp",
+      //   href: "/admin/whatsapp-temporal-message",
+      //   icon: MessageSquare,
+      // },
       {
-        label: "Mensaje temporal WhatsApp",
-        href: "/admin/whatsapp-temporal-message",
-        icon: MessageSquare,
+        label: "Audios del bot",
+        href: "/admin/audios-bot",
+        icon: Mic,
       },
       {
         label: "Automatizaciones",

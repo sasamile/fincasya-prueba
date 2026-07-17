@@ -18,6 +18,11 @@ function rank(estado?: string): number {
   return ESTADO_RANK[String(estado ?? '').toLowerCase()] ?? 0;
 }
 
+/** El contador CR solo avanza con contrato real (generado+), no con borradores. */
+function shouldCommitContractCode(estado?: string): boolean {
+  return rank(estado) >= rank('generado');
+}
+
 type ContractFields = {
   contractNumber: string;
   propertyId?: Id<'properties'>;
@@ -192,20 +197,23 @@ async function upsertContract(
   if (convId) cleaned.conversationId = convId;
 
   if (!existing) {
+    const estado = fields.estado || 'borrador';
     await ctx.db.insert('contracts', {
       contractNumber: num,
-      estado: fields.estado || 'borrador',
+      estado,
       createdAt: now,
       updatedAt: now,
       ...cleaned,
     });
-    try {
-      await ctx.runMutation(
-        internal.adminContractSettings.commitContractCodeInternal,
-        { code: num },
-      );
-    } catch {
-      /* contador opcional */
+    if (shouldCommitContractCode(estado)) {
+      try {
+        await ctx.runMutation(
+          internal.adminContractSettings.commitContractCodeInternal,
+          { code: num },
+        );
+      } catch {
+        /* contador opcional */
+      }
     }
     return;
   }
@@ -253,13 +261,15 @@ async function upsertContract(
     }
   }
 
-  try {
-    await ctx.runMutation(
-      internal.adminContractSettings.commitContractCodeInternal,
-      { code: String(patch.contractNumber ?? existing.contractNumber) },
-    );
-  } catch {
-    /* contador opcional */
+  if (shouldCommitContractCode(String(nextEstado))) {
+    try {
+      await ctx.runMutation(
+        internal.adminContractSettings.commitContractCodeInternal,
+        { code: String(patch.contractNumber ?? existing.contractNumber) },
+      );
+    } catch {
+      /* contador opcional */
+    }
   }
 }
 
@@ -515,6 +525,10 @@ export const list = query({
 
     if (args.estado && args.estado !== 'todos') {
       all = all.filter((c) => c.estado === args.estado);
+    } else {
+      // "Todos" = contratos reales. Los borradores no van en el gestor (no
+      // consumen numeración ni muestran acciones de PDF final).
+      all = all.filter((c) => c.estado !== 'borrador');
     }
     if (args.origen) all = all.filter((c) => c.origen === args.origen);
     if (args.tipo === 'contrato') {

@@ -355,13 +355,18 @@ export async function sendAudioToYcloud(args: {
     filename: normalized.filename,
   });
 
+  // Meta SOLO renderiza la nota de voz (burbuja con onda, voice:true) cuando el
+  // archivo es OGG/Opus. Con MP3/M4A, forzar voice:true hace que Meta rechace
+  // el envío; por eso solo se marca voice para OGG. Los demás formatos salen
+  // como audio normal (reproduce igual, sin la onda) en vez de fallar.
+  const isOggVoice = normalized.mimeType === "audio/ogg";
   const body: Record<string, unknown> = {
     from: wabaNumber,
     to: args.to,
     type: "audio",
     audio: {
       id: mediaId,
-      voice: true,
+      ...(isOggVoice ? { voice: true } : {}),
     },
   };
   if (args.wamid) body.context = { message_id: args.wamid };

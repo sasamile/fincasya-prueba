@@ -20,6 +20,7 @@ import type * as agentSettings from "../agentSettings.js";
 import type * as auth from "../auth.js";
 import type * as automationSettings from "../automationSettings.js";
 import type * as bookings from "../bookings.js";
+import type * as botAudios from "../botAudios.js";
 import type * as businessHours from "../businessHours.js";
 import type * as campaignBroadcast from "../campaignBroadcast.js";
 import type * as categoryZoneTemplates from "../categoryZoneTemplates.js";
@@ -146,6 +147,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   automationSettings: typeof automationSettings;
   bookings: typeof bookings;
+  botAudios: typeof botAudios;
   businessHours: typeof businessHours;
   campaignBroadcast: typeof campaignBroadcast;
   categoryZoneTemplates: typeof categoryZoneTemplates;

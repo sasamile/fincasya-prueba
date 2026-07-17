@@ -666,6 +666,12 @@ export default defineSchema(
       selectedBankAccountIds: v.array(v.string()),
       notes: v.optional(v.string()),
       /**
+       * Firmante elegido al crear el link (catálogo admin).
+       * `firmaArrendadorUrl` se inyecta en preview/contrato como {{Firma}}.
+       */
+      firmanteId: v.optional(v.string()),
+      firmaArrendadorUrl: v.optional(v.string()),
+      /**
        * Preferencias del check-in del link (mismas que al enviar /checkin).
        * Se copian al booking al provisionar/actualizar.
        */
@@ -1691,6 +1697,29 @@ export default defineSchema(
       updatedAt: v.number(),
       updatedByUserId: v.optional(v.string()),
     }).index('by_scope', ['scope']),
+
+    /**
+     * AUDIOS DEL BOT (/admin/audios-bot): notas de voz pregrabadas que el bot
+     * envía cuando la conversación cae en la situación descrita (ej. el
+     * cliente pregunta "¿es seguro? ¿son confiables?"). El equipo crea casos,
+     * sube el audio y lo habilita/deshabilita; máximo un envío por audio por
+     * conversación.
+     */
+    botAudios: defineTable({
+      titulo: v.string(),
+      /** Cuándo debe enviarlo el bot (se inyecta a la tool del agente). */
+      situacion: v.string(),
+      /** Audio opcional: un caso puede ser solo texto, solo audio o ambos. */
+      storageId: v.optional(v.id('_storage')),
+      mimeType: v.optional(v.string()),
+      filename: v.optional(v.string()),
+      /** Texto OFICIAL opcional: se envía TAL CUAL (el modelo no lo reescribe). */
+      texto: v.optional(v.string()),
+      enabled: v.boolean(),
+      sentCount: v.optional(v.number()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index('by_enabled', ['enabled']),
 
     /**
      * Saludo automático al propietario (editable + aprobación desde el panel

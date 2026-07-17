@@ -72,13 +72,19 @@ async function isContractCodeTaken(
       .query('contracts')
       .withIndex('by_contract_number', (q) => q.eq('contractNumber', key))
       .first();
-    if (contract) return true;
+    // Borradores no bloquean ni “pierden” numeración; solo contratos reales.
+    if (contract && String(contract.estado ?? '').toLowerCase() !== 'borrador') {
+      return true;
+    }
 
     const link = await ctx.db
       .query('saleLinks')
       .withIndex('by_contract_code', (q) => q.eq('contractCode', key))
       .first();
-    if (link) return true;
+    // Links cancelados liberan el número (no deben “quemar” la serie).
+    if (link && String(link.status ?? '') !== 'cancelled') {
+      return true;
+    }
 
     const booking = await ctx.db
       .query('bookings')
@@ -272,3 +278,78 @@ async function commitContractCodeImpl(
   await ctx.db.patch(row._id, { payload, updatedAt: Date.now() });
   return { ok: true, sellerId: matched.id, lastNumber: usedNumber };
 }
+
+/**
+ * Realinea `lastNumber` de cada vendedor al máximo CR del gestor
+ * (contratos con estado ≠ borrador). No usa links sueltos ni borradores,
+ * para no “quemar” la serie (ej. CR2912 en gestor → siguiente CR2913).
+ */
+export const resyncSellerLastNumbers = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { row, payload, sellers } = await loadSellers(ctx);
+    if (!row || !payload || sellers.length === 0) {
+      return { ok: false as const, sellers: [] as Array<{ id: string; lastNumber: number; maxUsed: number }> };
+    }
+
+    const sorted = [...sellers].sort(
+      (a, b) => b.iniciales.length - a.iniciales.length,
+    );
+
+    const maxBySellerId = new Map<string, number>();
+    for (const s of sellers) maxBySellerId.set(s.id, 0);
+
+    const bump = (code: string | undefined | null) => {
+      const raw = String(code ?? '').trim();
+      if (!raw) return;
+      for (const s of sorted) {
+        const n = parseCodeNumber(raw, s.iniciales);
+        if (n != null && n > 0) {
+          maxBySellerId.set(s.id, Math.max(maxBySellerId.get(s.id) ?? 0, n));
+          return;
+        }
+      }
+    };
+
+    const contracts = await ctx.db.query('contracts').take(5000);
+    for (const c of contracts) {
+      if (String(c.estado ?? '').toLowerCase() === 'borrador') continue;
+      bump(c.contractNumber);
+    }
+
+    const nextSellers = sellers.map((s) => ({
+      ...s,
+      lastNumber: maxBySellerId.get(s.id) ?? 0,
+    }));
+    payload.contractSellers = nextSellers;
+    await ctx.db.patch(row._id, { payload, updatedAt: Date.now() });
+
+    return {
+      ok: true as const,
+      sellers: nextSellers.map((s) => ({
+        id: s.id,
+        nombre: s.nombre,
+        iniciales: s.iniciales,
+        lastNumber: s.lastNumber,
+        maxUsed: maxBySellerId.get(s.id) ?? 0,
+        siguiente: formatCode(s.iniciales, s.lastNumber + 1),
+      })),
+    };
+  },
+});
+
+/** Borra contratos en borrador (no cuentan en el gestor ni en la serie). */
+export const purgeBorradorContracts = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db.query('contracts').take(5000);
+    let deleted = 0;
+    for (const c of all) {
+      if (String(c.estado ?? '').toLowerCase() !== 'borrador') continue;
+      await ctx.db.delete(c._id);
+      deleted += 1;
+    }
+    return { ok: true as const, deleted };
+  },
+});
+

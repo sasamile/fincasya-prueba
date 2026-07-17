@@ -117,6 +117,9 @@ export async function POST(
           otherCharges: 0,
           manillaCondominio: 0,
           bankAccountIds: link.selectedBankAccountIds ?? [],
+          ...(link.firmaArrendadorUrl
+            ? { firmaArrendadorUrl: link.firmaArrendadorUrl }
+            : {}),
         }),
       },
     );

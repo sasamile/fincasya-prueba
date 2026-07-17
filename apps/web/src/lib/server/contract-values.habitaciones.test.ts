@@ -41,7 +41,7 @@ describe("habitaciones en contrato", () => {
     expect(n).toBe(2);
   });
 
-  test("formatFincaFeaturesPlain antepone HABITACIONES", () => {
+  test("formatFincaFeaturesPlain antepone HABITACIONES y prioriza amenidades hero", () => {
     const text = formatFincaFeaturesPlain(
       [
         { name: "Piscina", quantity: 1, zone: "GENERAL" },
@@ -52,10 +52,10 @@ describe("habitaciones en contrato", () => {
         zoneOrder: ["GENERAL", "Habitación 1", "Habitación 2"],
       },
     );
-    expect(text).toBe("02 HABITACIONES\n02 BAÑO\nPISCINA");
+    expect(text).toBe("02 HABITACIONES\nPISCINA\n02 BAÑO");
   });
 
-  test("prioriza featuredIcons y limita a 33 amenidades", () => {
+  test("prioriza featuredIcons y limita a 22 amenidades (default)", () => {
     const features = Array.from({ length: 40 }, (_, i) => ({
       name: `Amenidad ${i + 1}`,
       quantity: 1,
@@ -64,14 +64,33 @@ describe("habitaciones en contrato", () => {
     const text = formatFincaFeaturesPlain(features, {
       habitaciones: 4,
       featuredIconIds: ["icon-40", "icon-39", "icon-1"],
-      maxAmenities: 33,
     });
     const lines = text.split("\n");
     expect(lines[0]).toBe("04 HABITACIONES");
-    expect(lines).toHaveLength(34); // 1 habitaciones + 33 amenidades
+    expect(lines).toHaveLength(23); // 1 habitaciones + 22 amenidades
     expect(lines[1]).toBe("AMENIDAD 40");
     expect(lines[2]).toBe("AMENIDAD 39");
     expect(lines[3]).toBe("AMENIDAD 1");
+  });
+
+  test("omite inventario de camas si ya hay HABITACIONES", () => {
+    const text = formatFincaFeaturesPlain(
+      [
+        { name: "Piscina", quantity: 1 },
+        { name: "Cama doble", quantity: 2 },
+        { name: "02 Camas semi doble - nido sencillo", quantity: 1 },
+        { name: "Jacuzzi", quantity: 1 },
+        { name: "Cocina equipada", quantity: 1 },
+      ],
+      { habitaciones: 4, maxAmenities: 22 },
+    );
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("04 HABITACIONES");
+    expect(lines).toContain("PISCINA");
+    expect(lines).toContain("JACUZZI");
+    expect(lines).toContain("COCINA EQUIPADA");
+    expect(lines.some((l) => /cama/i.test(l))).toBe(false);
+    expect(lines.some((l) => /nido/i.test(l))).toBe(false);
   });
 
   test("override manual de habitaciones gana sobre zonas", () => {

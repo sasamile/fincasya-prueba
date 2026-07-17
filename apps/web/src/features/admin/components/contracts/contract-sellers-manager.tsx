@@ -10,6 +10,7 @@ import {
   Trash2,
   Check,
   X,
+  RefreshCw,
 } from "lucide-react";
 import { sileo } from "sileo";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,8 @@ import {
   type ContractSeller,
 } from "@/features/admin/store/contract-settings.store";
 import { cn } from "@/lib/utils";
+import { convex } from "@/lib/convex-client";
+import { api } from "@fincasya/backend/convex/_generated/api";
 
 const EMPTY = { nombre: "", iniciales: "", lastNumber: "0" };
 
@@ -47,6 +50,7 @@ export function ContractSellersManager() {
     iniciales: "",
     lastNumber: "0",
   });
+  const [resyncing, setResyncing] = useState(false);
 
   const persistSoon = () => {
     void syncContractSettingsNow().catch(() => {
@@ -55,6 +59,43 @@ export function ContractSellersManager() {
         fill: "#fee2e2",
       });
     });
+  };
+
+  /** Baja el contador al máximo CR realmente usado (sin borradores quemados). */
+  const handleResyncCounters = async () => {
+    setResyncing(true);
+    try {
+      const result = await convex.mutation(
+        api.adminContractSettings.resyncSellerLastNumbers,
+        {},
+      );
+      if (!result.ok) {
+        sileo.error({
+          title: "No hay vendedores para alinear",
+          fill: "#fee2e2",
+        });
+        return;
+      }
+      for (const s of result.sellers) {
+        updateContractSeller(s.id, { lastNumber: s.lastNumber });
+      }
+      const summary = result.sellers
+        .map((s) => `${s.iniciales} → ${s.siguiente}`)
+        .join(" · ");
+      sileo.success({
+        title: "Contadores alineados",
+        description: summary || "Listo",
+        fill: "#f0fdf4",
+      });
+    } catch (err) {
+      sileo.error({
+        title: "No se pudo alinear",
+        description: err instanceof Error ? err.message : "Error desconocido",
+        fill: "#fee2e2",
+      });
+    } finally {
+      setResyncing(false);
+    }
   };
 
   const resolveParts = (inicialesRaw: string, lastNumberRaw: string) => {
@@ -258,7 +299,25 @@ export function ContractSellersManager() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Vendedores configurados</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Vendedores configurados</h2>
+          {sellers.length > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 rounded-lg text-xs"
+              disabled={resyncing}
+              onClick={() => void handleResyncCounters()}
+              title="Pone Último = el CR más alto ya usado de verdad (ignora borradores)"
+            >
+              <RefreshCw
+                className={cn("h-3.5 w-3.5", resyncing && "animate-spin")}
+              />
+              {resyncing ? "Alineando…" : "Alinear con usados"}
+            </Button>
+          ) : null}
+        </div>
         {sellers.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
             <Hash className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />

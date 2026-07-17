@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format, differenceInCalendarDays, addDays, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Home, Loader2, Plus, Link2, CreditCard } from "lucide-react";
+import { CalendarIcon, Check, Home, Loader2, Plus, Link2, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -108,6 +108,8 @@ const schema = z
     checkinClientPaymentProofUploadEnabled: z.boolean(),
     checkinGuestListUnlocked: z.boolean(),
     checkinOwnerShareGuestList: z.boolean(),
+    /** Id del firmante del catálogo (vacío = sin firma en el contrato). */
+    firmanteId: z.string(),
   })
   .superRefine((data, ctx) => {
     if (!data.checkIn) {
@@ -176,6 +178,7 @@ const DEFAULT_VALUES: FormValues = {
   checkinClientPaymentProofUploadEnabled: true,
   checkinGuestListUnlocked: false,
   checkinOwnerShareGuestList: true,
+  firmanteId: "",
 };
 
 interface Props {
@@ -502,6 +505,7 @@ export function CreateSaleLinkModal({
   const { data: propertiesData, isLoading: isLoadingProperties } =
     useProperties({ limit: 200 });
   const bankAccounts = useContractSettingsStore((s) => s.bankAccounts);
+  const firmantes = useContractSettingsStore((s) => s.firmantes);
   const addBankAccount = useContractSettingsStore((s) => s.addBankAccount);
   const adminSettings = useContractSettingsStore((s) => s.adminSettings);
   const updateOwnerInfo = useUpdatePropertyOwnerInfo();
@@ -528,6 +532,15 @@ export function CreateSaleLinkModal({
   const advancePaymentAmount = form.watch("advancePaymentAmount");
   const boldSurchargePercent = form.watch("boldSurchargePercent");
   const generateBoldLink = form.watch("generateBoldLink");
+  const selectedFirmanteId = form.watch("firmanteId");
+
+  const selectedFirmante = useMemo(
+    () =>
+      selectedFirmanteId
+        ? (firmantes.find((f) => f.id === selectedFirmanteId) ?? null)
+        : null,
+    [firmantes, selectedFirmanteId],
+  );
 
   useEffect(() => {
     if (open) {
@@ -535,6 +548,13 @@ export function CreateSaleLinkModal({
       setAdvanceManual(false);
       form.reset(DEFAULT_VALUES);
       setPropertySearch("");
+      // Prefiere el firmante marcado como default (si tiene imagen).
+      const def = useContractSettingsStore
+        .getState()
+        .firmantes.find((f) => f.esDefault && f.firmaUrl);
+      if (def) {
+        form.setValue("firmanteId", def.id);
+      }
     }
   }, [open, form]);
 
@@ -763,6 +783,8 @@ export function CreateSaleLinkModal({
           values.checkinClientPaymentProofUploadEnabled,
         checkinGuestListUnlocked: values.checkinGuestListUnlocked,
         checkinOwnerShareGuestList: values.checkinOwnerShareGuestList,
+        firmanteId: selectedFirmante?.id,
+        firmaArrendadorUrl: selectedFirmante?.firmaUrl || undefined,
       });
 
       const saleUrl = `${window.location.origin}/venta/${result.token}`;
@@ -1632,6 +1654,127 @@ export function CreateSaleLinkModal({
                 }}
               />
             </section>
+
+            <Separator />
+
+            {/* Firma del arrendador */}
+            <FormField
+              control={form.control}
+              name="firmanteId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm font-semibold">
+                    Firma en el contrato
+                    <span className="ml-1 font-normal text-muted-foreground">
+                      (opcional)
+                    </span>
+                  </FormLabel>
+                  <p className="text-xs text-muted-foreground">
+                    Se usa en la preview del cliente y al generar el contrato.
+                    El catálogo se gestiona en Ajustes globales → Firmantes.
+                  </p>
+                  {firmantes.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-border bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
+                      No hay firmantes. Cárgalos en Configuración → Contrato →
+                      Firmantes. Puedes crear el link sin firma.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => field.onChange("")}
+                        className={cn(
+                          "flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition",
+                          !field.value
+                            ? "border-primary/50 bg-primary/5"
+                            : "border-border hover:bg-muted/40",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "grid h-5 w-5 shrink-0 place-items-center rounded-full border-2",
+                            !field.value
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border",
+                          )}
+                        >
+                          {!field.value ? <Check className="h-3 w-3" /> : null}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold">Sin firma</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            El contrato sale sin imagen sobre ARRENDADOR
+                          </p>
+                        </div>
+                      </button>
+                      {firmantes.map((f) => {
+                        const on = field.value === f.id;
+                        return (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() =>
+                              field.onChange(on ? "" : f.id)
+                            }
+                            className={cn(
+                              "flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition",
+                              on
+                                ? "border-primary/50 bg-primary/5"
+                                : "border-border hover:bg-muted/40",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "grid h-5 w-5 shrink-0 place-items-center rounded-full border-2",
+                                on
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "border-border",
+                              )}
+                            >
+                              {on ? <Check className="h-3 w-3" /> : null}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-bold">
+                                {f.nombre}
+                                {f.esDefault ? (
+                                  <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground">
+                                    · default
+                                  </span>
+                                ) : null}
+                              </p>
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {[
+                                  f.cargo,
+                                  f.cedula ? `C.C. ${f.cedula}` : "",
+                                  f.ciudad,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ") || "Sin datos"}
+                                {!f.firmaUrl ? " · sin imagen" : ""}
+                              </p>
+                            </div>
+                            {f.firmaUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={f.firmaUrl}
+                                alt={`Firma ${f.nombre}`}
+                                className="h-10 w-16 shrink-0 rounded border border-border bg-white object-contain p-0.5"
+                              />
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                      {selectedFirmante && !selectedFirmante.firmaUrl ? (
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                          Este firmante no tiene imagen de firma; el contrato
+                          saldrá sin la firma del arrendador.
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </FormItem>
+              )}
+            />
 
             <Separator />
 

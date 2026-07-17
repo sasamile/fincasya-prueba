@@ -16,6 +16,8 @@ import {
 import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { formatScheduleText, isOutOfHours } from './lib/businessHours';
+import { sendAudioToYcloud } from './lib/ycloud/senders';
+import type { BotAudioForAgent } from './botAudios';
 import type { Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import {
@@ -1518,6 +1520,51 @@ export const runAgentTurn = internalAction({
       });
     }
 
+    // AUDIOS DEL BOT (/admin/audios-bot): si el equipo tiene notas de voz
+    // habilitadas, el agente recibe una tool dinámica con los casos y decide
+    // cuándo aplica (ej. "¿es seguro?" → audio de confianza).
+    let botAudios: BotAudioForAgent[] = [];
+    try {
+      botAudios = await ctx.runQuery(internal.botAudios.listEnabledInternal, {});
+    } catch (err) {
+      console.error('[agent] fallo cargando audios del bot', err);
+    }
+    const audioToolDefs: ToolDef[] =
+      botAudios.length > 0
+        ? [
+            {
+              type: 'function',
+              function: {
+                name: 'enviar_respuesta_oficial',
+                description:
+                  'Envía la RESPUESTA OFICIAL pregrabada del equipo para una situación específica: nota de voz, texto oficial o ambos (salen como mensajes aparte, ANTES de tu texto, TAL CUAL los grabó/escribió el equipo). Usala UNA sola vez por conversación por caso y SOLO cuando el mensaje del cliente caiga claramente en la situación descrita — no la fuerces. Casos disponibles:\n' +
+                  botAudios
+                    .map(
+                      (a) =>
+                        `- casoId "${String(a.id)}" (${a.titulo}${
+                          a.storageId && a.texto
+                            ? ', nota de voz + texto'
+                            : a.storageId
+                              ? ', nota de voz'
+                              : ', texto oficial'
+                        }): usar cuando ${a.situacion}`,
+                    )
+                    .join('\n'),
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    casoId: {
+                      type: 'string',
+                      description: 'casoId exacto de la lista de casos disponibles',
+                    },
+                  },
+                  required: ['casoId'],
+                },
+              },
+            },
+          ]
+        : [];
+
     let escalated = false;
     let mascotasSentThisTurn = false;
     let avisoMinimoSentThisTurn = false;
@@ -1529,7 +1576,7 @@ export const runAgentTurn = internalAction({
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
       const { content, toolCalls } = await chatCompletion({
         messages,
-        tools: round < MAX_TOOL_ROUNDS ? TOOL_DEFS : [],
+        tools: round < MAX_TOOL_ROUNDS ? [...TOOL_DEFS, ...audioToolDefs] : [],
       });
       if (toolCalls.length === 0) {
         finalText = content;
@@ -2073,6 +2120,100 @@ export const runAgentTurn = internalAction({
               escalado: true,
               nota: 'El mensaje de confirmacion de interes YA se envio y la conversacion fue escalada a un experto. NO escribas texto final — el mensaje oficial ya cubre todo.',
             };
+          } else if (call.function.name === 'enviar_respuesta_oficial') {
+            const casoIdArg = String(args.casoId ?? args.audioId ?? '').trim();
+            const caso =
+              botAudios.find((a) => String(a.id) === casoIdArg) ??
+              botAudios.find((a) => a.titulo === casoIdArg);
+            if (!caso) {
+              result = {
+                enviado: false,
+                nota: 'casoId inválido: usa un casoId EXACTO de la lista de la tool.',
+              };
+            } else if (
+              await ctx.runQuery(internal.botAudios.yaEnviadoEnConversacion, {
+                conversationId,
+                audioId: caso.id,
+              })
+            ) {
+              result = {
+                enviado: false,
+                nota: `La respuesta oficial «${caso.titulo}» YA se envió antes en esta conversación. NO la repitas: responde en texto normal.`,
+              };
+            } else if (!context.contactPhone) {
+              result = {
+                enviado: false,
+                nota: 'No hay teléfono del cliente. Responde normal en texto.',
+              };
+            } else {
+              // 1) Nota de voz (si el caso la tiene).
+              let audioSent = false;
+              let audioWamid: string | undefined;
+              if (caso.storageId) {
+                try {
+                  const blob = await ctx.storage.get(caso.storageId);
+                  if (blob) {
+                    const sent = await sendAudioToYcloud({
+                      to: context.contactPhone,
+                      audioBuffer: new Uint8Array(await blob.arrayBuffer()),
+                      mimeType: caso.mimeType ?? 'audio/ogg',
+                      filename: caso.filename ?? 'nota-de-voz.ogg',
+                    });
+                    audioSent = true;
+                    audioWamid = sent.wamid;
+                  }
+                } catch (err) {
+                  console.error('[agent] fallo el envio de la nota de voz', err);
+                }
+              }
+              // 2) Texto oficial (si el caso lo tiene): sale TAL CUAL, después
+              //    de la nota de voz.
+              let textoSent = false;
+              let textoWamid: string | undefined;
+              if (caso.texto) {
+                try {
+                  const sent = await sendWhatsappText({
+                    to: context.contactPhone,
+                    text: caso.texto,
+                  });
+                  textoSent = true;
+                  textoWamid = sent.wamid;
+                } catch (err) {
+                  console.error('[agent] fallo el envio del texto oficial', err);
+                }
+              }
+              if (!audioSent && !textoSent) {
+                result = {
+                  enviado: false,
+                  nota: 'La respuesta oficial NO se pudo enviar (error técnico). Responde normal en texto, sin mencionarla.',
+                };
+              } else {
+                await ctx.runMutation(internal.botAudios.recordSent, {
+                  conversationId,
+                  audioId: caso.id,
+                  audioSent,
+                  audioWamid,
+                  textoSent,
+                  textoWamid,
+                });
+                console.log('[agent] respuesta oficial enviada', {
+                  conversationId,
+                  caso: caso.titulo,
+                  audioSent,
+                  textoSent,
+                });
+                result = {
+                  enviado: true,
+                  nota: `La respuesta oficial «${caso.titulo}» YA se envió como mensaje(s) aparte (${
+                    audioSent && textoSent
+                      ? 'nota de voz + texto oficial'
+                      : audioSent
+                        ? 'nota de voz'
+                        : 'texto oficial'
+                  }). NO repitas su contenido en texto: acompáñala máximo con UNA línea corta y natural (o continúa el flujo si había algo pendiente).`,
+                };
+              }
+            }
           } else if (call.function.name === 'escalar_a_humano') {
             result = await ctx.runMutation(internal.agent.toolEscalar, {
               conversationId,

@@ -596,7 +596,7 @@ export default function ContractsManagerPage() {
                         >
                           <Eye className="w-4 h-4" />
                         </Button>
-                        {contractFile.url ? (
+                        {c.estado !== "borrador" && contractFile.url ? (
                           <Button
                             variant="ghost"
                             size="icon"
@@ -613,18 +613,8 @@ export default function ContractsManagerPage() {
                               <Download className="w-4 h-4" />
                             </a>
                           </Button>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 rounded-lg opacity-30"
-                            disabled
-                            title="Sin contrato en S3"
-                          >
-                            <Download className="w-4 h-4" />
-                          </Button>
-                        )}
-                        {canPreview ? (
+                        ) : null}
+                        {c.estado !== "borrador" && canPreview ? (
                           <Button
                             variant="ghost"
                             size="icon"
@@ -641,21 +631,7 @@ export default function ContractsManagerPage() {
                           >
                             <ExternalLink className="w-4 h-4" />
                           </Button>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 rounded-lg opacity-30"
-                            disabled
-                            title={
-                              previewKind === "confirmation"
-                                ? "Sin confirmación generada"
-                                : "Sin contrato en S3"
-                            }
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </Button>
-                        )}
+                        ) : null}
                         <Button
                           variant="ghost"
                           size="icon"

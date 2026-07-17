@@ -238,7 +238,7 @@ export type FormatFincaFeaturesOpts = {
   habitaciones?: number | string | null;
   /** Orden de zonas de la propiedad (preferido para contar habitaciones). */
   zoneOrder?: string[] | null;
-  /** Máximo de amenidades en el contrato (además de HABITACIONES). Default 33. */
+  /** Máximo de amenidades en el contrato (además de HABITACIONES). Default 22. */
   maxAmenities?: number;
   /**
    * IDs de iconography marcados como “principales” en la finca (featuredIcons).
@@ -247,10 +247,34 @@ export type FormatFincaFeaturesOpts = {
   featuredIconIds?: string[] | null;
 };
 
+/** Inventario de camas: no va en contrato si ya listamos HABITACIONES. */
+export function isBedInventoryFeatureName(name: string): boolean {
+  const n = name.trim().toUpperCase().normalize("NFD").replace(/\p{M}/gu, "");
+  if (!n) return false;
+  // Cama, nido, colchón, litera, camarote… (no "sala comedor", etc.)
+  return (
+    /\bCAMAS?\b/.test(n) ||
+    /\bNIDOS?\b/.test(n) ||
+    /\bCOLCHONES?\b/.test(n) ||
+    /\bLITERAS?\b/.test(n) ||
+    /\bCAMAROTES?\b/.test(n)
+  );
+}
+
+/** Amenidades “hero” del contrato cuando no hay featuredIcons. */
+function principalAmenityScore(name: string): number {
+  const n = name.trim().toUpperCase().normalize("NFD").replace(/\p{M}/gu, "");
+  if (/PISCINA|JACUZZI|TURCO|SAUNA/.test(n)) return 0;
+  if (/AIRE\s*ACONDICIONADO|COCINA|PARRILLA|BBQ|ASADOR/.test(n)) return 1;
+  if (/GYM|GIMNASIO|SONIDO|SMART\s*TV|SALA|TERRAZA|BALCON/.test(n)) return 2;
+  if (/BANO|BAÑO|PARQUEADERO|ESTACIONAMIENTO|WIFI|INTERNET/.test(n)) return 3;
+  return 10;
+}
+
 /**
  * Texto plano para {{caracteristicasDeFinca}}:
  * 1) "NN HABITACIONES" (zonas Habitación N, o override manual)
- * 2) hasta 33 amenidades principales (featured primero, luego el resto)
+ * 2) hasta ~22 amenidades principales (featured primero; sin detalle de camas)
  */
 export function formatFincaFeaturesPlain(
   features: unknown[],
@@ -272,11 +296,13 @@ export function formatFincaFeaturesPlain(
   const roomsLine = formatHabitacionesContractLine(roomCount);
   if (roomsLine) lines.push(roomsLine);
 
-  const maxAmenities = Math.max(0, opts?.maxAmenities ?? 33);
+  // Tope: el bloque de firmas del DOCX no debe saltar a otra hoja.
+  const maxAmenities = Math.max(0, opts?.maxAmenities ?? 22);
   const featuredIds = (opts?.featuredIconIds ?? [])
     .map((id) => String(id ?? "").trim())
     .filter(Boolean);
   const featuredRank = new Map(featuredIds.map((id, i) => [id, i]));
+  const skipBeds = Boolean(roomsLine);
 
   const items = [...aggregatePropertyFeatureCounts(features || [])].sort(
     (a, b) => {
@@ -295,6 +321,9 @@ export function formatFincaFeaturesPlain(
         Number.POSITIVE_INFINITY,
       );
       if (rankA !== rankB) return rankA - rankB;
+      const scoreA = principalAmenityScore(a.name);
+      const scoreB = principalAmenityScore(b.name);
+      if (scoreA !== scoreB) return scoreA - scoreB;
       // Sin featured: las de mayor cantidad primero (más “presentes”).
       if (b.count !== a.count) return b.count - a.count;
       return a.name.localeCompare(b.name, "es");
@@ -305,6 +334,7 @@ export function formatFincaFeaturesPlain(
   for (const { name, count } of items) {
     // Evita duplicar "HABITACIONES" si alguien la cargó como amenidad suelta.
     if (/^habitaciones?$/i.test(name.trim())) continue;
+    if (skipBeds && isBedInventoryFeatureName(name)) continue;
     const line = formatFeatureContractLine(name, count);
     if (!line) continue;
     lines.push(line);
@@ -687,7 +717,7 @@ export function buildContractWordValues(
         habitacionesHint != null ? String(habitacionesHint) : undefined,
       zoneOrder: finca.zoneOrder,
       featuredIconIds: finca.featuredIcons,
-      maxAmenities: 33,
+      maxAmenities: 22,
     });
   const nombrePropietario =
     (dto.propertyOwnerName && String(dto.propertyOwnerName).trim()) ||
