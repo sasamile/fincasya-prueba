@@ -902,6 +902,7 @@ export const create = mutation({
     city: v.optional(v.string()),
     address: v.optional(v.string()),
     fechaNacimiento: v.optional(v.string()),
+    cedulaPhotoUrl: v.optional(v.string()),
     isDirect: v.optional(v.boolean()),
     userEmail: v.optional(v.string()),
     purpose: v.optional(v.string()),
@@ -1032,6 +1033,8 @@ export const create = mutation({
       address: args.address,
       multimedia: args.multimedia,
       isDirect: args.isDirect,
+      fechaNacimiento: args.fechaNacimiento,
+      cedulaPhotoUrl: args.cedulaPhotoUrl?.trim() || undefined,
       createdAt: now,
       updatedAt: now,
     });

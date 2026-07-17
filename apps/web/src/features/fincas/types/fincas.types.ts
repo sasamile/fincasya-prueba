@@ -323,6 +323,18 @@ export type PropertyDetail = {
   salePriceCop?: number | null;
   saleSquareMeters?: number | null;
   saleDescription?: string | null;
+  /** Propiedad Empresa → reserva web. */
+  reservable?: boolean;
+  visibleInWhatsAppCatalog?: boolean;
+  allowsPets?: boolean;
+  allowsEventsContent?: boolean;
+  familyOnly?: boolean;
+  serviceStaffAvailable?: boolean;
+  serviceStaffMandatory?: boolean;
+  serviceStaffPrice?: number;
+  depositoDanosReembolsable?: number;
+  depositoAseo?: number;
+  manillaCondominio?: number;
   features: {
     name: string;
     zone: string | null;

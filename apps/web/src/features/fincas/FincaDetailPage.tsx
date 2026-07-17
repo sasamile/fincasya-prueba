@@ -2,7 +2,8 @@
 
 /**
  * Detalle público de una finca — réplica visual de FincasYaWeb/finca-detail-content.tsx.
- * El flujo de reservas con calendario vive en producción (Nest); aquí el CTA es WhatsApp.
+ * Propiedad Empresa (`reservable`): fechas → /book → Bold → contrato.
+ * Resto: CTA WhatsApp.
  */
 import { notFound } from 'next/navigation';
 import { useQuery } from 'convex/react';

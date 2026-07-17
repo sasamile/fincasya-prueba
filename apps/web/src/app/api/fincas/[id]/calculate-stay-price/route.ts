@@ -11,6 +11,7 @@ export async function GET(
   const fechaSalida = searchParams.get('fechaSalida') ?? '';
   const numeroPersonas = Number(searchParams.get('numeroPersonas') ?? '0') || undefined;
   const numeroMascotas = Number(searchParams.get('numeroMascotas') ?? '0') || undefined;
+  const incluirServicio = searchParams.get('incluirServicio') === 'true';
 
   try {
     const client = getConvexHttpClient();
@@ -20,6 +21,7 @@ export async function GET(
       fechaSalida,
       numeroPersonas,
       numeroMascotas,
+      incluirServicio,
     });
     return NextResponse.json(data);
   } catch (error) {

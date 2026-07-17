@@ -88,6 +88,29 @@ function getPriceForDate(dateStr: string, basePrice: number, activeRules: any[])
   return { price: basePrice, ruleName: 'Estándar', ruleId: null };
 }
 
+/** Lectura pública mínima de finca (reserva web). */
+export const getByIdPublic = query({
+  args: { id: v.id('properties') },
+  handler: async (ctx, { id }) => {
+    const property = await ctx.db.get(id);
+    if (!property || property.visible === false) return null;
+    return {
+      id: String(property._id),
+      title: property.title,
+      slug: property.slug ?? null,
+      location: property.location,
+      capacity: property.capacity,
+      priceBase: property.priceBase,
+      reservable: property.reservable !== false,
+      allowsPets: property.allowsPets !== false,
+      serviceStaffAvailable: property.serviceStaffAvailable === true,
+      serviceStaffMandatory: property.serviceStaffMandatory === true,
+      serviceStaffPrice: property.serviceStaffPrice ?? 0,
+      depositoDanosReembolsable: property.depositoDanosReembolsable ?? 0,
+    };
+  },
+});
+
 /** Calcular precio total de una estadía (admin / contratos / reservas). */
 export const calculateStayPrice = query({
   args: {

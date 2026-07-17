@@ -40,6 +40,7 @@ import type * as conversationAudit from "../conversationAudit.js";
 import type * as crmContacts from "../crmContacts.js";
 import type * as crons from "../crons.js";
 import type * as curation from "../curation.js";
+import type * as directBooking from "../directBooking.js";
 import type * as exemplars from "../exemplars.js";
 import type * as features from "../features.js";
 import type * as fincas from "../fincas.js";
@@ -168,6 +169,7 @@ declare const fullApi: ApiFromModules<{
   crmContacts: typeof crmContacts;
   crons: typeof crons;
   curation: typeof curation;
+  directBooking: typeof directBooking;
   exemplars: typeof exemplars;
   features: typeof features;
   fincas: typeof fincas;

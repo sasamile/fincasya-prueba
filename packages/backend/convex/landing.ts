@@ -116,6 +116,18 @@ export const getPropertyBySlug = query({
       salePriceCop: property.salePriceCop ?? null,
       saleSquareMeters: property.saleSquareMeters ?? null,
       saleDescription: property.saleDescription ?? null,
+      /** Propiedad Empresa: reserva web (fechas → Bold → contrato). */
+      reservable: property.reservable !== false,
+      visibleInWhatsAppCatalog: property.visibleInWhatsAppCatalog !== false,
+      allowsPets: property.allowsPets !== false,
+      allowsEventsContent: property.allowsEventsContent !== false,
+      familyOnly: property.familyOnly === true,
+      serviceStaffAvailable: property.serviceStaffAvailable === true,
+      serviceStaffMandatory: property.serviceStaffMandatory === true,
+      serviceStaffPrice: property.serviceStaffPrice ?? 0,
+      depositoDanosReembolsable: property.depositoDanosReembolsable ?? 0,
+      depositoAseo: property.depositoAseo ?? 0,
+      manillaCondominio: property.manillaCondominio ?? 0,
       features: features.map((f) => {
         const icon = f.iconId ? iconsById.get(f.iconId) : undefined;
         return {

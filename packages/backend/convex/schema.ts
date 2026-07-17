@@ -1046,6 +1046,15 @@ export default defineSchema(
       ),
       isDirect: v.optional(v.boolean()),
       isDirectBooking: v.optional(v.boolean()),
+      /** Link Bold de anticipo (reserva web Propiedad Empresa). */
+      boldPaymentUrl: v.optional(v.string()),
+      boldPaymentLinkId: v.optional(v.string()),
+      boldPaymentAmount: v.optional(v.number()),
+      /** PDF del contrato generado tras el pago (reserva directa). */
+      contractUrl: v.optional(v.string()),
+      /** Foto de cédula validada (reserva web Propiedad Empresa). */
+      cedulaPhotoUrl: v.optional(v.string()),
+      fechaNacimiento: v.optional(v.string()),
       googleEventId: v.optional(v.string()),
       googleCalendarId: v.optional(v.string()),
       /**

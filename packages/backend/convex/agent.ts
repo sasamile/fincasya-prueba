@@ -447,6 +447,28 @@ function capacityCeilRelaxedForCupo(cupo: number): number {
 }
 
 /**
+ * Baraja DETERMINISTA por semilla (Math.random no se permite en queries de
+ * Convex). Mismo seed → mismo orden; seeds distintas → órdenes distintos. Sirve
+ * para ROTAR qué fincas salen primero en cada envío (variedad).
+ */
+function seededShuffle<T>(arr: T[], seed: number): T[] {
+  const out = [...arr];
+  let s = (seed >>> 0) || 1;
+  const rnd = () => {
+    // xorshift32: PRNG barato y estable.
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    return ((s >>> 0) % 1_000_000) / 1_000_000;
+  };
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
  * Selecciona fincas para el catalogo con las REGLAS DEL EQUIPO (portadas de
  * fincasya-new/convex/whatsappCatalogs.ts):
  *   - min: capacity >= cupo; techo estricto (capacityCeilForCupo) y, si hay
@@ -466,10 +488,16 @@ export const toolCatalogPick = internalQuery({
     /** ms epoch — si vienen, solo se envian fincas LIBRES esas fechas. */
     fechaEntradaMs: v.optional(v.number()),
     fechaSalidaMs: v.optional(v.number()),
+    /**
+     * Semilla de ROTACIÓN (la pone runAgentTurn, que sí puede usar Date.now).
+     * Baraja el orden dentro de cada tier para que distintos clientes vean
+     * fincas DISTINTAS — antes salían siempre las mismas 12 favoritas.
+     */
+    seed: v.optional(v.number()),
   },
   handler: async (
     ctx,
-    { conversationId, personas, zona, mascotas, fechaEntradaMs, fechaSalidaMs },
+    { conversationId, personas, zona, mascotas, fechaEntradaMs, fechaSalidaMs, seed },
   ): Promise<CatalogPickResult> => {
     const conversation = await ctx.db.get(conversationId);
     const exclude = new Set(
@@ -489,7 +517,6 @@ export const toolCatalogPick = internalQuery({
     // "la Vega o Villeta" → ['la vega','villeta'] — antes se comparaba la
     // frase completa y el tier nunca aplicaba con dos municipios.
     const zonaParts = zonaTrim ? splitZoneParts(zonaTrim) : [];
-    const zonaLower = zonaTrim?.toLowerCase();
 
     // COSTA SOLO SI LA PIDEN (regla comercial): Santa Marta, Cartagena, Islas
     // del Rosario… jamás se mezclan en las favoritas sin zona ni en la
@@ -530,66 +557,29 @@ export const toolCatalogPick = internalQuery({
       matches = strict.length >= 6 ? strict : relaxed.length >= 4 ? relaxed : minOnly;
     }
 
-    // Orden por tiers (politica comercial del equipo). El tier 1 es el
-    // municipio EXACTO pedido (cualquiera de ellos si nombró varios), con
-    // comparación sin tildes ("Apicalá" vs "apicala").
+    // ORDEN POR TIERS con ROTACIÓN. Antes el orden era fijo (favoritas por
+    // capacidad/precio) → cada cliente veía SIEMPRE las mismas 12. Ahora se
+    // baraja DENTRO de cada tier con la semilla del turno, así distintos
+    // clientes ven fincas distintas y con el tiempo rotan las 97 enviables.
+    // Los tiers preservan las reglas buenas:
+    //   1. municipio EXACTO pedido (comparación sin tildes)
+    //   2. favoritas (política del equipo) — pero rotando CUÁL favorita lidera
+    //   3. el resto
+    const rotSeed = typeof seed === 'number' && seed !== 0 ? seed : 1;
     const inExactZone = (location: string): boolean => {
       if (zonaParts.length === 0) return false;
       const loc = normZoneText(location);
       return zonaParts.some((p) => loc.includes(p));
     };
-    matches = [...matches].sort((a, b) => {
-      if (zonaParts.length > 0) {
-        const aExact = inExactZone(a.location) ? 0 : 1;
-        const bExact = inExactZone(b.location) ? 0 : 1;
-        if (aExact !== bExact) return aExact - bExact;
-      }
-      const aFav = a.isFavorite === true ? 0 : 1;
-      const bFav = b.isFavorite === true ? 0 : 1;
-      if (aFav !== bFav) return aFav - bFav;
-      if (personas && personas > 0) {
-        const aDist = Math.abs(a.capacity - personas);
-        const bDist = Math.abs(b.capacity - personas);
-        if (aDist !== bDist) return aDist - bDist;
-      }
-      return (a.priceBase ?? 0) - (b.priceBase ?? 0);
-    });
-
-    // Sin zona: intercalar municipios (variedad — favoritas de varios sitios).
-    if (!zonaLower) {
-      const byTown = new Map<string, typeof matches>();
-      for (const p of matches) {
-        const town = p.location.toLowerCase();
-        const bucket = byTown.get(town) ?? [];
-        bucket.push(p);
-        byTown.set(town, bucket);
-      }
-      const interleaved: typeof matches = [];
-      let added = true;
-      while (added) {
-        added = false;
-        for (const bucket of byTown.values()) {
-          const next = bucket.shift();
-          if (next) {
-            interleaved.push(next);
-            added = true;
-          }
-        }
-      }
-      matches = interleaved;
-    }
-
-    // FAVORITAS DE PRIMERAS (regla del equipo): sin romper la variedad/orden ya
-    // calculado, se llevan las favoritas al frente. SOLO sin zona: si el
-    // cliente pidió municipio(s), el municipio EXACTO manda sobre la favorita
-    // (queja real: pidió "la Vega o Villeta" y una favorita de Viotá salió
-    // antes que las fincas de Villeta).
-    if (zonaParts.length === 0) {
-      matches = [
-        ...matches.filter((p) => p.isFavorite === true),
-        ...matches.filter((p) => p.isFavorite !== true),
-      ];
-    }
+    const tierExact = matches.filter((p) => inExactZone(p.location));
+    const rest = matches.filter((p) => !inExactZone(p.location));
+    const tierFav = rest.filter((p) => p.isFavorite === true);
+    const tierRest = rest.filter((p) => p.isFavorite !== true);
+    matches = [
+      ...seededShuffle(tierExact, rotSeed),
+      ...seededShuffle(tierFav, rotSeed),
+      ...seededShuffle(tierRest, rotSeed),
+    ];
 
     // ¿Filtramos por disponibilidad? Solo si vienen fechas válidas.
     const checkAvailability =
@@ -1891,6 +1881,10 @@ export const runAgentTurn = internalAction({
               });
               continue;
             }
+            // Semilla de rotación: cambia por turno (Date.now solo se puede en
+            // la action, no en la query) → cada cliente/envío ve fincas
+            // distintas. Misma semilla para el intento principal y el ampliado.
+            const catalogSeed = Date.now() % 2147483647;
             let pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
               conversationId,
               personas: typeof args.personas === 'number' ? args.personas : undefined,
@@ -1899,6 +1893,7 @@ export const runAgentTurn = internalAction({
                 typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
               fechaEntradaMs: feMs,
               fechaSalidaMs: fsMs,
+              seed: catalogSeed,
             });
             // REGLA DEL EQUIPO: nunca dejar al cliente sin opciones. Si la zona
             // pedida no tiene fincas para ese grupo, se amplía SOLO a otros
@@ -1915,6 +1910,7 @@ export const runAgentTurn = internalAction({
                   typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
                 fechaEntradaMs: feMs,
                 fechaSalidaMs: fsMs,
+                seed: catalogSeed,
               });
               if (retry.ok && retry.items.length > 0) {
                 pick = retry;
