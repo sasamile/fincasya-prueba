@@ -1416,6 +1416,16 @@ export function ContractsReservationSection({
     accountHolder: draft.accountHolder,
     idNumber: draft.idNumber,
     bankAccountIds: bankIdsForContract,
+    bankAccounts: bankAccounts
+      .filter((a) => bankIdsForContract.includes(a.id))
+      .map((a) => ({
+        id: a.id,
+        bankName: a.bankName,
+        accountType: a.accountType,
+        accountNumber: a.accountNumber,
+        ownerName: a.ownerName,
+        ownerCedula: a.ownerCedula,
+      })),
     cleaningFee: Number(draft.cleaningFee || 0),
     refundableDeposit: Number(draft.refundableDeposit || 0),
     manillaCondominio: Number(draft.manillaCondominio || 0),

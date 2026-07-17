@@ -406,7 +406,6 @@ export type ContractFinca = {
 /** Payload del contrato (salida de buildContractPayload en el front). */
 export type ContractDto = Record<string, unknown> & {
   contractNumber?: string;
-  /** Borrador de solo lectura (sin numeración contractual). */
   draft?: boolean;
   nightlyPrice?: string;
   totalPrice?: string;
@@ -434,6 +433,7 @@ export type ContractDto = Record<string, unknown> & {
   accountHolder?: string;
   idNumber?: string;
   bankAccountIds?: string[];
+  bankAccounts?: ContractBankAccountInput[];
   cleaningFee?: number;
   refundableDeposit?: number;
   cleaningFeeLabel?: string;
@@ -541,7 +541,7 @@ export function buildContractWordValues(
   const {
     admin: contractAdmin,
     ownerOverrides,
-    bankAccounts,
+    bankAccounts: settingsBankAccounts,
     contractBankAccountIds,
     primaryBankAccountId,
   } = parseContractSettingsPayload(contractSettingsPayload);
@@ -579,27 +579,59 @@ export function buildContractWordValues(
     ownerOverride.ciudadCedula?.trim() ||
     "";
 
+  // Preferir cuentas enviadas por el cliente (inbox ya las tiene seleccionadas).
+  const dtoBankAccounts = Array.isArray(dto.bankAccounts)
+    ? dto.bankAccounts.filter(
+        (a) =>
+          a &&
+          typeof a === "object" &&
+          (String(a.accountNumber ?? "").trim() ||
+            String(a.bankName ?? "").trim()),
+      )
+    : [];
+  const bankById = new Map<string, ContractBankAccountInput>();
+  for (const a of settingsBankAccounts) {
+    if (a?.id) bankById.set(String(a.id), a);
+  }
+  for (const [i, a] of dtoBankAccounts.entries()) {
+    const id = a.id ? String(a.id) : `dto-${i}`;
+    bankById.set(id, { ...bankById.get(id), ...a, id });
+  }
+  const bankAccounts = Array.from(bankById.values());
+
   const selectedBankIds =
     Array.isArray(dto.bankAccountIds) && dto.bankAccountIds.length > 0
       ? dto.bankAccountIds.map(String)
-      : contractBankAccountIds.length > 0
-        ? contractBankAccountIds.map(String)
-        : primaryBankAccountId
-          ? [String(primaryBankAccountId)]
-          : [];
+      : dtoBankAccounts.length > 0
+        ? dtoBankAccounts.map((a, i) => String(a.id ?? `dto-${i}`))
+        : contractBankAccountIds.length > 0
+          ? contractBankAccountIds.map(String)
+          : primaryBankAccountId
+            ? [String(primaryBankAccountId)]
+            : [];
+
+  let selectedBankAccounts = bankAccounts.filter(
+    (a) => a.id && selectedBankIds.includes(String(a.id)),
+  );
+  // Si el cliente mandó cuentas explícitas y el match por id falló, úsalas tal cual.
+  if (selectedBankAccounts.length === 0 && dtoBankAccounts.length > 0) {
+    selectedBankAccounts = dtoBankAccounts.map((a, i) => ({
+      ...a,
+      id: a.id ? String(a.id) : `dto-${i}`,
+    }));
+  }
 
   const cuentasBancariasPlain = buildBankAccountsPlainSnippet(
-    bankAccounts,
-    selectedBankIds,
+    selectedBankAccounts.length > 0 ? selectedBankAccounts : bankAccounts,
+    selectedBankAccounts.length > 0
+      ? selectedBankAccounts.map((a) => String(a.id))
+      : selectedBankIds,
     {
       accountNumber: dto.accountNumber ?? "",
       bankName: dto.bankName ?? "",
       ownerName: dto.accountHolder ?? "",
       ownerCedula: dto.idNumber ?? "",
     },
-  );
-  const selectedBankAccounts = bankAccounts.filter(
-    (a) => a.id && selectedBankIds.includes(String(a.id)),
   );
   const contractBankAccount =
     selectedBankAccounts[0] ??

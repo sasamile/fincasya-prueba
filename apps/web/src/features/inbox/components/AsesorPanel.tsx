@@ -833,6 +833,16 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
               normalizeExtraPersonFee(draft.extraPersonFee),
             ),
             bankAccountIds: selectedBankIds,
+            bankAccounts: bankAccounts
+              .filter((a) => selectedBankIds.includes(a.id))
+              .map((a) => ({
+                id: a.id,
+                bankName: a.bankName,
+                accountType: a.accountType,
+                accountNumber: a.accountNumber,
+                ownerName: a.ownerName,
+                ownerCedula: a.ownerCedula,
+              })),
           }),
         },
       );
@@ -1421,6 +1431,16 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             clientName: fullClientName(draft),
           }}
           selectedBankIds={selectedBankIds}
+          selectedBankAccounts={bankAccounts
+            .filter((a) => selectedBankIds.includes(a.id))
+            .map((a) => ({
+              id: a.id,
+              bankName: a.bankName,
+              accountType: a.accountType,
+              accountNumber: a.accountNumber,
+              ownerName: a.ownerName,
+              ownerCedula: a.ownerCedula,
+            }))}
           conversation={conversation}
           propertyTitle={
             fincas?.find((f) => f._id === draft.fincaId)?.title ??

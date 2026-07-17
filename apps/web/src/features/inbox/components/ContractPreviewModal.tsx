@@ -59,6 +59,7 @@ type SuperDocInstance = any;
 export function ContractPreviewModal({
   draft,
   selectedBankIds,
+  selectedBankAccounts = [],
   conversation,
   propertyTitle,
   propertyLocation,
@@ -66,6 +67,14 @@ export function ContractPreviewModal({
 }: {
   draft: PreviewDraft;
   selectedBankIds: string[];
+  selectedBankAccounts?: Array<{
+    id: string;
+    bankName?: string;
+    accountType?: string;
+    accountNumber?: string;
+    ownerName?: string;
+    ownerCedula?: string;
+  }>;
   conversation: ConversationRow | null;
   propertyTitle?: string;
   propertyLocation?: string;
@@ -167,6 +176,7 @@ export function ContractPreviewModal({
                 })(),
               ),
               bankAccountIds: selectedBankIds,
+              bankAccounts: selectedBankAccounts,
             }),
           },
         );
@@ -229,7 +239,7 @@ export function ContractPreviewModal({
       superdocRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, selectedBankIds]);
+  }, [draft, selectedBankIds, selectedBankAccounts]);
 
   /** Exporta el docx editado del editor como Blob. */
   async function exportEditedDocx(): Promise<Blob> {

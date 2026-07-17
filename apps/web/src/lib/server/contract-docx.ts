@@ -299,6 +299,15 @@ export function fillContractDocx(
     if (raw == null) continue;
     let processed = raw;
 
+    // Quitar proofErr antes del cluster de cuentas: Word parte {{cuentaNumero}}
+    // con spellcheck y si no se limpia, el replace del bloque falla y luego
+    // el cleanup borra los placeholders → "cuentas de ahorros: .".
+    processed = processed.replace(/<w:proofErr[^/>]*\/>/g, "");
+    processed = processed.replace(
+      /<w:proofErr[^>]*>[\s\S]*?<\/w:proofErr>/g,
+      "",
+    );
+
     if (opts.featuresRaw?.trim()) {
       processed = replaceWordListPlaceholderWithLeftAlign(
         processed,
