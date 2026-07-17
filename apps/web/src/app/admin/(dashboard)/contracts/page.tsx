@@ -24,6 +24,7 @@ import {
   Link2,
   AlertCircle,
   Inbox,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -181,7 +182,34 @@ export default function ContractsManagerPage() {
     page: 1,
   });
   const backfillContracts = useConvexMutation(api.contracts.backfill);
+  const removeContract = useConvexMutation(api.contracts.remove);
   const [isBackfilling, setIsBackfilling] = useState(false);
+  const [deletingContract, setDeletingContract] = useState<string | null>(null);
+
+  const handleDeleteContract = async (contractNumber: string) => {
+    const label = contractNumber.trim() || "este contrato";
+    if (
+      !window.confirm(
+        `¿Eliminar el registro de ${label}? Esta acción no se puede deshacer.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingContract(contractNumber);
+    try {
+      const res = await removeContract({ contractNumber });
+      if (!res.ok) {
+        toast.error("No se pudo eliminar el contrato.");
+        return;
+      }
+      toast.success("Contrato eliminado.");
+      if (detailContract === contractNumber) setDetailContract(null);
+    } catch {
+      toast.error("No se pudo eliminar el contrato.");
+    } finally {
+      setDeletingContract(null);
+    }
+  };
 
   const data = rawContracts as ContractsResponse | undefined;
   const isLoading = rawContracts === undefined;
@@ -628,6 +656,22 @@ export default function ContractsManagerPage() {
                             <ExternalLink className="w-4 h-4" />
                           </Button>
                         )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          title="Eliminar contrato"
+                          disabled={deletingContract === c.contractNumber}
+                          onClick={() =>
+                            void handleDeleteContract(c.contractNumber)
+                          }
+                        >
+                          {deletingContract === c.contractNumber ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>

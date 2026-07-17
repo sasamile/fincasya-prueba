@@ -225,18 +225,29 @@ const CLIENT_DOC_TYPES = [
   { value: "NIT", label: "NIT" },
 ] as const;
 
-function assembleClientFullName(first: string, last: string, fallback = "") {
-  return `${first} ${last}`.trim() || fallback.trim();
+function assembleClientFullName(
+  first?: string | null,
+  last?: string | null,
+  fallback = "",
+) {
+  return `${first ?? ""} ${last ?? ""}`.trim() || String(fallback ?? "").trim();
 }
 
 function splitClientFullName(full: string): { first: string; last: string } {
-  const parts = full.trim().split(/\s+/).filter(Boolean);
+  const parts = String(full ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
   if (parts.length === 0) return { first: "", last: "" };
   if (parts.length === 1) return { first: parts[0]!, last: "" };
   return {
     first: parts.slice(0, -1).join(" "),
     last: parts[parts.length - 1]!,
   };
+}
+
+function strTrim(value: unknown): string {
+  return String(value ?? "").trim();
 }
 
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
@@ -346,17 +357,17 @@ function ensureApiContractNumber(
   draft: FormState,
   props: PropertyLike[],
 ): string {
-  const t = draft.contractNumber.trim();
+  const t = strTrim(draft.contractNumber);
   if (t) return t;
   const p = props.find((x) => x.id === draft.propertyId);
   const codePart = (p?.code || "FN")
     .replace(/[^\w-]+/g, "")
     .slice(0, 16)
     .replace(/^$/, "FN");
-  const inPart = String(draft.checkIn || "")
+  const inPart = strTrim(draft.checkInDate)
     .replace(/\D/g, "")
     .slice(0, 8);
-  const outPart = String(draft.checkOut || "")
+  const outPart = strTrim(draft.checkOutDate)
     .replace(/\D/g, "")
     .slice(0, 8);
   if (inPart && outPart) {
@@ -547,6 +558,39 @@ export function ContractsReservationSection({
   // Paso actual del asistente (stepper) de generación de contrato.
   const [step, setStep] = useState(0);
 
+  // Migrar formularios viejos sin los campos nuevos de cliente.
+  useEffect(() => {
+    setForm((prev) => {
+      if (
+        typeof prev.clientFirstName === "string" &&
+        typeof prev.clientLastName === "string" &&
+        typeof prev.clientDocType === "string" &&
+        typeof prev.clientDocIssuedAt === "string"
+      ) {
+        return prev;
+      }
+      const split = splitClientFullName(prev.clientName || "");
+      return {
+        ...INITIAL,
+        ...prev,
+        clientFirstName:
+          typeof prev.clientFirstName === "string"
+            ? prev.clientFirstName
+            : split.first,
+        clientLastName:
+          typeof prev.clientLastName === "string"
+            ? prev.clientLastName
+            : split.last,
+        clientDocType:
+          typeof prev.clientDocType === "string" ? prev.clientDocType : "CC",
+        clientDocIssuedAt:
+          typeof prev.clientDocIssuedAt === "string"
+            ? prev.clientDocIssuedAt
+            : "",
+      };
+    });
+  }, []);
+
   // Precarga SuperDoc en pasos previos al editor Word (paso 5).
   useEffect(() => {
     if (step >= 3) {
@@ -637,6 +681,7 @@ export function ContractsReservationSection({
           }
         }
         setForm((prev) => ({
+          ...INITIAL,
           ...prev,
           propertyId: rec.propertyId || draft.propertyId || prev.propertyId,
           contractNumber: rec.contractNumber || prev.contractNumber,
@@ -1225,11 +1270,13 @@ export function ContractsReservationSection({
   }, [autoApplied, seasonManual, form.temporada, seasonOptions]);
 
   const validateContractForm = (draft: FormState) => {
+    // Borradores viejos / snapshots pueden venir sin campos nuevos → nunca .trim() directo.
+    const d: FormState = { ...INITIAL, ...draft };
     const nextErrors: FieldErrors = {};
-    if (!draft.propertyId) nextErrors.propertyId = "Selecciona una finca.";
-    if (!draft.contractTotalInput || Number(draft.contractTotalInput) <= 0)
+    if (!d.propertyId) nextErrors.propertyId = "Selecciona una finca.";
+    if (!d.contractTotalInput || Number(d.contractTotalInput) <= 0)
       nextErrors.contractTotalInput = "Ingresa el valor total del contrato.";
-    if (!draft.nightlyPrice || Number(draft.nightlyPrice) <= 0)
+    if (!d.nightlyPrice || Number(d.nightlyPrice) <= 0)
       nextErrors.nightlyPrice =
         "Ingresa el valor por noche o revisa total, fechas y cargos.";
     if (nights <= 0)
@@ -1242,62 +1289,72 @@ export function ContractsReservationSection({
       nextErrors.bankAccounts =
         "Selecciona al menos 1 cuenta bancaria en Ajustes globales del contrato.";
     if (!isLinkMode) {
-      if (
-        !draft.clientName.trim() &&
-        !assembleClientFullName(draft.clientFirstName, draft.clientLastName)
-      )
-        nextErrors.clientName = "El nombre del arrendatario es obligatorio.";
-      if (!draft.clientFirstName.trim() && !draft.clientName.trim())
-        nextErrors.clientFirstName = "Los nombres son obligatorios.";
-      if (!draft.clientId.trim())
+      const clientName = strTrim(d.clientName);
+      const clientFirst = strTrim(d.clientFirstName);
+      const clientLast = strTrim(d.clientLastName);
+      const fullName = assembleClientFullName(
+        clientFirst,
+        clientLast,
+        clientName,
+      );
+      if (!fullName)
+        nextErrors.clientFirstName =
+          "Los nombres del arrendatario son obligatorios.";
+      if (!strTrim(d.clientId))
         nextErrors.clientId = "El número de documento es obligatorio.";
-      if (!draft.clientDocIssuedAt.trim())
+      if (!strTrim(d.clientDocIssuedAt))
         nextErrors.clientDocIssuedAt =
           "La fecha de expedición del documento es obligatoria.";
-      if (!draft.clientCity.trim())
+      if (!strTrim(d.clientCity))
         nextErrors.clientCity =
           "La ciudad de expedición de la cédula es obligatoria.";
-      if (!draft.clientPhone.trim())
+      if (!strTrim(d.clientPhone))
         nextErrors.clientPhone = "El celular es obligatorio.";
-      if (!draft.clientEmail.trim())
+      if (!strTrim(d.clientEmail))
         nextErrors.clientEmail = "El correo es obligatorio.";
-      if (!draft.clientAddress.trim())
+      if (!strTrim(d.clientAddress))
         nextErrors.clientAddress = "La dirección es obligatoria.";
     }
-    if (!draft.checkInDate)
+    if (!d.checkInDate)
       nextErrors.checkInDate = "La fecha de entrada es obligatoria.";
-    else if (draft.checkInDate < localTodayYmd())
+    else if (d.checkInDate < localTodayYmd())
       nextErrors.checkInDate = "La fecha de entrada no puede ser pasada.";
-    if (!draft.checkOutDate)
+    if (!d.checkOutDate)
       nextErrors.checkOutDate = "La fecha de salida es obligatoria.";
-    else if (draft.checkOutDate < localTodayYmd())
+    else if (d.checkOutDate < localTodayYmd())
       nextErrors.checkOutDate = "La fecha de salida no puede ser pasada.";
-    else if (draft.checkInDate && draft.checkOutDate < draft.checkInDate)
+    else if (d.checkInDate && d.checkOutDate < d.checkInDate)
       nextErrors.checkOutDate =
         "La fecha de salida debe ser posterior o igual a la de entrada.";
-    if (!draft.checkInTime.trim())
+    if (!strTrim(d.checkInTime))
       nextErrors.checkInTime = "La hora de entrada es obligatoria.";
-    if (!draft.checkOutTime.trim())
+    if (!strTrim(d.checkOutTime))
       nextErrors.checkOutTime = "La hora de salida es obligatoria.";
-    if (!draft.guests.trim() || Number(draft.guests) <= 0)
+    if (!strTrim(d.guests) || Number(d.guests) <= 0)
       nextErrors.guests = "Ingresa el numero de huespedes.";
-    if (!draft.temporada.trim())
+    if (!strTrim(d.temporada))
       nextErrors.temporada = "Selecciona la temporada.";
-    if (!draft.bankName.trim())
+    if (!strTrim(d.bankName))
       nextErrors.bankName =
         "Elige la cuenta del contrato en Ajustes globales (cuentas bancarias) o agrega una cuenta.";
-    if (!draft.accountNumber.trim())
+    if (!strTrim(d.accountNumber))
       nextErrors.accountNumber =
         "Elige la cuenta principal en Ajustes globales del contrato (cuentas bancarias) o agrega una cuenta.";
-    if (!draft.accountHolder.trim())
+    if (!strTrim(d.accountHolder))
       nextErrors.accountHolder =
         "Elige la cuenta principal en Ajustes globales del contrato (cuentas bancarias) o agrega una cuenta.";
-    if (!draft.idNumber.trim())
+    if (!strTrim(d.idNumber))
       nextErrors.idNumber =
         "Elige la cuenta principal en Ajustes globales del contrato (cuentas bancarias) o agrega una cuenta.";
-    if (Number(draft.petCount || 0) < 0)
+    if (Number(d.petCount || 0) < 0)
       nextErrors.petCount = "El numero de mascotas no puede ser negativo.";
-    if (draft.serviceStaffIncluded && Number(draft.serviceStaffFee || 0) <= 0) {
+    // Servicio obligatorio o precio 0 en finca: no exigir fee manual.
+    if (
+      d.serviceStaffIncluded &&
+      Number(d.serviceStaffFee || 0) <= 0 &&
+      !propertyServiceMandatory &&
+      propertyServiceFee > 0
+    ) {
       nextErrors.serviceStaffFee = "Ingresa el valor del servicio.";
     }
     return nextErrors;
@@ -1334,15 +1391,15 @@ export function ContractsReservationSection({
       draft.clientLastName,
       draft.clientName,
     ),
-    clientFirstName: draft.clientFirstName,
-    clientLastName: draft.clientLastName,
-    clientId: draft.clientId,
-    clientDocType: draft.clientDocType || "CC",
-    clientDocIssuedAt: draft.clientDocIssuedAt,
-    clientEmail: draft.clientEmail,
-    clientPhone: draft.clientPhone,
-    clientCity: draft.clientCity,
-    clientAddress: draft.clientAddress,
+    clientFirstName: strTrim(draft.clientFirstName),
+    clientLastName: strTrim(draft.clientLastName),
+    clientId: strTrim(draft.clientId),
+    clientDocType: strTrim(draft.clientDocType) || "CC",
+    clientDocIssuedAt: strTrim(draft.clientDocIssuedAt),
+    clientEmail: strTrim(draft.clientEmail),
+    clientPhone: strTrim(draft.clientPhone),
+    clientCity: strTrim(draft.clientCity),
+    clientAddress: strTrim(draft.clientAddress),
     checkInDate: draft.checkInDate,
     checkOutDate: draft.checkOutDate,
     checkInTime: draft.checkInTime,
@@ -1779,16 +1836,27 @@ export function ContractsReservationSection({
 
   const generateContractAndReserve = async () => {
     const generatedContractNumber = ensureApiContractNumber(form, properties);
-    const nextFormState = {
+    const nextFormState: FormState = {
+      ...INITIAL,
       ...form,
       contractNumber: generatedContractNumber,
+      clientFirstName: strTrim(form.clientFirstName),
+      clientLastName: strTrim(form.clientLastName),
+      clientName:
+        assembleClientFullName(
+          form.clientFirstName,
+          form.clientLastName,
+          form.clientName,
+        ) || strTrim(form.clientName),
+      clientDocType: strTrim(form.clientDocType) || "CC",
+      clientDocIssuedAt: strTrim(form.clientDocIssuedAt),
     };
 
     const effectiveForm = {
       ...nextFormState,
       petDeposit: String(petDepositTotal),
       petSurcharge: String(petSurchargeTotal),
-      serviceStaffFee: form.serviceStaffIncluded
+      serviceStaffFee: nextFormState.serviceStaffIncluded
         ? String(serviceStaffTotal)
         : "0",
     };
@@ -2077,9 +2145,20 @@ export function ContractsReservationSection({
 
   const generateContractLink = async () => {
     const generatedContractNumber = ensureApiContractNumber(form, properties);
-    const nextFormState = {
+    const nextFormState: FormState = {
+      ...INITIAL,
       ...form,
       contractNumber: generatedContractNumber,
+      clientFirstName: strTrim(form.clientFirstName),
+      clientLastName: strTrim(form.clientLastName),
+      clientName:
+        assembleClientFullName(
+          form.clientFirstName,
+          form.clientLastName,
+          form.clientName,
+        ) || strTrim(form.clientName),
+      clientDocType: strTrim(form.clientDocType) || "CC",
+      clientDocIssuedAt: strTrim(form.clientDocIssuedAt),
       petDeposit: String(petDepositTotal),
       petSurcharge: String(petSurchargeTotal),
       serviceStaffFee: form.serviceStaffIncluded
@@ -3493,7 +3572,7 @@ export function ContractsReservationSection({
                           Nombres
                         </Label>
                         <Input
-                          value={form.clientFirstName}
+                          value={form.clientFirstName ?? ""}
                           onChange={(event) =>
                             setClientField(
                               "clientFirstName",
@@ -3514,7 +3593,7 @@ export function ContractsReservationSection({
                           Apellidos
                         </Label>
                         <Input
-                          value={form.clientLastName}
+                          value={form.clientLastName ?? ""}
                           onChange={(event) =>
                             setClientField("clientLastName", event.target.value)
                           }
@@ -3737,7 +3816,7 @@ export function ContractsReservationSection({
                               ? String(serviceStaffTotal)
                               : "0",
                           },
-                          form.contractNumber.trim() || "BORRADOR",
+                          strTrim(form.contractNumber) || "BORRADOR",
                         )}
                         active={step === 5 && Boolean(form.propertyId)}
                     documentKey={[
@@ -3745,8 +3824,8 @@ export function ContractsReservationSection({
                       form.contractNumber,
                       form.nightlyPrice,
                       form.contractTotalInput,
-                      form.clientFirstName,
-                      form.clientLastName,
+                      form.clientFirstName ?? "",
+                      form.clientLastName ?? "",
                       form.clientName,
                       form.clientId,
                       form.clientDocType,

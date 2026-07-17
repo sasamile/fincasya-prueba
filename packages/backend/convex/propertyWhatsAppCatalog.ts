@@ -118,8 +118,8 @@ export const getPropertyByRetailerId = query({
 
     // A veces Meta usa el Convex _id de la propiedad como retailerId.
     if (!propertyId) {
-      const asProp = await ctx.db.get(rid as any);
-      if (asProp && 'title' in asProp) propertyId = rid as any;
+      const asProp = ctx.db.normalizeId('properties', rid);
+      if (asProp && (await ctx.db.get(asProp))) propertyId = asProp;
     }
     if (!propertyId) return null;
 

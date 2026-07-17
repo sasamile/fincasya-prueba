@@ -114,9 +114,13 @@ async function buildProductCard(
 ): Promise<ProductCard | null> {
   let pid = retailerToProp.get(retailerId);
   if (!pid) {
-    const asId = retailerId as Id<'properties'>;
-    const direct = await ctx.db.get(asId);
-    if (direct) pid = asId;
+    // Meta a veces manda un retailerId que no es Convex ID (ej. código corto).
+    // normalizeId evita el crash "Invalid ID length".
+    const asId = ctx.db.normalizeId('properties', retailerId);
+    if (asId) {
+      const direct = await ctx.db.get(asId);
+      if (direct) pid = asId;
+    }
   }
   if (!pid) return null;
   const p = await ctx.db.get(pid);
