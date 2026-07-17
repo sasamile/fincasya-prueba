@@ -11,6 +11,11 @@ const nextConfig: NextConfig = {
     "@ilovepdf/ilovepdf-js-core",
     "heic-convert",
   ],
+  /** Incluye el script fallback DOCX→PDF en las funciones serverless. */
+  outputFileTracingIncludes: {
+    "/api/fincas/contract-docx-to-pdf": ["./scripts/docx-to-pdf.mjs"],
+    "/api/fincas/[id]/direct-booking-contract": ["./scripts/docx-to-pdf.mjs"],
+  },
   images: {
     formats: ['image/webp'],
     remotePatterns: [

@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getConvexHttpClient, api } from "@/lib/convex-server";
 import { fillContractDocx } from "@/lib/server/contract-docx";
-import { convertDocxToPdf } from "@/lib/server/docx-to-pdf";
+import { convertDocxToPdfDetailed } from "@/lib/server/docx-to-pdf";
 import {
   buildContractWordValues,
   type ContractDto,
@@ -140,7 +140,7 @@ export async function POST(
     }
 
     // Plantilla Word → PDF (iLovePDF o LibreOffice), igual que fincasya-new.
-    const pdf = await convertDocxToPdf(docx);
+    const { pdf, error: pdfError } = await convertDocxToPdfDetailed(docx);
     if (pdf) {
       return NextResponse.json({
         success: true,
@@ -151,10 +151,12 @@ export async function POST(
       });
     }
 
+    console.error("[direct-booking-contract] pdf:", pdfError);
     return NextResponse.json(
       {
         error:
-          "No se pudo convertir el contrato a PDF. Revisa las credenciales ILOVEPDF en .env o instala LibreOffice.",
+          pdfError ||
+          "No se pudo convertir el contrato a PDF. Revisa las credenciales ILOVEPDF en Vercel (Production) o instala LibreOffice en local.",
       },
       { status: 503 },
     );

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { convertDocxToPdf } from "@/lib/server/docx-to-pdf";
+import { convertDocxToPdfDetailed } from "@/lib/server/docx-to-pdf";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -38,12 +38,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const pdf = await convertDocxToPdf(docx);
+    const { pdf, error } = await convertDocxToPdfDetailed(docx);
     if (!pdf) {
+      console.error("[contract-docx-to-pdf]", error);
       return NextResponse.json(
         {
           error:
-            "No se pudo convertir a PDF. Revisa las credenciales ILOVEPDF en .env o instala LibreOffice.",
+            error ||
+            "No se pudo convertir a PDF. Revisa las credenciales ILOVEPDF en Vercel (Production) o instala LibreOffice en local.",
         },
         { status: 503 },
       );
