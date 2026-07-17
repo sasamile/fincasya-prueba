@@ -2,9 +2,10 @@
  * Convierte .docx → PDF fuera del bundle de Next/Turbopack.
  * stdin: docx binario · stdout: PDF binario · stderr: errores
  *
- * 1) iLovePDF (officepdf) si hay keys en el entorno
+ * 1) iLovePDF REST (sin SDK) si hay keys en el entorno
  * 2) LibreOffice headless local
  */
+import { createHmac } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,11 +13,37 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const ILOVE_API = "https://api.ilovepdf.com/v1";
 
 async function readStdinBuffer() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
   return Buffer.concat(chunks);
+}
+
+function isPdf(buf) {
+  return buf.length >= 4 && buf.subarray(0, 4).toString() === "%PDF";
+}
+
+function base64url(data) {
+  const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+  return buf.toString("base64url");
+}
+
+function signJwt(publicKey, secretKey) {
+  const timeNow = Date.now() / 1000;
+  const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const payload = base64url(
+    JSON.stringify({
+      jti: publicKey,
+      iss: "api.ilovepdf.com",
+      iat: timeNow - 5,
+    }),
+  );
+  const sig = createHmac("sha256", secretKey)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+  return `${header}.${payload}.${sig}`;
 }
 
 function candidateBinaries() {
@@ -38,34 +65,81 @@ async function convertWithILovePdf(docx) {
   const secretKey = process.env.ILOVEPDF_SECRET_KEY?.trim();
   if (!publicKey || !secretKey) return null;
 
-  const tmpDir = mkdtempSync(join(tmpdir(), "fy-ilove-"));
-  const tmpFile = join(tmpDir, `contract_${Date.now()}.docx`);
   try {
-    // El paquete es CJS; createRequire evita el error ESM de subpath sin `.js`.
-    const { createRequire } = await import("node:module");
-    const require = createRequire(import.meta.url);
-    const ILovePDFApi = require("@ilovepdf/ilovepdf-nodejs");
-    const ILovePDFFile = require("@ilovepdf/ilovepdf-nodejs/ILovePDFFile.js");
+    const token = signJwt(publicKey, secretKey);
+    const auth = { Authorization: `Bearer ${token}` };
 
-    const instance = new ILovePDFApi(publicKey, secretKey);
-    const task = instance.newTask("officepdf");
-    await task.start();
+    const startRes = await fetch(`${ILOVE_API}/start/officepdf`, {
+      method: "GET",
+      headers: auth,
+    });
+    const start = await startRes.json().catch(() => ({}));
+    if (!startRes.ok || !start.server || !start.task) {
+      process.stderr.write(
+        `iLovePDF start: ${JSON.stringify(start).slice(0, 200)}\n`,
+      );
+      return null;
+    }
 
-    writeFileSync(tmpFile, docx);
-    await task.addFile(new ILovePDFFile(tmpFile));
-    await task.process();
-    const out = await task.download();
-    const pdf = Buffer.isBuffer(out) ? out : Buffer.from(out);
-    return pdf.length >= 4 && pdf.subarray(0, 4).toString() === "%PDF"
-      ? pdf
-      : null;
+    const serverBase = `https://${start.server}/v1`;
+    const form = new FormData();
+    form.append("task", start.task);
+    form.append(
+      "file",
+      new Blob([docx], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      }),
+      "contract.docx",
+    );
+
+    const uploadRes = await fetch(`${serverBase}/upload`, {
+      method: "POST",
+      headers: auth,
+      body: form,
+    });
+    const uploaded = await uploadRes.json().catch(() => ({}));
+    if (!uploadRes.ok || !uploaded.server_filename) {
+      process.stderr.write(
+        `iLovePDF upload: ${JSON.stringify(uploaded).slice(0, 200)}\n`,
+      );
+      return null;
+    }
+
+    const processRes = await fetch(`${serverBase}/process`, {
+      method: "POST",
+      headers: { ...auth, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: start.task,
+        tool: "officepdf",
+        files: [
+          {
+            server_filename: uploaded.server_filename,
+            filename: "contract.docx",
+          },
+        ],
+      }),
+    });
+    if (!processRes.ok) {
+      const body = await processRes.text().catch(() => "");
+      process.stderr.write(`iLovePDF process: ${body.slice(0, 200)}\n`);
+      return null;
+    }
+
+    const downloadRes = await fetch(
+      `${serverBase}/download/${encodeURIComponent(start.task)}`,
+      { method: "GET", headers: auth },
+    );
+    if (!downloadRes.ok) {
+      process.stderr.write(`iLovePDF download: ${downloadRes.status}\n`);
+      return null;
+    }
+    const pdf = Buffer.from(await downloadRes.arrayBuffer());
+    return isPdf(pdf) ? pdf : null;
   } catch (err) {
     process.stderr.write(
       `iLovePDF: ${err instanceof Error ? err.message : String(err)}\n`,
     );
     return null;
-  } finally {
-    rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
@@ -108,9 +182,7 @@ async function convertWithLibreOffice(docx) {
     }
 
     const pdf = readFileSync(outputPath);
-    return pdf.length >= 4 && pdf.subarray(0, 4).toString() === "%PDF"
-      ? pdf
-      : null;
+    return isPdf(pdf) ? pdf : null;
   } catch (err) {
     process.stderr.write(
       `LibreOffice: ${err instanceof Error ? err.message : String(err)}\n`,
