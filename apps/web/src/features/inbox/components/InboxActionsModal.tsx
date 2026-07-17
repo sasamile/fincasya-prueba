@@ -7,7 +7,7 @@
  * a las mutaciones del backend (markReadByRange / assignByRange).
  */
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalendarDays, CheckCheck, ListChecks, UserCheck, Volume2, VolumeX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -15,6 +15,7 @@ import {
   isSoundEnabled,
   playNotificationSound,
   setSoundEnabled,
+  SOUND_ENABLED_EVENT,
 } from '@/features/inbox/lib/notification-sound';
 
 export type DateRange = { from?: number; to?: number; label: string };
@@ -117,6 +118,15 @@ export function InboxActionsModal({
   const [busy, setBusy] = useState(false);
   const [soundOn, setSoundOn] = useState(() => isSoundEnabled());
 
+  useEffect(() => {
+    const sync = (e: Event) => {
+      const detail = (e as CustomEvent<boolean>).detail;
+      setSoundOn(typeof detail === 'boolean' ? detail : isSoundEnabled());
+    };
+    window.addEventListener(SOUND_ENABLED_EVENT, sync);
+    return () => window.removeEventListener(SOUND_ENABLED_EVENT, sync);
+  }, []);
+
   const customRange = (): DateRange | null => {
     const from = parseDateInput(rangeFrom, false);
     const to = parseDateInput(rangeTo, true);
@@ -139,7 +149,7 @@ export function InboxActionsModal({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 p-4"
       onClick={onClose}
     >
       <div
@@ -162,13 +172,18 @@ export function InboxActionsModal({
         <div className="space-y-6 px-5 py-4">
           {/* 0. Sonido de notificaciones (estilo WhatsApp) */}
           <section className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3.5 py-2.5">
-            <div className="flex items-center gap-2 text-[13px] font-semibold">
-              {soundOn ? (
-                <Volume2 className="h-4 w-4 text-primary" />
-              ) : (
-                <VolumeX className="h-4 w-4 text-muted-foreground" />
-              )}
-              Sonido al llegar mensajes
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[13px] font-semibold">
+                {soundOn ? (
+                  <Volume2 className="h-4 w-4 shrink-0 text-primary" />
+                ) : (
+                  <VolumeX className="h-4 w-4 shrink-0 text-muted-foreground" />
+                )}
+                Sonido de notificaciones
+              </div>
+              <p className="mt-0.5 pl-6 text-[11px] text-muted-foreground">
+                Al llegar un chat o mensaje nuevo
+              </p>
             </div>
             <button
               type="button"
@@ -184,7 +199,7 @@ export function InboxActionsModal({
                 }
               }}
               className={cn(
-                'relative h-6 w-11 rounded-full transition-colors',
+                'relative h-6 w-11 shrink-0 rounded-full transition-colors',
                 soundOn ? 'bg-primary' : 'bg-muted-foreground/30',
               )}
             >

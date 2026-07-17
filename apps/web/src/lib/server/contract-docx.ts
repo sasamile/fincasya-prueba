@@ -106,52 +106,114 @@ function buildWordTemplateRun(text: string, bold = false): string {
 export type WordBankAccountSnippet = {
   accountNumber?: string;
   bankName?: string;
+  accountType?: string;
+  ownerName?: string;
+  ownerCedula?: string;
 };
 
+/** Una cuenta válida para el párrafo del 50% (número, banco o titular). */
+function isUsableBankSnippet(a: WordBankAccountSnippet): boolean {
+  return Boolean(
+    (a.accountNumber ?? "").trim() ||
+      (a.bankName ?? "").trim() ||
+      (a.ownerName ?? "").trim(),
+  );
+}
+
+function formatBankSnippetLabel(acc: WordBankAccountSnippet): string {
+  const num = (acc.accountNumber ?? "").trim();
+  const bank = (acc.bankName ?? "").trim();
+  if (num && bank) return `${num} de ${bank}`;
+  if (num) return num;
+  if (bank) return bank;
+  const typed = [acc.accountType, acc.bankName].filter(Boolean).join(" ").trim();
+  if (typed) return typed;
+  return "cuenta de pagos";
+}
+
+/**
+ * Arma el XML inline que sustituye
+ * `{{cuentaNumero}} … {{titularCedula}}` cuando hay 1+ cuentas.
+ * Si todas comparten titular, se lista una sola vez al final.
+ */
 function buildWordBankAccountsClusterXml(
   accounts: WordBankAccountSnippet[],
   ownerName: string,
   ownerCedula: string,
 ): string {
-  const valid = accounts.filter(
-    (a) => (a.accountNumber ?? "").trim() || (a.bankName ?? "").trim(),
-  );
+  const valid = accounts.filter(isUsableBankSnippet);
   if (valid.length === 0) return "";
 
-  let xml = "";
-  valid.forEach((acc, i) => {
-    const num = (acc.accountNumber ?? "").trim();
-    const bank = (acc.bankName ?? "").trim();
-    if (i === 0) {
-      if (num) xml += buildWordTemplateRun(num, true);
-      xml += buildWordTemplateRun(" de ", false);
-      if (bank) xml += buildWordTemplateRun(bank, true);
-      return;
-    }
-    const extra = ` o ${num}${bank ? ` del banco ${bank}` : ""}`;
-    xml += buildWordTemplateRun(extra, false);
-  });
+  const holderOf = (acc: WordBankAccountSnippet) =>
+    (acc.ownerName ?? "").trim() || ownerName.trim();
+  const cedulaOf = (acc: WordBankAccountSnippet) =>
+    (acc.ownerCedula ?? "").trim() || ownerCedula.trim();
 
-  const holder = ownerName.trim();
-  const cedula = ownerCedula.trim();
-  if (holder) {
-    xml += buildWordTemplateRun(" a nombre de ", false);
-    xml += buildWordTemplateRun(holder, false);
+  const firstHolder = holderOf(valid[0]);
+  const firstCedula = cedulaOf(valid[0]);
+  const sameHolder = valid.every(
+    (a) => holderOf(a) === firstHolder && cedulaOf(a) === firstCedula,
+  );
+
+  let xml = "";
+  if (sameHolder) {
+    valid.forEach((acc, i) => {
+      const label = formatBankSnippetLabel(acc);
+      if (i === 0) {
+        xml += buildWordTemplateRun(label, true);
+      } else {
+        xml += buildWordTemplateRun(` o ${label}`, false);
+      }
+    });
+    if (firstHolder) {
+      xml += buildWordTemplateRun(" a nombre de ", false);
+      xml += buildWordTemplateRun(firstHolder, false);
+    }
+    if (firstCedula) {
+      xml += buildWordTemplateRun(" con la cédula N° ", false);
+      xml += buildWordTemplateRun(firstCedula, false);
+    }
+    return xml;
   }
-  if (cedula) {
-    xml += buildWordTemplateRun(" con la cédula N° ", false);
-    xml += buildWordTemplateRun(cedula, false);
+
+  valid.forEach((acc, i) => {
+    const label = formatBankSnippetLabel(acc);
+    const holder = holderOf(acc);
+    const cedula = cedulaOf(acc);
+    const prefix = i === 0 ? "" : " o ";
+    xml += buildWordTemplateRun(`${prefix}${label}`, i === 0);
+    if (holder) {
+      xml += buildWordTemplateRun(" a nombre de ", false);
+      xml += buildWordTemplateRun(holder, false);
+    }
+    if (cedula) {
+      xml += buildWordTemplateRun(" con la cédula N° ", false);
+      xml += buildWordTemplateRun(cedula, false);
+    }
+  });
+  return xml;
+}
+
+/** Texto plano (líneas de cuentasBancarias) → runs de Word. */
+function buildWordBankAccountsFromPlain(plain: string): string {
+  const lines = plain
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return "";
+  if (lines.length === 1) return buildWordTemplateRun(lines[0], true);
+  let xml = buildWordTemplateRun(lines[0], true);
+  for (let i = 1; i < lines.length; i++) {
+    xml += buildWordTemplateRun(` o ${lines[i]}`, false);
   }
   return xml;
 }
 
 function replaceWordBankAccountPlaceholderCluster(
   xml: string,
-  accounts: WordBankAccountSnippet[],
-  ownerName: string,
-  ownerCedula: string,
+  inlineXml: string,
 ): string {
-  if (accounts.length <= 1) return xml;
+  if (!inlineXml.trim()) return xml;
   const gap = WORD_TEMPLATE_GAP;
   const cuentaKey = Array.from("cuentaNumero")
     .map((ch) => escapeRegExp(ch))
@@ -162,12 +224,8 @@ function replaceWordBankAccountPlaceholderCluster(
   const re = new RegExp(
     `(\\{${gap}\\{${gap}${cuentaKey}${gap}\\}${gap}\\}|\\{\\{${gap}${cuentaKey}${gap}\\}\\})[\\s\\S]*?(\\{${gap}\\{${gap}${titularKey}${gap}\\}${gap}\\}|\\{\\{${gap}${titularKey}${gap}\\}\\})`,
   );
-  const inline = buildWordBankAccountsClusterXml(
-    accounts,
-    ownerName,
-    ownerCedula,
-  );
-  return xml.replace(re, inline);
+  if (!re.test(xml)) return xml;
+  return xml.replace(re, inlineXml);
 }
 
 function replaceWordListPlaceholderWithLeftAlign(
@@ -321,13 +379,28 @@ export function fillContractDocx(
       );
     }
 
-    if ((opts.bankAccounts?.length ?? 0) > 1) {
-      processed = replaceWordBankAccountPlaceholderCluster(
-        processed,
-        opts.bankAccounts!,
+    // Varias cuentas: sustituir el bloque entero cuentaNumero→titularCedula.
+    // Nunca reemplazar con vacío (eso dejaba "cuentas de ahorros: .").
+    const bankSnippets = opts.bankAccounts ?? [];
+    const usableBanks = bankSnippets.filter(isUsableBankSnippet);
+    const plainBanks = String(
+      values.cuentasBancarias || values.cuentasBancariasContrato || "",
+    ).trim();
+    const plainLineCount = plainBanks
+      ? plainBanks.split(/\r?\n/).filter((l) => l.trim()).length
+      : 0;
+    if (usableBanks.length > 1 || plainLineCount > 1) {
+      let inline = buildWordBankAccountsClusterXml(
+        usableBanks,
         opts.ownerName ?? "",
         opts.ownerCedula ?? "",
       );
+      if (!inline && plainBanks) {
+        inline = buildWordBankAccountsFromPlain(plainBanks);
+      }
+      if (inline) {
+        processed = replaceWordBankAccountPlaceholderCluster(processed, inline);
+      }
     }
 
     processed = applyWordTemplateReplacements(processed, values);

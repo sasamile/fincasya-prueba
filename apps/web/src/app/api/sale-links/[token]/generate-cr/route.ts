@@ -20,6 +20,17 @@ const ymd = (ms: number) =>
     day: "2-digit",
   }).format(new Date(ms));
 
+function formatGroupTypeLabel(raw: unknown): string {
+  const v = String(raw ?? "")
+    .trim()
+    .toUpperCase();
+  if (!v) return "";
+  if (v === "FAMILIAR") return "Familiar";
+  if (v === "AMIGOS") return "Amigos";
+  if (v === "EMPRESA") return "Empresa";
+  return String(raw).trim();
+}
+
 /** Logo de FincasYa como data URL (para que puppeteer lo renderice offline). */
 async function loadLogoDataUrl(): Promise<string | undefined> {
   try {
@@ -117,6 +128,17 @@ export async function POST(
       totalAmount: financials.totalAmount,
       paymentMethod: "bancolombia",
       paymentStatus: "paid",
+      groupType:
+        formatGroupTypeLabel(
+          (link as { groupType?: string }).groupType ??
+            (client as { groupType?: string }).groupType,
+        ) || "Familiar",
+      purpose:
+        String(
+          (link as { purpose?: string }).purpose ??
+            (client as { purpose?: string }).purpose ??
+            "",
+        ).trim() || "Descanso",
     };
 
     const logoDataUrl = await loadLogoDataUrl();

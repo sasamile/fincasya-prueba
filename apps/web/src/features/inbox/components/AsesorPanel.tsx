@@ -843,6 +843,22 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                 ownerName: a.ownerName,
                 ownerCedula: a.ownerCedula,
               })),
+            // Fallback 1 cuenta por si el cluster multi falla en el servidor.
+            ...(selectedBankIds[0]
+              ? (() => {
+                  const first = bankAccounts.find(
+                    (a) => a.id === selectedBankIds[0],
+                  );
+                  return first
+                    ? {
+                        bankName: first.bankName,
+                        accountNumber: first.accountNumber,
+                        accountHolder: first.ownerName,
+                        idNumber: first.ownerCedula,
+                      }
+                    : {};
+                })()
+              : {}),
           }),
         },
       );

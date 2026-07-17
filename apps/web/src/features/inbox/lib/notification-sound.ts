@@ -11,6 +11,8 @@
  */
 
 const STORAGE_KEY = 'inbox-sound-enabled';
+/** Evento same-tab para que cabecera / modal / contacto se sincronicen. */
+export const SOUND_ENABLED_EVENT = 'inbox-sound-enabled';
 
 let ctx: AudioContext | null = null;
 let lastPlayedAt = 0;
@@ -26,6 +28,7 @@ export function isSoundEnabled(): boolean {
 export function setSoundEnabled(on: boolean): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(STORAGE_KEY, on ? 'on' : 'off');
+  window.dispatchEvent(new CustomEvent(SOUND_ENABLED_EVENT, { detail: on }));
 }
 
 function getContext(): AudioContext | null {
@@ -86,12 +89,17 @@ function notifyBrowserIfHidden(): void {
   }
 }
 
-/** Reproduce el tono de nueva conversación/mensaje (si está habilitado). */
+/**
+ * Avisa de un mensaje nuevo: notificación de escritorio (si la pestaña está
+ * oculta) y tono (si el sonido está habilitado). Silenciar solo apaga el audio.
+ */
 export function playNotificationSound(): void {
-  if (!isSoundEnabled()) return;
   const now = Date.now();
   if (now - lastPlayedAt < MIN_GAP_MS) return;
+  lastPlayedAt = now;
   notifyBrowserIfHidden();
+
+  if (!isSoundEnabled()) return;
 
   const audio = getContext();
   if (!audio) return;
@@ -100,7 +108,6 @@ export function playNotificationSound(): void {
     // Dos notas ascendentes (D6 → A6), el "pop-pop" clásico de WhatsApp Web.
     blip(audio, 1174.66, t, 0.16, 0.22);
     blip(audio, 1760.0, t + 0.09, 0.22, 0.18);
-    lastPlayedAt = Date.now();
   };
   if (audio.state === 'suspended') {
     void audio

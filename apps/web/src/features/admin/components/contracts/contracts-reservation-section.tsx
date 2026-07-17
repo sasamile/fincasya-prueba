@@ -279,6 +279,22 @@ function localTodayYmd(): string {
 }
 
 /** Borrador interno: mismos datos que luego crearán la reserva al confirmar pago. */
+/** Etiqueta legible para la CR (FAMILIAR → Familiar). */
+function formatGroupTypeLabel(raw: unknown): string {
+  const v = String(raw ?? "")
+    .trim()
+    .toUpperCase();
+  if (!v) return "";
+  if (v === "FAMILIAR") return "Familiar";
+  if (v === "AMIGOS") return "Amigos";
+  if (v === "EMPRESA") return "Empresa";
+  return String(raw).trim();
+}
+
+function purposeFromForm(isEvento: boolean): string {
+  return isEvento ? "Evento" : "Descanso";
+}
+
 function buildContractSnapshotPayload(input: {
   form: FormState;
   inMs: number;
@@ -321,6 +337,8 @@ function buildContractSnapshotPayload(input: {
     depositoGarantia: f.refundableDeposit || "0",
     numeroNoches: String(input.nights),
     temporada: f.temporada || "ESTANDAR",
+    groupType: f.groupType || "FAMILIAR",
+    purpose: purposeFromForm(Boolean(f.isEvento)),
     horaEntrada: f.checkInTime,
     horaSalida: f.checkOutTime,
     city: f.clientCity,
@@ -1666,6 +1684,17 @@ export function ContractsReservationSection({
         balanceDate: confForm.balanceDate || "",
         paymentMethod: confForm.paymentMethod,
         paymentStatus: confForm.paymentStatus === "PAID" ? "paid" : "pending",
+        groupType:
+          formatGroupTypeLabel(b.groupType) ||
+          formatGroupTypeLabel(form.groupType) ||
+          "Familiar",
+        purpose:
+          String(b.purpose ?? "").trim() ||
+          purposeFromForm(
+            b.isEvento === true ||
+              b.isEvento === "true" ||
+              form.isEvento === true,
+          ),
         persistConfirmation: true,
       };
 

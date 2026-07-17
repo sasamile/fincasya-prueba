@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
-import { Archive, Bot, ChevronRight, MoreVertical, Plus, Search } from 'lucide-react';
+import { Archive, Bot, ChevronRight, MoreVertical, Plus, Search, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LoadingArea } from '@/components/ui/spinner';
@@ -40,7 +40,7 @@ import {
   type Operator,
 } from '@/features/inbox/components/InboxActionsModal';
 import { authClient } from '@/lib/auth-client';
-import { playNotificationSound } from '@/features/inbox/lib/notification-sound';
+import { playNotificationSound, isSoundEnabled, setSoundEnabled, ensureNotificationPermission, SOUND_ENABLED_EVENT } from '@/features/inbox/lib/notification-sound';
 import type { ConversationRow, Filter } from '@/features/inbox/types';
 
 export default function App() {
@@ -109,7 +109,19 @@ export default function App() {
   );
   const [confirmDisableBotOpen, setConfirmDisableBotOpen] = useState(false);
   const [togglingGlobalBot, setTogglingGlobalBot] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
   const labels = useQuery(api.labels.listLabels);
+
+  // Preferencia de sonido (localStorage); hidratar y sincronizar con modal/contacto.
+  useEffect(() => {
+    setSoundOn(isSoundEnabled());
+    const sync = (e: Event) => {
+      const detail = (e as CustomEvent<boolean>).detail;
+      setSoundOn(typeof detail === 'boolean' ? detail : isSoundEnabled());
+    };
+    window.addEventListener(SOUND_ENABLED_EVENT, sync);
+    return () => window.removeEventListener(SOUND_ENABLED_EVENT, sync);
+  }, []);
 
   // Operador logueado (para "míos") y lista de vendedores (para asignar).
   const { data: session } = authClient.useSession();
@@ -423,6 +435,32 @@ export default function App() {
                     title={globalBotHint}
                   />
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-full text-muted-foreground"
+                  title={
+                    soundOn
+                      ? 'Silenciar sonido de notificaciones'
+                      : 'Activar sonido de notificaciones'
+                  }
+                  aria-pressed={!soundOn}
+                  onClick={() => {
+                    const next = !soundOn;
+                    setSoundEnabled(next);
+                    setSoundOn(next);
+                    if (next) {
+                      ensureNotificationPermission();
+                      playNotificationSound();
+                    }
+                  }}
+                >
+                  {soundOn ? (
+                    <Volume2 className="h-5 w-5" />
+                  ) : (
+                    <VolumeX className="h-5 w-5 text-amber-600" />
+                  )}
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

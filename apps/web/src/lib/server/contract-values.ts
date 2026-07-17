@@ -55,6 +55,36 @@ export type ContractBankAccountInput = {
   ownerCedula?: string;
 };
 
+/** Normaliza cuentas del cliente/settings (aliases viejos: accountHolderName, etc.). */
+export function normalizeContractBankAccount(
+  raw: unknown,
+  fallbackId?: string,
+): ContractBankAccountInput | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = String(o.id ?? fallbackId ?? "").trim();
+  const bankName = String(o.bankName ?? o.banco ?? o.bank ?? "").trim();
+  const accountType = String(o.accountType ?? o.tipoCuenta ?? "").trim();
+  const accountNumber = String(
+    o.accountNumber ?? o.numeroCuenta ?? o.number ?? o.cuenta ?? "",
+  ).trim();
+  const ownerName = String(
+    o.ownerName ?? o.accountHolderName ?? o.titular ?? o.holderName ?? "",
+  ).trim();
+  const ownerCedula = String(
+    o.ownerCedula ?? o.titularCedula ?? o.cedula ?? o.idNumber ?? "",
+  ).trim();
+  if (!bankName && !accountNumber && !ownerName) return null;
+  return {
+    ...(id ? { id } : {}),
+    ...(bankName ? { bankName } : {}),
+    ...(accountType ? { accountType } : {}),
+    ...(accountNumber ? { accountNumber } : {}),
+    ...(ownerName ? { ownerName } : {}),
+    ...(ownerCedula ? { ownerCedula } : {}),
+  };
+}
+
 export function parseContractSettingsPayload(payload: unknown): {
   admin: ContractAdminSettings;
   ownerOverrides: Record<string, PropertyContractOwnerOverride>;
@@ -89,7 +119,9 @@ export function parseContractSettingsPayload(payload: unknown): {
         >)
       : {};
   const bankAccounts = Array.isArray(o.bankAccounts)
-    ? (o.bankAccounts as ContractBankAccountInput[])
+    ? (o.bankAccounts as unknown[])
+        .map((a, i) => normalizeContractBankAccount(a, `settings-${i}`))
+        .filter((a): a is ContractBankAccountInput => a != null)
     : [];
   const contractBankAccountIds = Array.isArray(o.contractBankAccountIds)
     ? (o.contractBankAccountIds as string[])
@@ -498,10 +530,13 @@ export function buildContractWordValues(
     }
   }
 
-  const providedTotal = parseInt(String(dto.totalPrice));
-  const unitPriceNum = parseInt(String(dto.nightlyPrice)) || 0;
+  const providedTotal = Number(
+    String(dto.totalPrice ?? "").replace(/[^\d]/g, ""),
+  );
+  const unitPriceNum =
+    Number(String(dto.nightlyPrice ?? "").replace(/[^\d]/g, "")) || 0;
   let totalPriceNum =
-    !isNaN(providedTotal) && providedTotal > 0
+    Number.isFinite(providedTotal) && providedTotal > 0
       ? providedTotal
       : unitPriceNum * totalDays;
 
@@ -523,7 +558,7 @@ export function buildContractWordValues(
       ? Math.max(0, Number(dto.petCleaningFee))
       : computedPetCleaning;
   const serviceStaffFee = Number(dto.serviceStaffFee) || 0;
-  if (isNaN(providedTotal) || providedTotal <= 0) {
+  if (!Number.isFinite(providedTotal) || providedTotal <= 0) {
     totalPriceNum +=
       petSurchargeRefundable +
       petSurchargeNonRefundable +
@@ -581,13 +616,9 @@ export function buildContractWordValues(
 
   // Preferir cuentas enviadas por el cliente (inbox ya las tiene seleccionadas).
   const dtoBankAccounts = Array.isArray(dto.bankAccounts)
-    ? dto.bankAccounts.filter(
-        (a) =>
-          a &&
-          typeof a === "object" &&
-          (String(a.accountNumber ?? "").trim() ||
-            String(a.bankName ?? "").trim()),
-      )
+    ? (dto.bankAccounts as unknown[])
+        .map((a, i) => normalizeContractBankAccount(a, `dto-${i}`))
+        .filter((a): a is ContractBankAccountInput => a != null)
     : [];
   const bankById = new Map<string, ContractBankAccountInput>();
   for (const a of settingsBankAccounts) {
@@ -620,6 +651,8 @@ export function buildContractWordValues(
       id: a.id ? String(a.id) : `dto-${i}`,
     }));
   }
+  // Si hay IDs seleccionados pero no resolvieron (settings vacío / IDs viejos),
+  // no inventar stubs: el fallback de dto.accountNumber / bankName cubre 1 cuenta.
 
   const cuentasBancariasPlain = buildBankAccountsPlainSnippet(
     selectedBankAccounts.length > 0 ? selectedBankAccounts : bankAccounts,
@@ -757,6 +790,9 @@ export function buildContractWordValues(
   const bankSnippets = selectedBankAccounts.map((a) => ({
     accountNumber: a.accountNumber,
     bankName: a.bankName,
+    accountType: a.accountType,
+    ownerName: a.ownerName,
+    ownerCedula: a.ownerCedula,
   }));
 
   return {

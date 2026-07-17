@@ -26,6 +26,13 @@ import {
 } from 'lucide-react';
 import { avatarColorFor } from '@/lib/avatarColor';
 import { LoadingArea } from '@/components/ui/spinner';
+import {
+  isSoundEnabled,
+  setSoundEnabled,
+  ensureNotificationPermission,
+  playNotificationSound,
+  SOUND_ENABLED_EVENT,
+} from '@/features/inbox/lib/notification-sound';
 
 /** Evento del historial ya colapsado (rachas de mensajes del mismo usuario). */
 type AuditItem = {
@@ -112,7 +119,18 @@ export function ContactInfo({
   const generateUploadUrl = useMutation(api.inbox.generateUploadUrl);
   const setContactPhoto = useMutation(api.inbox.setContactPhoto);
 
-  const [muted, setMuted] = useState(false);
+  // Silenciar = sonido off (misma preferencia que cabecera / menú ⋮).
+  const [muted, setMuted] = useState(() => !isSoundEnabled());
+
+  useEffect(() => {
+    const sync = (e: Event) => {
+      const detail = (e as CustomEvent<boolean>).detail;
+      const on = typeof detail === 'boolean' ? detail : isSoundEnabled();
+      setMuted(!on);
+    };
+    window.addEventListener(SOUND_ENABLED_EVENT, sync);
+    return () => window.removeEventListener(SOUND_ENABLED_EVENT, sync);
+  }, []);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
@@ -355,7 +373,7 @@ export function ContactInfo({
                 const { Icon, cls, text } = auditVisual(item);
                 return (
                   <li key={item.key} className="relative">
-                    <span className="absolute -left-[26px] top-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-border/70 bg-card">
+                    <span className="absolute left-[-26px] top-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-border/70 bg-card">
                       <Icon className={`h-3 w-3 ${cls}`} />
                     </span>
                     <p className="text-[13px] leading-snug text-foreground">{text}</p>
@@ -384,13 +402,26 @@ export function ContactInfo({
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
             <Bell className="h-5 w-5 text-muted-foreground" />
-            <span className="text-[15px]">Silenciar notificaciones</span>
+            <div>
+              <span className="block text-[15px]">Silenciar sonido</span>
+              <span className="text-[12px] text-muted-foreground">
+                Sigue avisando en escritorio si la pestaña está oculta
+              </span>
+            </div>
           </div>
           <button
             type="button"
             role="switch"
             aria-checked={muted}
-            onClick={() => setMuted((m) => !m)}
+            onClick={() => {
+              const nextMuted = !muted;
+              setMuted(nextMuted);
+              setSoundEnabled(!nextMuted);
+              if (!nextMuted) {
+                ensureNotificationPermission();
+                playNotificationSound();
+              }
+            }}
             className="toggle-track relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors"
             data-on={muted}
           >

@@ -177,6 +177,14 @@ export function ContractPreviewModal({
               ),
               bankAccountIds: selectedBankIds,
               bankAccounts: selectedBankAccounts,
+              ...(selectedBankAccounts[0]
+                ? {
+                    bankName: selectedBankAccounts[0].bankName,
+                    accountNumber: selectedBankAccounts[0].accountNumber,
+                    accountHolder: selectedBankAccounts[0].ownerName,
+                    idNumber: selectedBankAccounts[0].ownerCedula,
+                  }
+                : {}),
             }),
           },
         );
