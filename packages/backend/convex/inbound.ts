@@ -13,7 +13,7 @@ import {
 } from './lib/agentEligibility';
 import { isAppAutoReply } from './lib/appAutoReply';
 import { DEFAULT_OWNER_GREETING } from './ownerGreeting';
-import { isOutOfHours } from './lib/businessHours';
+import { OUT_OF_HOURS_DEDUP_MS, isOutOfHours } from './lib/businessHours';
 
 const AGENT_DEBOUNCE_MS = 7000;
 const SETTINGS_KEY = 'default';
@@ -640,15 +640,42 @@ export const ingestInboundMessage = internalMutation({
       .unique();
     const fueraDeHorario =
       (bhRow?.enabled ?? false) && isOutOfHours(now, bhRow?.schedule ?? null);
-    // "Con historial" = ya interactuó antes (otra conversación) o es cliente.
-    const esRecurrente =
+    // "Con historial" = ya interactuó antes (otra conversación o es cliente) o
+    // ya fue ATENDIDO dentro del horario en ESTA conversación — el caso típico:
+    // lo atendieron en el día y vuelve a escribir en la noche → solo el mensaje
+    // de ausencia, el bot no retoma la venta. (Si toda la atención ocurrió fuera
+    // de horario, sigue siendo "nuevo": el bot lo atiende y remata con el cierre.)
+    let esRecurrente =
       conversations.some((c) => c._id !== conversation._id) ||
       contact.crmType === 'client' ||
       !!contact.lastReservationAt;
+    if (fueraDeHorario && !esRecurrente) {
+      const prevMsgs = await ctx.db
+        .query('messages')
+        .withIndex('by_conversation', (q) =>
+          q.eq('conversationId', conversation._id),
+        )
+        .collect();
+      esRecurrente = prevMsgs.some(
+        (m) =>
+          m.sender === 'assistant' &&
+          !m.deletedAt &&
+          !isOutOfHours(m.createdAt, bhRow?.schedule ?? null),
+      );
+    }
 
     // CON HISTORIAL + fuera de horario → SOLO el saludo, el bot NO atiende.
+    // El dedup es por NOCHE (no para siempre): si vuelve otra noche, sale de nuevo.
     if (fueraDeHorario && esRecurrente) {
-      if (conversation.outOfHoursReturningSent !== true) {
+      const returningRecien =
+        conversation.outOfHoursReturningSentAt != null &&
+        now - conversation.outOfHoursReturningSentAt < OUT_OF_HOURS_DEDUP_MS;
+      console.log(
+        '[businessHours] fuera de horario, cliente con historial → solo mensaje de ausencia',
+        String(conversation._id),
+        returningRecien ? '(ya enviado esta noche)' : '(se envía ahora)',
+      );
+      if (!returningRecien) {
         await ctx.scheduler.runAfter(
           0,
           internal.businessHours.sendOutOfHoursReturning,
@@ -716,7 +743,10 @@ export const ingestInboundMessage = internalMutation({
         fueraDeHorario &&
         !esRecurrente &&
         !isNewConversation &&
-        conversation.outOfHoursClosingSent !== true
+        !(
+          conversation.outOfHoursClosingSentAt != null &&
+          now - conversation.outOfHoursClosingSentAt < OUT_OF_HOURS_DEDUP_MS
+        )
       ) {
         await ctx.scheduler.runAfter(
           AGENT_DEBOUNCE_MS + 12000,

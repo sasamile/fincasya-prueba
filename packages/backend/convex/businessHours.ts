@@ -22,6 +22,7 @@ import {
   DEFAULT_NEW_CLOSING_MSG,
   DEFAULT_RETURNING_MSG,
   DEFAULT_SCHEDULE,
+  OUT_OF_HOURS_DEDUP_MS,
   formatScheduleText,
   isOutOfHours,
   type Schedule,
@@ -160,8 +161,8 @@ export const recordOutOfHoursMsg = internalMutation({
     await ctx.db.patch(conversationId, {
       lastMessageAt: now,
       ...(flag === 'returning'
-        ? { outOfHoursReturningSent: true }
-        : { outOfHoursClosingSent: true }),
+        ? { outOfHoursReturningSent: true, outOfHoursReturningSentAt: now }
+        : { outOfHoursClosingSent: true, outOfHoursClosingSentAt: now }),
     });
   },
 });
@@ -178,10 +179,13 @@ export const outOfHoursPrecheck = internalQuery({
   handler: async (ctx, { conversationId, flag }) => {
     const conv = await ctx.db.get(conversationId);
     if (!conv) return { ok: false as const };
-    const yaEnviado =
+    // Dedup por tiempo (no para siempre): solo se calla si ya salió ESTA noche.
+    const sentAt =
       flag === 'returning'
-        ? conv.outOfHoursReturningSent === true
-        : conv.outOfHoursClosingSent === true;
+        ? conv.outOfHoursReturningSentAt
+        : conv.outOfHoursClosingSentAt;
+    const yaEnviado =
+      sentAt != null && Date.now() - sentAt < OUT_OF_HOURS_DEDUP_MS;
     if (yaEnviado) return { ok: false as const };
     // El cierre del cliente NUEVO no sale si un humano ya tomó la conversación.
     if (flag === 'closing' && conv.status !== 'ai') return { ok: false as const };

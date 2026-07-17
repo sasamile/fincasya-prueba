@@ -33,6 +33,13 @@ Hemos recibido tu solicitud.
 
 En este momento nuestro equipo de expertos se encuentra fuera del horario de atención. Si deseas agregar más información, puedes responder a este chat o enviarnos un audio. Uno de nuestros expertos retomará tu solicitud y continuará brindándote atención tan pronto iniciemos nuestra próxima jornada laboral.`;
 
+/**
+ * Dedup por tiempo: cada mensaje de fuera de horario sale máximo una vez por
+ * "noche". 18h cubre la ventana más larga (sáb 15:30 → dom 9:00 = 17.5h) sin
+ * callar al cliente que vuelve la noche siguiente (>24h).
+ */
+export const OUT_OF_HOURS_DEDUP_MS = 18 * 60 * 60 * 1000;
+
 /** Minutos desde medianoche de "HH:MM"; null si no es válido. */
 function toMinutes(hhmm: string | undefined): number | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm ?? '').trim());

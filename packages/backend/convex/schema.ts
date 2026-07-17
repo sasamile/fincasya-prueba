@@ -183,6 +183,13 @@ export default defineSchema(
       outOfHoursReturningSent: v.optional(v.boolean()),
       /** Ya se envió el cierre de "fuera de horario" a un cliente NUEVO. */
       outOfHoursClosingSent: v.optional(v.boolean()),
+      /**
+       * CUÁNDO se enviaron (ms). El dedup es por tiempo (misma noche), no para
+       * siempre: si el cliente vuelve otra noche, el mensaje sale de nuevo.
+       * Los booleanos de arriba quedan como legado.
+       */
+      outOfHoursReturningSentAt: v.optional(v.number()),
+      outOfHoursClosingSentAt: v.optional(v.number()),
       /** Fijada arriba en el inbox (clic derecho → Fijar). */
       pinned: v.optional(v.boolean()),
       /** Archivada: oculta del listado principal (clic derecho → Archivar). */
