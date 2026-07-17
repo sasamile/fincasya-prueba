@@ -257,6 +257,39 @@ export const BUSINESS_HOURS_SCHEDULE_SHORT = `🕛 Horarios de atención:
 export const HORARIO_SIMPLE = BUSINESS_HOURS_SCHEDULE_SHORT;
 
 /**
+ * Fin de semana AGOTADO (temporal — julio 2026).
+ * Candado en enviar_catalogo: no se envían fichas si el stay se cruza con
+ * estas noches. Quitar tras el 20-jul-2026.
+ */
+export const SOLD_OUT_WEEKEND_2026_07 = {
+  /** Primera noche ocupada (YYYY-MM-DD). */
+  nightStart: '2026-07-18',
+  /** Checkout del bloqueo (mitad abierta: noches [18, 20)). */
+  nightEndExclusive: '2026-07-20',
+  label: '18 al 20 de julio',
+} as const;
+
+/** ¿El stay [entrada, salida) se cruza con el finde agotado? */
+export function stayOverlapsSoldOutWeekend(
+  fechaEntrada: string,
+  fechaSalida: string,
+): boolean {
+  const { nightStart, nightEndExclusive } = SOLD_OUT_WEEKEND_2026_07;
+  if (!fechaEntrada || !fechaSalida) return false;
+  return fechaEntrada < nightEndExclusive && fechaSalida > nightStart;
+}
+
+/** Aviso oficial cuando piden el finde agotado — se envía TAL CUAL. */
+export function buildSoldOutWeekendMessage(): string {
+  const { label } = SOLD_OUT_WEEKEND_2026_07;
+  return `Con mucho gusto te ayudo 😊
+
+Para el fin de semana del *${label}* lamentablemente no tenemos disponibilidad en este momento 🗓️.
+
+¿Te sirven otras fechas? Con gusto te busco opciones disponibles 🏡✨`;
+}
+
+/**
  * Aviso oficial de ESTADÍA MÍNIMA (puente festivo / temporada especial).
  * Se envía TAL CUAL desde el candado de enviar_catalogo — el LLM no lo
  * redacta (lo comprimía y perdía el tono aprobado por Santiago, 14-jul).

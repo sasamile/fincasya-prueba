@@ -261,6 +261,22 @@ A la mayor brevedad te compartiremos la información detallada de esta casa y ot
     response: `Perfecto, en un momento un Experto de nuestro equipo se comunica contigo para confirmar disponibilidad y los siguientes pasos ✅`,
   },
   {
+    key: 'sit:finde-agotado-jul-2026',
+    situation:
+      'TEMPORAL julio 2026: el cliente pide fincas para el fin de semana del 18 al 20 de julio (o fechas que se crucen con esas noches). NO hay disponibilidad — NO enviar catalogo ni ofrecer fincas. Avisar con calidez e invitar a otras fechas.',
+    clientExamples: [
+      'Busco finca del 18 al 20 de julio',
+      'Para este fin de semana del 18 al 20',
+      'Tienen algo del 18 al 20?',
+      'Del 17 al 20 de julio para 15 personas',
+    ],
+    response: `Con mucho gusto te ayudo 😊
+
+Para el fin de semana del *18 al 20 de julio* lamentablemente no tenemos disponibilidad en este momento 🗓️.
+
+¿Te sirven otras fechas? Con gusto te busco opciones disponibles 🏡✨`,
+  },
+  {
     key: 'sit:temporada-especial',
     situation:
       'El cliente pide fechas de Navidad, fin de año o puente de Reyes. Hay condiciones especiales y estancia minima de noches en esas temporadas.',

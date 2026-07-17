@@ -30,6 +30,7 @@ import { buildSystemPrompt } from './lib/prompts';
 import {
   buildMinimoNochesMessage,
   buildPropertySelectionHandoff,
+  buildSoldOutWeekendMessage,
   buildWelcomeMessage,
   burstHasOnlyGreeting,
   buildCatalogoIntro,
@@ -38,6 +39,7 @@ import {
   MASCOTAS_POLITICA,
   PROCESO_RESERVA_MSG,
   prependGreetingIfNeeded,
+  stayOverlapsSoldOutWeekend,
   stripRedundantHolaPrefix,
 } from './lib/copys';
 import { isAppAutoReply } from './lib/appAutoReply';
@@ -1736,6 +1738,49 @@ export const runAgentTurn = internalAction({
               });
               console.log('[agent] catalogo bloqueado: inicio de año antes del 5-ene', {
                 fechaEntrada,
+              });
+              continue;
+            }
+
+            // FINDE AGOTADO 18-20 jul 2026 (temporal): no enviar fichas que
+            // luego haya que desdecir. Quitar tras el 20-jul-2026.
+            if (
+              fechaEntrada &&
+              fechaSalida &&
+              stayOverlapsSoldOutWeekend(fechaEntrada, fechaSalida)
+            ) {
+              const aviso = buildSoldOutWeekendMessage();
+              let avisoWamid: string | undefined;
+              if (context.contactPhone) {
+                try {
+                  const sent = await sendWhatsappText({
+                    to: context.contactPhone,
+                    text: aviso,
+                  });
+                  avisoWamid = sent.wamid;
+                } catch (err) {
+                  console.error('[agent] fallo el aviso de finde agotado', err);
+                }
+              }
+              await ctx.runMutation(internal.agent.saveAssistantMessage, {
+                conversationId,
+                content: aviso,
+                wamid: avisoWamid,
+              });
+              skipFinalReply = true;
+              result = {
+                enviadas: [],
+                error: 'finde 18-20 julio 2026 sin disponibilidad',
+                nota: 'El aviso oficial de fin de semana sin disponibilidad YA se envio TAL CUAL como mensaje aparte. NO escribas mas texto este turno y NO envies catalogo hasta que el cliente de OTRAS fechas (fuera del 18-20 de julio 2026).',
+              };
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: JSON.stringify(result),
+              });
+              console.log('[agent] catalogo bloqueado: finde agotado 18-20 jul', {
+                fechaEntrada,
+                fechaSalida,
               });
               continue;
             }
