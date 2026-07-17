@@ -431,6 +431,10 @@ export function DirectBookPage({
 
   async function onPay() {
     setSubmitError(null);
+    if (!finca) {
+      setSubmitError('Finca no cargada. Recarga la página.');
+      return;
+    }
     if (!loggedIn) {
       setSubmitError('Debes iniciar sesión o crear tu cuenta para reservar.');
       return;
@@ -452,13 +456,16 @@ export function DirectBookPage({
       return;
     }
 
+    const propertyId = finca.id;
+    const serviceMandatory = finca.serviceStaffMandatory === true;
+
     setSubmitting(true);
     try {
       const res = await fetch('/api/bookings/direct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          propertyId: finca.id,
+          propertyId,
           nombreCompleto: nombre.trim(),
           cedula: cedula.trim(),
           celular: celular.trim(),
@@ -471,8 +478,7 @@ export function DirectBookPage({
           fechaSalida: salida,
           numeroPersonas: guests,
           numeroMascotas: pets,
-          incluirServicio:
-            finca.serviceStaffMandatory === true || incluirServicio,
+          incluirServicio: serviceMandatory || incluirServicio,
           purpose: purpose || undefined,
           groupType: groupType || undefined,
           isEvento: purpose === 'EVENTO',
