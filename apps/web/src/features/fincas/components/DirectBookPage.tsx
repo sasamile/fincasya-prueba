@@ -146,7 +146,8 @@ export function DirectBookPage({
   }, [loggedIn, sessionEmail, sessionName, correo, nombre]);
 
   useEffect(() => {
-    if (!finca?.id || !checkIn || !checkOut || nights < 1) return;
+    const propertyId = finca?.id;
+    if (!propertyId || !checkIn || !checkOut || nights < 1) return;
     let cancelled = false;
     setPriceLoading(true);
     const qs = new URLSearchParams({
@@ -156,7 +157,7 @@ export function DirectBookPage({
       numeroMascotas: String(pets),
       incluirServicio: String(incluirServicio),
     });
-    void fetch(`/api/fincas/${finca.id}/calculate-stay-price?${qs}`)
+    void fetch(`/api/fincas/${propertyId}/calculate-stay-price?${qs}`)
       .then(async (res) => {
         const data = (await res.json()) as StayPrice;
         if (!cancelled) setPrice(data);
@@ -173,7 +174,8 @@ export function DirectBookPage({
   }, [finca?.id, checkIn, checkOut, guests, pets, incluirServicio, nights]);
 
   useEffect(() => {
-    if (!finca?.id || !checkIn || !checkOut) {
+    const propertyId = finca?.id;
+    if (!propertyId || !checkIn || !checkOut) {
       setAvailable(null);
       return;
     }
@@ -185,7 +187,7 @@ export function DirectBookPage({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        propertyId: finca.id,
+        propertyId,
         fechaEntrada: entrada,
         fechaSalida: salida,
       }),
