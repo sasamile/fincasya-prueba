@@ -53,6 +53,11 @@ export async function POST(
       return NextResponse.json({ error: "Link no encontrado." }, { status: 404 });
     }
     if (link.crUrl) {
+      // Re-adjunta para sincronizar con Gestor de contratos (idempotente).
+      await convex.mutation(api.saleLinks.attachCr, {
+        token,
+        crUrl: link.crUrl,
+      });
       return NextResponse.json({ ok: true, crUrl: link.crUrl });
     }
     if (!link.paymentValidated) {

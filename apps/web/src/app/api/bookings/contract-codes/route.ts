@@ -5,13 +5,14 @@ import { getConvexHttpClient, api } from "@/lib/convex-server";
 export const runtime = "nodejs";
 
 /**
- * GET /api/bookings/contract-codes?propertyId=&search=&page=&limit=
- * Historial de códigos de contrato (borradores, links y reservas).
+ * GET /api/bookings/contract-codes?propertyId=&search=&prefix=&page=&limit=
+ * Historial de códigos. `prefix` = CR / CRA / etc. para filtrar la serie.
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const propertyIdRaw = (searchParams.get("propertyId") ?? "").trim();
   const search = (searchParams.get("search") ?? "").trim() || undefined;
+  const prefix = (searchParams.get("prefix") ?? "").trim() || undefined;
   const pageRaw = Number(searchParams.get("page") ?? "1");
   const limitRaw = Number(searchParams.get("limit") ?? "20");
 
@@ -27,6 +28,7 @@ export async function GET(request: Request) {
         ? { propertyId: propertyIdRaw as Id<"properties"> }
         : {}),
       ...(search ? { search } : {}),
+      ...(prefix ? { prefix } : {}),
       page,
       limit,
     });

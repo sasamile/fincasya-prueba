@@ -125,6 +125,9 @@ export type SaleLinkPublicData = {
     tipoDocumento?: string;
     esMenor?: boolean;
   }>;
+  checkinClientPaymentProofUploadEnabled?: boolean;
+  checkinGuestListUnlocked?: boolean;
+  checkinOwnerShareGuestList?: boolean;
 };
 
 const STEPS = [

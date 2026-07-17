@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "convex dev",
+    "dev": "convex dev --typecheck=disable",
     "deploy": "convex deploy",
     "typecheck": "tsc --noEmit -p convex",
     "catalog:audit": "convex run admin:auditCatalogMappings",

@@ -54,6 +54,7 @@ import {
   saveInboxContratoDraft,
 } from '@/features/inbox/utils/contrato-draft-storage';
 import { buildInboxContractUpsertArgs } from '@/features/inbox/utils/persist-inbox-contract';
+import { ContractCodeSellerButtons } from '@/features/admin/components/contracts/contract-code-seller-buttons';
 import type { AsesorTool } from '@/features/inbox/components/IconRail';
 import type { ConversationRow } from '@/features/inbox/types';
 
@@ -857,7 +858,8 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           buildInboxContractUpsertArgs(
             { ...draft, clientName },
             {
-              estado: 'generado',
+              estado: 'borrador',
+              conversationId: conversation?.conversationId,
               propertyTitle: finca?.title ?? draft.fincaTitle,
               propertyLocation: finca?.location,
             },
@@ -946,7 +948,15 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             ) : null}
           </div>
           <div className="grid grid-cols-2 gap-3">
-            {field('Código contrato', 'contractCode', 'Ej. CR 2041')}
+            <div className="col-span-2 space-y-2">
+              {field('Código contrato', 'contractCode', 'Ej. CR 2041')}
+              <ContractCodeSellerButtons
+                compact
+                onAssign={(code) =>
+                  setDraft((d) => ({ ...d, contractCode: code }))
+                }
+              />
+            </div>
             {moneyField('Valor / noche', 'pricePerNight')}
             {field('Entrada', 'checkIn', '', 'date')}
             {field('Salida', 'checkOut', '', 'date')}

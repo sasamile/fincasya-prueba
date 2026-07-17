@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import type { SaleLinkPublicData } from "./venta-page-content";
@@ -20,6 +20,8 @@ import {
   VentaCallout,
   VentaPanel,
 } from "./venta-ui";
+import { materializeProofFile } from "@/features/ventas/utils/venta-draft-storage";
+import { generatePdfPagesForAi } from "@/lib/pdf-preview";
 
 interface Props {
   data: SaleLinkPublicData;
@@ -36,15 +38,87 @@ async function uploadDocument(file: File) {
   return { url: d.url as string };
 }
 
+function isPdfFile(file: File) {
+  return (
+    file.type === "application/pdf" ||
+    file.name.toLowerCase().endsWith(".pdf")
+  );
+}
+
+async function dataUrlToJpegFile(
+  dataUrl: string,
+  baseName: string,
+): Promise<File> {
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const safe = baseName.replace(/\.[^.]+$/, "") || "contrato";
+  return new File([blob], `${safe}.jpg`, { type: "image/jpeg" });
+}
+
+/**
+ * Prepara JPG(s) para visión: última página del PDF (firma) + primera si hay
+ * varias páginas. Imágenes se suben tal cual.
+ */
+async function prepareSignedContractImagesForAi(
+  file: File,
+): Promise<File[]> {
+  if (isPdfFile(file)) {
+    const pdfFile =
+      file.type === "application/pdf"
+        ? file
+        : new File([await file.arrayBuffer()], file.name.replace(/\.pdf$/i, "") + ".pdf", {
+            type: "application/pdf",
+          });
+    const pages = await generatePdfPagesForAi(pdfFile);
+    const last = await dataUrlToJpegFile(pages.lastPage, `${file.name}-firma`);
+    if (pages.pageCount <= 1) return [last];
+    const first = await dataUrlToJpegFile(
+      pages.firstPage,
+      `${file.name}-portada`,
+    );
+    return [last, first];
+  }
+  return [file];
+}
+
+const SIGNED_CONTRACT_REJECT_MESSAGES: Record<string, string> = {
+  not_a_contract:
+    "Eso no parece el contrato de arrendamiento. Debes subir el PDF o la foto del contrato firmado (no listas de invitados ni otros documentos).",
+  missing_signature:
+    "El contrato no muestra la firma del cliente. Fírmalo (firma manuscrita o digital) y vuelve a subirlo.",
+  pdf_not_allowed:
+    "No pudimos leer ese PDF. Sube una foto clara de la página de firmas, o un PDF del contrato firmado.",
+  unreadable:
+    "No pudimos leer ese archivo. Sube una foto o PDF más claro del contrato firmado.",
+  ai_unavailable:
+    "No pudimos validar el contrato ahora. Espera un momento e intenta de nuevo.",
+  inactive: "Este link ya no está activo. Contacta a tu asesor.",
+  not_found: "El link ya no existe.",
+  contract_not_verified:
+    "Debes validar el contrato firmado antes de continuar.",
+  contract_rejected:
+    "El archivo no fue aceptado como contrato firmado. Sube el documento correcto.",
+};
+
+function signedContractRejectMessage(reason: string | undefined): string {
+  if (!reason) return SIGNED_CONTRACT_REJECT_MESSAGES.not_a_contract;
+  return (
+    SIGNED_CONTRACT_REJECT_MESSAGES[reason] ??
+    SIGNED_CONTRACT_REJECT_MESSAGES.not_a_contract
+  );
+}
+
 export function StepContrato({ data, onSubmitted }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [statusLabel, setStatusLabel] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const generateAttemptedRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const submitSignedContract = useMutation(api.saleLinks.submitSignedContract);
+  const verifySignedContract = useAction(api.saleLinks.verifySignedContract);
 
   const requestContractGeneration = async () => {
     if (data.contractUrl || !data.paymentValidated) return;
@@ -102,15 +176,51 @@ export function StepContrato({ data, onSubmitted }: Props) {
       return;
     }
     setSubmitting(true);
+    setStatusLabel("Subiendo…");
     try {
-      const { url } = await uploadDocument(file);
+      const stable = await materializeProofFile(file);
+
+      setStatusLabel("Preparando para validación…");
+      let forAi: File[];
+      try {
+        forAi = await prepareSignedContractImagesForAi(stable);
+      } catch {
+        toast.error(
+          "No pudimos leer ese archivo. Sube una foto (JPG/PNG) o un PDF del contrato firmado.",
+        );
+        return;
+      }
+
+      const uploadedOriginal = await uploadDocument(stable);
+
+      setStatusLabel("Validando firma…");
+      const photoUrls: string[] = [];
+      for (const img of forAi) {
+        const up = await uploadDocument(img);
+        photoUrls.push(up.url);
+      }
+
+      const verdict = await verifySignedContract({
+        token: data.token,
+        documentUrl: uploadedOriginal.url,
+        photoUrls,
+      });
+
+      if (!verdict.allow) {
+        toast.error(signedContractRejectMessage(verdict.reason));
+        setFile(null);
+        if (fileRef.current) fileRef.current.value = "";
+        return;
+      }
+
+      setStatusLabel("Enviando…");
       const r = await submitSignedContract({
         token: data.token,
-        signedContractUrl: url,
-        signedContractFileName: file.name,
+        signedContractUrl: uploadedOriginal.url,
+        signedContractFileName: stable.name,
       });
       if (!r.ok) {
-        toast.error("No se pudo enviar el contrato firmado.");
+        toast.error(signedContractRejectMessage(r.reason));
         return;
       }
       toast.success("¡Contrato firmado recibido! Gracias.");
@@ -119,6 +229,7 @@ export function StepContrato({ data, onSubmitted }: Props) {
       toast.error("Error de conexión. Intenta de nuevo.");
     } finally {
       setSubmitting(false);
+      setStatusLabel(null);
     }
   };
 
@@ -194,8 +305,8 @@ export function StepContrato({ data, onSubmitted }: Props) {
         <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
           <li>Descarga el contrato PDF</li>
           <li>Imprímelo o fírmalo digitalmente</li>
-          <li>Toma una foto o escanea el contrato firmado</li>
-          <li>Súbelo a continuación</li>
+          <li>Toma una foto o escanea el contrato firmado (debe verse tu firma)</li>
+          <li>Súbelo a continuación — se valida que sea el contrato firmado</li>
         </ol>
       </VentaCallout>
 
@@ -248,7 +359,7 @@ export function StepContrato({ data, onSubmitted }: Props) {
           {submitting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Enviando...
+              {statusLabel ?? "Enviando..."}
             </>
           ) : (
             <>
@@ -262,6 +373,10 @@ export function StepContrato({ data, onSubmitted }: Props) {
             Espera a que el contrato esté disponible para descargarlo primero
           </p>
         )}
+        <p className="text-center text-xs text-muted-foreground">
+          Solo se acepta el contrato con tu firma. Otros documentos (listas,
+          comprobantes, etc.) serán rechazados.
+        </p>
       </div>
 
       {data.signedContractSubmitted ? (

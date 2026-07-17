@@ -81,13 +81,14 @@ export function ContractPreviewModal({
   const [baseName, setBaseName] = useState('contrato');
 
   const persistContract = async (
-    estado: 'generado' | 'enviado',
+    estado: 'borrador' | 'enviado',
     extra?: { pdfUrl?: string; pdfFilename?: string },
   ) => {
     try {
       await upsertContract(
         buildInboxContractUpsertArgs(draft, {
           estado,
+          conversationId: conversation?.conversationId,
           propertyTitle,
           propertyLocation,
           pdfUrl: extra?.pdfUrl,
@@ -116,7 +117,12 @@ export function ContractPreviewModal({
         })();
         const perNight = Number(draft.pricePerNight) || 0;
 
-        // Pedimos el .docx (outputFormat: docx) para poder editarlo.
+        // Pedimos el .docx y precargamos SuperDoc en paralelo.
+        const modulesPromise = Promise.all([
+          import('@harbour-enterprises/superdoc'),
+          import('@superdoc-dev/fonts'),
+        ]);
+
         const res = await fetch(
           `/api/fincas/${draft.fincaId}/direct-booking-contract`,
           {
@@ -176,8 +182,12 @@ export function ContractPreviewModal({
 
         const filename = data.filename || 'contrato.docx';
         setBaseName(filename.replace(/\.docx$/i, ''));
-        // Registra en Admin → Contratos (aunque sea prueba o corrección).
-        void persistContract('generado');
+        void persistContract('borrador');
+
+        const [{ SuperDoc }, fontsMod] = await modulesPromise;
+        if (cancelled) return;
+        setLoading(false);
+
         const bytes = Uint8Array.from(atob(data.fileBase64), (c) =>
           c.charCodeAt(0),
         );
@@ -185,19 +195,7 @@ export function ContractPreviewModal({
           type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         });
 
-        // Cargamos SuperDoc + el pack de fuentes solo en el cliente. El pack
-        // sustituye Tahoma/Century Gothic/Verdana (propietarias) por fuentes
-        // libres métricamente compatibles (Liberation, Carlito…) — las mismas
-        // que usa LibreOffice/iLovePDF, así el editor coincide con el PDF final.
-        const [{ SuperDoc }, fontsMod] = await Promise.all([
-          import('@harbour-enterprises/superdoc'),
-          import('@superdoc-dev/fonts'),
-        ]);
-        if (cancelled) return;
-        setLoading(false);
-
         const fonts = fontsMod.createSuperDocFonts();
-        // Servimos los woff2 desde /public/superdoc-fonts (self-hosted).
         (fonts as { resolveAssetUrl?: (c: { file: string }) => string }).resolveAssetUrl =
           (c) => `/superdoc-fonts/${c.file}`;
 

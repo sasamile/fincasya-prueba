@@ -28,6 +28,9 @@ export interface SaleLink {
   boldSurchargePercent?: number;
   boldPaymentLinkId?: string;
   boldPaymentStatus?: string;
+  checkinClientPaymentProofUploadEnabled?: boolean;
+  checkinGuestListUnlocked?: boolean;
+  checkinOwnerShareGuestList?: boolean;
   selectedBankAccountIds: string[];
   notes?: string;
   clientStep: number;
@@ -108,6 +111,9 @@ export interface CreateSaleLinkPayload {
    * Ej: https://fincasya.com · https://www.fincasya.com · http://localhost:3789
    */
   portalOrigin?: string;
+  checkinClientPaymentProofUploadEnabled?: boolean;
+  checkinGuestListUnlocked?: boolean;
+  checkinOwnerShareGuestList?: boolean;
   selectedBankAccountIds: string[];
   notes?: string;
 }
@@ -176,6 +182,10 @@ export async function createSaleLink(
     portalOrigin,
     selectedBankAccountIds: payload.selectedBankAccountIds,
     notes: payload.notes,
+    checkinClientPaymentProofUploadEnabled:
+      payload.checkinClientPaymentProofUploadEnabled,
+    checkinGuestListUnlocked: payload.checkinGuestListUnlocked,
+    checkinOwnerShareGuestList: payload.checkinOwnerShareGuestList,
   });
   return {
     id: String(result.id),

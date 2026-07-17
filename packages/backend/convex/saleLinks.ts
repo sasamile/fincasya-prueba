@@ -16,6 +16,82 @@ import {
 import { checkinGuestValidator } from './lib/checkinGuest';
 import { verifyCedulaPhoto, decideCedulaVerdict } from './lib/cedulaAi';
 import { verifyPaymentReceiptPhoto } from './lib/receiptAi';
+import { verifySignedContractPhoto } from './lib/signedContractAi';
+
+function bogotaYmd(ms: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms));
+}
+
+/**
+ * Escribe/actualiza la fila en Admin → Gestor de contratos para un link de venta.
+ * Misma clave = contractCode (o VL-token). No falla el flujo del portal si el
+ * registro secundario revienta.
+ */
+async function registerSaleLinkInContracts(
+  ctx: MutationCtx,
+  link: Doc<'saleLinks'>,
+  patch: {
+    estado?: string;
+    pdfUrl?: string;
+    pdfFilename?: string;
+    confirmationPdfUrl?: string;
+    confirmationPdfFilename?: string;
+    bookingId?: Id<'bookings'>;
+  },
+): Promise<void> {
+  try {
+    const contractNumber =
+      link.contractCode?.trim() || resolveSaleLinkReference(link);
+    if (!contractNumber) return;
+
+    const prop = await ctx.db.get(link.propertyId);
+    const client = link.clientData;
+    const bookingId = patch.bookingId ?? link.bookingId;
+
+    await ctx.runMutation(internal.contracts.upsertInternal, {
+      contractNumber,
+      propertyId: link.propertyId,
+      propertyTitle: prop?.title,
+      propertyLocation: prop?.location,
+      clienteNombre: client?.nombre?.trim().toUpperCase() || undefined,
+      clienteCedula: client?.cedula?.trim() || undefined,
+      clienteEmail: client?.email?.trim() || undefined,
+      clienteTelefono: client?.telefono?.trim() || undefined,
+      clienteCiudad: client?.ciudad?.trim() || undefined,
+      clienteDireccion: client?.direccion?.trim() || undefined,
+      valorTotal:
+        link.totalValue && link.totalValue > 0
+          ? link.totalValue
+          : link.rentalValue && link.rentalValue > 0
+            ? link.rentalValue
+            : undefined,
+      fechaEntrada: bogotaYmd(link.checkIn),
+      fechaSalida: bogotaYmd(link.checkOut),
+      origen: 'link',
+      bookingId,
+      estado: patch.estado,
+      pdfUrl: patch.pdfUrl,
+      pdfFilename: patch.pdfFilename,
+      confirmationPdfUrl: patch.confirmationPdfUrl,
+      confirmationPdfFilename: patch.confirmationPdfFilename,
+      draftJson: JSON.stringify({
+        savedFrom: 'saleLink',
+        saleLinkId: link._id,
+        token: link.token,
+        contractCode: link.contractCode,
+        signedContractUrl: link.signedContractUrl,
+        crUrl: link.crUrl ?? patch.confirmationPdfUrl,
+      }),
+    });
+  } catch (err) {
+    console.error('[saleLinks] no se pudo registrar en gestión de contratos', err);
+  }
+}
 
 /**
  * URL de retorno tras pagar en Bold.
@@ -173,6 +249,25 @@ async function assertContractCodeAvailable(
     .first();
   if (existingBooking) {
     throw new Error(`Ya existe una reserva con la codificación ${code}`);
+  }
+
+  const existingContract = await ctx.db
+    .query('contracts')
+    .withIndex('by_contract_number', (q) => q.eq('contractNumber', code))
+    .first();
+  if (existingContract) {
+    throw new Error(`Ya existe un contrato con la codificación ${code}`);
+  }
+  // También con espacios (CR 2912) por si se guardó así.
+  const withSpace = rawCode.trim().toUpperCase();
+  if (withSpace !== code) {
+    const spaced = await ctx.db
+      .query('contracts')
+      .withIndex('by_contract_number', (q) => q.eq('contractNumber', withSpace))
+      .first();
+    if (spaced) {
+      throw new Error(`Ya existe un contrato con la codificación ${withSpace}`);
+    }
   }
 
   return code;
@@ -359,6 +454,9 @@ export const create = mutation({
     boldSurchargePercent: v.optional(v.number()),
     selectedBankAccountIds: v.array(v.string()),
     notes: v.optional(v.string()),
+    checkinClientPaymentProofUploadEnabled: v.optional(v.boolean()),
+    checkinGuestListUnlocked: v.optional(v.boolean()),
+    checkinOwnerShareGuestList: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { contractCode: rawContractCode, ...rest } = args;
@@ -380,6 +478,15 @@ export const create = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    try {
+      await ctx.runMutation(
+        internal.adminContractSettings.commitContractCodeInternal,
+        { code: contractCode },
+      );
+    } catch {
+      /* contador opcional */
+    }
 
     // CRM-3: promover oportunidad a "propuesta" o crearla
     const property = await ctx.db.get(args.propertyId);
@@ -451,6 +558,9 @@ export const createWithBold = action({
      * Bold solo acepta https en callback_url.
      */
     portalOrigin: v.optional(v.string()),
+    checkinClientPaymentProofUploadEnabled: v.optional(v.boolean()),
+    checkinGuestListUnlocked: v.optional(v.boolean()),
+    checkinOwnerShareGuestList: v.optional(v.boolean()),
   },
   handler: async (
     ctx,
@@ -551,11 +661,43 @@ export const update = mutation({
     selectedBankAccountIds: v.optional(v.array(v.string())),
     notes: v.optional(v.string()),
     status: v.optional(v.union(v.literal('active'), v.literal('completed'), v.literal('cancelled'))),
+    checkinClientPaymentProofUploadEnabled: v.optional(v.boolean()),
+    checkinGuestListUnlocked: v.optional(v.boolean()),
+    checkinOwnerShareGuestList: v.optional(v.boolean()),
   },
   handler: async (ctx, { id, ...patch }) => {
     const existing = await ctx.db.get(id);
     if (!existing) throw new Error('Sale link not found');
     await ctx.db.patch(id, { ...patch, updatedAt: Date.now() });
+
+    // Si ya hay booking, sincroniza flags de check-in al portal /checkin.
+    if (existing.bookingId) {
+      const booking = await ctx.db.get(existing.bookingId);
+      if (booking) {
+        const bookingPatch: Record<string, unknown> = { updatedAt: Date.now() };
+        if (patch.checkinGuestListUnlocked !== undefined) {
+          bookingPatch.guestListUnlocked = patch.checkinGuestListUnlocked;
+        }
+        if (patch.checkinClientPaymentProofUploadEnabled !== undefined) {
+          bookingPatch.clientPaymentProofUploadEnabled =
+            patch.checkinClientPaymentProofUploadEnabled;
+        }
+        if (patch.checkinOwnerShareGuestList !== undefined) {
+          const prev = (booking.ownerPortalShare ?? {}) as Record<
+            string,
+            boolean | undefined
+          >;
+          bookingPatch.ownerPortalShare = {
+            ...prev,
+            showGuestList: patch.checkinOwnerShareGuestList,
+          };
+        }
+        if (Object.keys(bookingPatch).length > 1) {
+          await ctx.db.patch(existing.bookingId, bookingPatch);
+        }
+      }
+    }
+
     return { ok: true };
   },
 });
@@ -606,6 +748,20 @@ export const attachContract = mutation({
       contractGeneratedAt: Date.now(),
       updatedAt: Date.now(),
     });
+    const refreshed = (await ctx.db.get(link._id))!;
+    const code = refreshed.contractCode?.trim() || resolveSaleLinkReference(refreshed);
+    await registerSaleLinkInContracts(ctx, refreshed, {
+      estado: refreshed.signedContractUrl ? 'enviado' : 'generado',
+      // Si ya hay firmado, no pisar el PDF firmado con el generado.
+      pdfUrl: refreshed.signedContractUrl?.trim() || url,
+      pdfFilename: refreshed.signedContractUrl
+        ? refreshed.signedContractFileName || `Contrato_firmado_${code}.pdf`
+        : `Contrato_${code}.pdf`,
+      confirmationPdfUrl: refreshed.crUrl,
+      confirmationPdfFilename: refreshed.crUrl
+        ? `CR_${code.replace(/[^\w-]+/g, '_')}.pdf`
+        : undefined,
+    });
     return { ok: true as const, contractUrl: url };
   },
 });
@@ -632,6 +788,22 @@ export const attachCr = mutation({
       crUrl: url,
       clientStep: Math.max(link.clientStep ?? 0, 6),
       updatedAt: Date.now(),
+    });
+    const refreshed = (await ctx.db.get(link._id))!;
+    const code = refreshed.contractCode?.trim() || resolveSaleLinkReference(refreshed);
+    await registerSaleLinkInContracts(ctx, refreshed, {
+      estado: refreshed.signedContractUrl ? 'enviado' : 'generado',
+      pdfUrl:
+        refreshed.signedContractUrl?.trim() ||
+        refreshed.contractUrl?.trim() ||
+        undefined,
+      pdfFilename: refreshed.signedContractUrl
+        ? refreshed.signedContractFileName || `Contrato_firmado_${code}.pdf`
+        : refreshed.contractUrl
+          ? `Contrato_${code}.pdf`
+          : undefined,
+      confirmationPdfUrl: url,
+      confirmationPdfFilename: `CR_${code.replace(/[^\w-]+/g, '_')}.pdf`,
     });
     return { ok: true as const, crUrl: url };
   },
@@ -665,6 +837,28 @@ export const setCrUrl = internalMutation({
     };
     if (resolvedBookingId) patch.bookingId = resolvedBookingId;
     await ctx.db.patch(id, patch);
+
+    const refreshed = await ctx.db.get(id);
+    if (refreshed) {
+      const code =
+        refreshed.contractCode?.trim() || resolveSaleLinkReference(refreshed);
+      await registerSaleLinkInContracts(ctx, refreshed, {
+        estado: refreshed.signedContractUrl ? 'enviado' : 'generado',
+        bookingId: resolvedBookingId,
+        pdfUrl:
+          refreshed.signedContractUrl?.trim() ||
+          refreshed.contractUrl?.trim() ||
+          undefined,
+        pdfFilename: refreshed.signedContractUrl
+          ? refreshed.signedContractFileName || `Contrato_firmado_${code}.pdf`
+          : refreshed.contractUrl
+            ? `Contrato_${code}.pdf`
+            : undefined,
+        confirmationPdfUrl: crUrl,
+        confirmationPdfFilename: `CR_${code.replace(/[^\w-]+/g, '_')}.pdf`,
+      });
+    }
+
     return {
       ok: true as const,
       bookingId: resolvedBookingId,
@@ -1024,6 +1218,34 @@ export const _savePaymentReceiptCheck = internalMutation({
   },
 });
 
+export const _saveSignedContractCheck = internalMutation({
+  args: {
+    token: v.string(),
+    check: v.object({
+      photoUrl: v.string(),
+      allow: v.boolean(),
+      needsReview: v.boolean(),
+      reason: v.optional(v.string()),
+      isContract: v.optional(v.boolean()),
+      hasClientSignature: v.optional(v.boolean()),
+      confidence: v.optional(v.number()),
+      note: v.optional(v.string()),
+      checkedAt: v.number(),
+    }),
+  },
+  handler: async (ctx, { token, check }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return;
+    await ctx.db.patch(link._id, {
+      signedContractCheck: check,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 /**
  * Verifica la foto de cédula recién subida. La llama el portal antes de dejar
  * pasar al cliente al paso de pago. El veredicto queda guardado en el link para
@@ -1135,6 +1357,66 @@ export const verifyPaymentReceipt = action({
       reason: verdict.reason,
       amount: verdict.check?.amount,
       bankName: verdict.check?.bankName,
+    };
+  },
+});
+
+/**
+ * Verifica que el archivo sea el contrato de arrendamiento firmado por el
+ * cliente. El portal solo avanza si allow=true; el veredicto se guarda para
+ * que submitSignedContract lo exija (documentUrl = URL que se enviará).
+ */
+export const verifySignedContract = action({
+  args: {
+    token: v.string(),
+    /** URL del documento que se guardará al enviar (PDF/foto original). */
+    documentUrl: v.string(),
+    /**
+     * Imágenes preparadas para visión (JPG). Suele ser la última página del
+     * PDF (firma) y, si hay varias, también la primera.
+     */
+    photoUrls: v.array(v.string()),
+  },
+  handler: async (
+    ctx,
+    { token, documentUrl, photoUrls },
+  ): Promise<{
+    allow: boolean;
+    needsReview: boolean;
+    reason?: string;
+  }> => {
+    const link = await ctx.runQuery(internal.saleLinks.getByToken, { token });
+    if (!link) return { allow: false, needsReview: true, reason: 'not_found' };
+    if (link.status !== 'active') {
+      return { allow: false, needsReview: true, reason: 'inactive' };
+    }
+
+    const urls = photoUrls.map((u) => u.trim()).filter(Boolean);
+    if (!urls.length) {
+      return { allow: false, needsReview: true, reason: 'unreadable' };
+    }
+
+    const verdict = await verifySignedContractPhoto(urls);
+
+    await ctx.runMutation(internal.saleLinks._saveSignedContractCheck, {
+      token,
+      check: {
+        photoUrl: documentUrl.trim(),
+        allow: verdict.allow,
+        needsReview: verdict.needsReview,
+        reason: verdict.reason,
+        isContract: verdict.check?.isContract,
+        hasClientSignature: verdict.check?.hasClientSignature,
+        confidence: verdict.check?.contractProbability,
+        note: verdict.check?.note,
+        checkedAt: Date.now(),
+      },
+    });
+
+    return {
+      allow: verdict.allow,
+      needsReview: verdict.needsReview,
+      reason: verdict.reason,
     };
   },
 });
@@ -1518,6 +1800,21 @@ export const submitSignedContract = mutation({
     if (!link) return { ok: false, reason: 'not_found' };
     if (link.clientStep < 4) return { ok: false, reason: 'not_ready' };
 
+    const documentUrl = args.signedContractUrl.trim();
+    if (!documentUrl) return { ok: false, reason: 'missing_contract' };
+
+    // Obligatorio: debió pasar por verifySignedContract con esta misma URL.
+    const check = link.signedContractCheck;
+    if (!check || check.photoUrl !== documentUrl) {
+      return { ok: false, reason: 'contract_not_verified' };
+    }
+    if (!check.allow) {
+      return {
+        ok: false,
+        reason: check.reason || 'contract_rejected',
+      };
+    }
+
     const now = Date.now();
     let bookingId = link.bookingId;
     if (!bookingId && link.clientData) {
@@ -1531,13 +1828,29 @@ export const submitSignedContract = mutation({
     }
 
     await ctx.db.patch(link._id, {
-      signedContractUrl: args.signedContractUrl,
+      signedContractUrl: documentUrl,
       signedContractFileName: args.signedContractFileName,
       signedContractSubmittedAt: now,
       clientStep: 5,
       ...(bookingId ? { bookingId } : {}),
       updatedAt: now,
     });
+
+    const refreshed = (await ctx.db.get(link._id))!;
+    const code =
+      refreshed.contractCode?.trim() || resolveSaleLinkReference(refreshed);
+    await registerSaleLinkInContracts(ctx, refreshed, {
+      estado: 'enviado',
+      bookingId,
+      pdfUrl: documentUrl,
+      pdfFilename:
+        args.signedContractFileName || `Contrato_firmado_${code}.pdf`,
+      confirmationPdfUrl: refreshed.crUrl,
+      confirmationPdfFilename: refreshed.crUrl
+        ? `CR_${code.replace(/[^\w-]+/g, '_')}.pdf`
+        : undefined,
+    });
+
     return { ok: true, bookingId };
   },
 });
@@ -1659,6 +1972,72 @@ export const submitCheckin = mutation({
       placas: args.placas,
       observaciones: args.observaciones,
     });
+  },
+});
+
+/**
+ * Asegura que exista la reserva antes del check-in embebido (/checkin UI).
+ * Idempotente: si ya hay bookingId, solo sincroniza flags de check-in.
+ */
+export const ensureBookingForCheckin = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token.trim()))
+      .unique();
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    if (!link.paymentValidated && link.clientStep < 4) {
+      return { ok: false as const, reason: 'not_ready' as const };
+    }
+    if (!link.clientData) {
+      return { ok: false as const, reason: 'no_client' as const };
+    }
+
+    const syncFlags = async (bookingId: Id<'bookings'>) => {
+      const booking = await ctx.db.get(bookingId);
+      if (!booking) return;
+      const prev = (booking.ownerPortalShare ?? {}) as Record<
+        string,
+        boolean | undefined
+      >;
+      await ctx.db.patch(bookingId, {
+        guestListUnlocked: link.checkinGuestListUnlocked === true,
+        clientPaymentProofUploadEnabled:
+          link.checkinClientPaymentProofUploadEnabled !== false,
+        ownerPortalShare: {
+          ...prev,
+          showGuestList: link.checkinOwnerShareGuestList !== false,
+        },
+        updatedAt: Date.now(),
+      });
+    };
+
+    if (link.bookingId) {
+      await syncFlags(link.bookingId);
+      const booking = await ctx.db.get(link.bookingId);
+      return {
+        ok: true as const,
+        bookingReference: booking?.reference ?? String(link.bookingId),
+      };
+    }
+
+    const provisioned = (await ctx.runMutation(
+      internal.bookings.provisionFromSaleLink,
+      { saleLinkId: link._id },
+    )) as
+      | { ok: true; bookingId: Id<'bookings'>; reference: string }
+      | { ok: false; reason: string };
+
+    if (!provisioned.ok) {
+      return { ok: false as const, reason: provisioned.reason };
+    }
+
+    await syncFlags(provisioned.bookingId);
+    return {
+      ok: true as const,
+      bookingReference: provisioned.reference,
+    };
   },
 });
 
@@ -2140,8 +2519,7 @@ export const getPublicByToken = query({
       }
     }
 
-    const bookingReference =
-      (await resolveBookingReference(ctx, link)) ?? resolveSaleLinkReference(link);
+    const bookingReference = await resolveBookingReference(ctx, link);
 
     return {
       token: link.token,
@@ -2210,6 +2588,10 @@ export const getPublicByToken = query({
       bookingReference,
       checkinCompleted: link.checkinCompleted,
       checkinGuests: link.checkinGuests,
+      checkinClientPaymentProofUploadEnabled:
+        link.checkinClientPaymentProofUploadEnabled !== false,
+      checkinGuestListUnlocked: link.checkinGuestListUnlocked === true,
+      checkinOwnerShareGuestList: link.checkinOwnerShareGuestList !== false,
     };
   },
 });
@@ -2380,8 +2762,7 @@ export const getForPortal = internalQuery({
       }
     }
 
-    const bookingReference =
-      (await resolveBookingReference(ctx, link)) ?? resolveSaleLinkReference(link);
+    const bookingReference = await resolveBookingReference(ctx, link);
 
     return {
       token: link.token,
@@ -2449,6 +2830,10 @@ export const getForPortal = internalQuery({
       bookingReference,
       checkinCompleted: link.checkinCompleted,
       checkinGuests: link.checkinGuests,
+      checkinClientPaymentProofUploadEnabled:
+        link.checkinClientPaymentProofUploadEnabled !== false,
+      checkinGuestListUnlocked: link.checkinGuestListUnlocked === true,
+      checkinOwnerShareGuestList: link.checkinOwnerShareGuestList !== false,
     };
   },
 });

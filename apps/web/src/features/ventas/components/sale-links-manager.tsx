@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   Receipt,
   Check,
+  Settings2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,7 @@ import {
   markSaleLinkOwnerOfferSent,
   validateSaleLinkPaymentAdmin,
   syncSaleLinkBoldPayment,
+  updateSaleLink,
   type SaleLink,
 } from "../api/sale-links.api";
 import {
@@ -62,8 +64,19 @@ import {
 import { CreateSaleLinkModal } from "./create-sale-link-modal";
 import { EditSaleLinkModal } from "./edit-sale-link-modal";
 import { SaleLinkDocumentViewerDialog } from "./sale-link-document-viewer";
+import {
+  SaleLinkCheckinOptions,
+  type SaleLinkCheckinOptionsValue,
+} from "./sale-link-checkin-options";
 import { formatPriceInput, parseCOP } from "@/lib/utils";
 import { saleLinkDocumentPreviewSrc } from "@/lib/sale-link-document-preview";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type DocumentPreview = {
   title: string;
@@ -184,6 +197,10 @@ export function SaleLinksManager() {
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [editLink, setEditLink] = useState<SaleLink | null>(null);
+  const [checkinOptsLink, setCheckinOptsLink] = useState<SaleLink | null>(null);
+  const [checkinOpts, setCheckinOpts] =
+    useState<SaleLinkCheckinOptionsValue | null>(null);
+  const [savingCheckinOpts, setSavingCheckinOpts] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [approveLink, setApproveLink] = useState<SaleLink | null>(null);
   const [resetLink, setResetLink] = useState<SaleLink | null>(null);
@@ -622,6 +639,23 @@ export function SaleLinksManager() {
                       <DropdownMenuItem onClick={() => setEditLink(link)}>
                         <Pencil className="mr-2 h-4 w-4" />
                         Editar link
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setCheckinOptsLink(link);
+                          setCheckinOpts({
+                            checkinClientPaymentProofUploadEnabled:
+                              link.checkinClientPaymentProofUploadEnabled !==
+                              false,
+                            checkinGuestListUnlocked:
+                              link.checkinGuestListUnlocked === true,
+                            checkinOwnerShareGuestList:
+                              link.checkinOwnerShareGuestList !== false,
+                          });
+                        }}
+                      >
+                        <Settings2 className="mr-2 h-4 w-4" />
+                        Opciones de check-in
                       </DropdownMenuItem>
                       {link.signedContractUrl ? (
                         <DropdownMenuItem
@@ -1126,6 +1160,74 @@ export function SaleLinksManager() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={!!checkinOptsLink}
+        onOpenChange={(o) => {
+          if (!o && !savingCheckinOpts) {
+            setCheckinOptsLink(null);
+            setCheckinOpts(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Opciones de check-in</DialogTitle>
+          </DialogHeader>
+          {checkinOpts ? (
+            <SaleLinkCheckinOptions
+              value={checkinOpts}
+              onChange={setCheckinOpts}
+            />
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={savingCheckinOpts}
+              onClick={() => {
+                setCheckinOptsLink(null);
+                setCheckinOpts(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={savingCheckinOpts || !checkinOpts || !checkinOptsLink}
+              onClick={() => {
+                if (!checkinOptsLink || !checkinOpts) return;
+                setSavingCheckinOpts(true);
+                void updateSaleLink(checkinOptsLink._id, {
+                  checkinClientPaymentProofUploadEnabled:
+                    checkinOpts.checkinClientPaymentProofUploadEnabled,
+                  checkinGuestListUnlocked:
+                    checkinOpts.checkinGuestListUnlocked,
+                  checkinOwnerShareGuestList:
+                    checkinOpts.checkinOwnerShareGuestList,
+                })
+                  .then(() => {
+                    toast.success("Opciones de check-in guardadas");
+                    qc.invalidateQueries({ queryKey: ["sale-links"] });
+                    setCheckinOptsLink(null);
+                    setCheckinOpts(null);
+                  })
+                  .catch(() => toast.error("No se pudieron guardar"))
+                  .finally(() => setSavingCheckinOpts(false));
+              }}
+            >
+              {savingCheckinOpts ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Guardando…
+                </>
+              ) : (
+                "Guardar"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

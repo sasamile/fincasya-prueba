@@ -2745,6 +2745,12 @@ export const provisionFromSaleLink = internalMutation({
       horaSalida: link.checkOutTime,
       isDirect: true,
       calendarLabel: '',
+      guestListUnlocked: link.checkinGuestListUnlocked === true,
+      clientPaymentProofUploadEnabled:
+        link.checkinClientPaymentProofUploadEnabled !== false,
+      ownerPortalShare: {
+        showGuestList: link.checkinOwnerShareGuestList !== false,
+      },
       paymentPortalConfig:
         link.selectedBankAccountIds.length > 0
           ? {

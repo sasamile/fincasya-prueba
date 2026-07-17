@@ -67,6 +67,54 @@ export interface Firmante {
   esDefault?: boolean;
 }
 
+/**
+ * Vendedor / asesor con secuencia propia de códigos de contrato.
+ * Ej. Hernán → iniciales "CR", lastNumber 12345678 → siguiente "CR12345679".
+ */
+export interface ContractSeller {
+  id: string;
+  nombre: string;
+  /** Prefijo del código (CR, CRA, VA…). Solo letras. */
+  iniciales: string;
+  /** Último número ya asignado. El siguiente clic usa lastNumber + 1. */
+  lastNumber: number;
+  activo?: boolean;
+}
+
+/** Formato: CR12345678 (sin espacio). */
+export function formatSellerContractCode(
+  iniciales: string,
+  number: number,
+): string {
+  const prefix = iniciales
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
+  return `${prefix}${number}`;
+}
+
+/**
+ * Separa un código completo en prefijo + número.
+ * "CR12345678" → { iniciales: "CR", lastNumber: 12345678 }
+ * "CR" → { iniciales: "CR", lastNumber: undefined }
+ */
+export function parseSellerCodeParts(raw: string): {
+  iniciales: string;
+  lastNumber?: number;
+} {
+  const cleaned = raw.trim().toUpperCase().replace(/\s+/g, "");
+  const match = cleaned.match(/^([A-Z]+)(\d+)$/);
+  if (match) {
+    return {
+      iniciales: match[1]!,
+      lastNumber: Math.max(0, Math.floor(Number(match[2]) || 0)),
+    };
+  }
+  return {
+    iniciales: cleaned.replace(/[^A-Z]/g, ""),
+  };
+}
+
 export const DEFAULT_ADMIN_SETTINGS: GlobalAdminSettings = {
   adminName: "HERNÁN AGUILERA GÓMEZ",
   adminCedula: "81.720.077",
@@ -155,6 +203,7 @@ export type ContractSettingsPersistedSnapshot = Pick<
   | "selectedFincaId"
   | "propertyContractOwnerOverrides"
   | "firmantes"
+  | "contractSellers"
 >;
 
 export function getBankAccountImages(account: BankAccount): string[] {
@@ -177,6 +226,7 @@ export function getContractSettingsSnapshot(
     selectedFincaId: state.selectedFincaId,
     propertyContractOwnerOverrides: state.propertyContractOwnerOverrides,
     firmantes: state.firmantes,
+    contractSellers: state.contractSellers,
   };
 }
 
@@ -225,12 +275,20 @@ interface ContractSettingsState {
   propertyContractOwnerOverrides: Record<string, PropertyContractOwnerOverride>;
   /** Firmantes del contrato (Hernán, esposa, etc.). Se elige uno al generar. */
   firmantes: Firmante[];
+  /** Vendedores con secuencia de CR (CR 291, CRA 12…). */
+  contractSellers: ContractSeller[];
 
   updateAdminSettings: (settings: Partial<GlobalAdminSettings>) => void;
   addFirmante: (firmante: Omit<Firmante, "id">) => void;
   updateFirmante: (id: string, patch: Partial<Omit<Firmante, "id">>) => void;
   removeFirmante: (id: string) => void;
   setDefaultFirmante: (id: string) => void;
+  addContractSeller: (seller: Omit<ContractSeller, "id">) => void;
+  updateContractSeller: (
+    id: string,
+    patch: Partial<Omit<ContractSeller, "id">>,
+  ) => void;
+  removeContractSeller: (id: string) => void;
   addBankAccount: (account: Omit<BankAccount, "id">) => void;
   /** Anexa varias cuentas conservando sus ids (importar cuentas predefinidas de un propietario). */
   addBankAccounts: (accounts: BankAccount[]) => void;
@@ -267,6 +325,7 @@ export const useContractSettingsStore = create<ContractSettingsState>()(
       selectedFincaId: "",
       propertyContractOwnerOverrides: {},
       firmantes: [],
+      contractSellers: [],
 
       updateAdminSettings: (settings) =>
         set((state) => ({
@@ -308,6 +367,53 @@ export const useContractSettingsStore = create<ContractSettingsState>()(
             ...f,
             esDefault: f.id === id,
           })),
+        })),
+
+      addContractSeller: (seller) =>
+        set((state) => ({
+          contractSellers: [
+            ...state.contractSellers,
+            {
+              ...seller,
+              id: crypto.randomUUID(),
+              nombre: seller.nombre.trim(),
+              iniciales: seller.iniciales
+                .trim()
+                .toUpperCase()
+                .replace(/[^A-Z]/g, ""),
+              lastNumber: Math.max(0, Math.floor(seller.lastNumber) || 0),
+              activo: seller.activo !== false,
+            },
+          ],
+        })),
+
+      updateContractSeller: (id, patch) =>
+        set((state) => ({
+          contractSellers: state.contractSellers.map((s) => {
+            if (s.id !== id) return s;
+            const next = { ...s, ...patch };
+            if (patch.iniciales != null) {
+              next.iniciales = String(patch.iniciales)
+                .trim()
+                .toUpperCase()
+                .replace(/[^A-Z]/g, "");
+            }
+            if (patch.nombre != null) {
+              next.nombre = String(patch.nombre).trim();
+            }
+            if (patch.lastNumber != null) {
+              next.lastNumber = Math.max(
+                0,
+                Math.floor(Number(patch.lastNumber)) || 0,
+              );
+            }
+            return next;
+          }),
+        })),
+
+      removeContractSeller: (id) =>
+        set((state) => ({
+          contractSellers: state.contractSellers.filter((s) => s.id !== id),
         })),
 
       addBankAccount: (account) =>
@@ -459,11 +565,14 @@ export const useContractSettingsStore = create<ContractSettingsState>()(
           selectedFincaId: snapshot.selectedFincaId,
           propertyContractOwnerOverrides: snapshot.propertyContractOwnerOverrides,
           firmantes: snapshot.firmantes ?? [],
+          contractSellers: Array.isArray(snapshot.contractSellers)
+            ? snapshot.contractSellers
+            : [],
         })),
     }),
     {
       name: "fincasya-contract-settings",
-      version: 8,
+      version: 9,
       migrate: (persisted, version) => {
         if (
           version < 2 &&
@@ -535,6 +644,17 @@ export const useContractSettingsStore = create<ContractSettingsState>()(
             }
           }
         }
+        if (
+          version < 9 &&
+          persisted &&
+          typeof persisted === "object" &&
+          "state" in persisted
+        ) {
+          const s = (persisted as { state: Record<string, unknown> }).state;
+          if (s && !("contractSellers" in s)) {
+            s.contractSellers = [];
+          }
+        }
         return persisted as never;
       },
       partialize: (state) => ({
@@ -547,6 +667,7 @@ export const useContractSettingsStore = create<ContractSettingsState>()(
         selectedFincaId: state.selectedFincaId,
         propertyContractOwnerOverrides: state.propertyContractOwnerOverrides,
         firmantes: state.firmantes,
+        contractSellers: state.contractSellers,
       }),
     },
   ),

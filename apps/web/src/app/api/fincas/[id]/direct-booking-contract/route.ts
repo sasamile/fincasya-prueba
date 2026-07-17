@@ -27,21 +27,40 @@ function resolveContractNumber(dto: ContractDto, finca: ContractFinca): string {
   return `DIR-${base}-${stamp}`;
 }
 
+let cachedTemplate: Buffer | null = null;
+let cachedTemplatePromise: Promise<Buffer> | null = null;
+
 async function loadTemplate(): Promise<Buffer> {
-  const envPath = process.env.DEFAULT_CONTRACT_DOCX_PATH?.trim();
-  const candidates = [
-    envPath,
-    path.join(process.cwd(), "assets", "contracts", "default-contract-template.docx"),
-  ].filter(Boolean) as string[];
-  for (const p of candidates) {
-    try {
-      const buf = await fs.readFile(p);
-      if (buf.length >= 2 && buf.subarray(0, 2).toString() === "PK") return buf;
-    } catch {
-      /* siguiente */
+  if (cachedTemplate) return cachedTemplate;
+  if (cachedTemplatePromise) return cachedTemplatePromise;
+
+  cachedTemplatePromise = (async () => {
+    const envPath = process.env.DEFAULT_CONTRACT_DOCX_PATH?.trim();
+    const candidates = [
+      envPath,
+      path.join(
+        process.cwd(),
+        "assets",
+        "contracts",
+        "default-contract-template.docx",
+      ),
+    ].filter(Boolean) as string[];
+    for (const p of candidates) {
+      try {
+        const buf = await fs.readFile(p);
+        if (buf.length >= 2 && buf.subarray(0, 2).toString() === "PK") {
+          cachedTemplate = buf;
+          return buf;
+        }
+      } catch {
+        /* siguiente */
+      }
     }
-  }
-  throw new Error("No se encontró la plantilla maestra del contrato (.docx).");
+    cachedTemplatePromise = null;
+    throw new Error("No se encontró la plantilla maestra del contrato (.docx).");
+  })();
+
+  return cachedTemplatePromise;
 }
 
 /**
@@ -71,11 +90,12 @@ export async function POST(
   try {
     const client = getConvexHttpClient();
 
-    const [property, settingsPayload] = await Promise.all([
+    const [property, settingsPayload, template] = await Promise.all([
       client.query(api.adminProperties.getById, { id: propertyId }),
       client
         .query(api.adminContractSettings.getGlobalPayload, {})
         .catch(() => null),
+      loadTemplate(),
     ]);
 
     if (!property) {
@@ -97,7 +117,6 @@ export async function POST(
     const { values, featuresRaw, bankAccounts, ownerName, ownerCedula } =
       buildContractWordValues(dto, finca, settingsPayload, contractNumber);
 
-    const template = await loadTemplate();
     const docx = fillContractDocx(template, values, {
       featuresRaw,
       bankAccounts,

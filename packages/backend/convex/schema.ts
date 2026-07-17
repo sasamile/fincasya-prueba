@@ -129,6 +129,13 @@ export default defineSchema(
       /** Últimas fincas enviadas en catálogo (para "otras opciones") */
       lastSentCatalogPropertyIds: v.optional(v.array(v.id('properties'))),
       /**
+       * FINCA DE REFERENCIA: retailer id de la última ficha desde la que el
+       * CLIENTE llegó/preguntó (con su fecha). Pegajosa: sobrevive aunque el
+       * mensaje salga de la ventana de historial del agente.
+       */
+      lastReferredRetailerId: v.optional(v.string()),
+      lastReferredAt: v.optional(v.number()),
+      /**
        * Zona que el cliente pidió (texto crudo, ej. "cerca a bogotá"). Es
        * PERSISTENTE: si el cliente actualiza fechas/personas sin repetir la
        * zona, se reutiliza para no enviar fincas de otra región.
@@ -578,13 +585,20 @@ export default defineSchema(
       // propertyFeatures.iconId.
       fillTokenId: v.optional(v.string()),
       draftJson: v.optional(v.string()),
+      /**
+       * Conversación del inbox que originó el contrato. Sirve para upsert
+       * estable: regenerar sin enviar actualiza el mismo registro en lugar
+       * de crear INBOX-{timestamp} nuevos.
+       */
+      conversationId: v.optional(v.string()),
       createdAt: v.number(),
       updatedAt: v.number(),
     })
       .index('by_contract_number', ['contractNumber'])
       .index('by_status', ['estado'])
       .index('by_created', ['createdAt'])
-      .index('by_property', ['propertyId']),
+      .index('by_property', ['propertyId'])
+      .index('by_conversation', ['conversationId']),
 
     contractFillTokens: defineTable({
       token: v.string(),
@@ -651,6 +665,13 @@ export default defineSchema(
       boldStatusCheckedAt: v.optional(v.number()),
       selectedBankAccountIds: v.array(v.string()),
       notes: v.optional(v.string()),
+      /**
+       * Preferencias del check-in del link (mismas que al enviar /checkin).
+       * Se copian al booking al provisionar/actualizar.
+       */
+      checkinClientPaymentProofUploadEnabled: v.optional(v.boolean()),
+      checkinGuestListUnlocked: v.optional(v.boolean()),
+      checkinOwnerShareGuestList: v.optional(v.boolean()),
       clientStep: v.number(),
       clientPortalUiStep: v.optional(v.number()),
       clientDraftPhase: v.optional(
@@ -744,6 +765,23 @@ export default defineSchema(
       signedContractUrl: v.optional(v.string()),
       signedContractFileName: v.optional(v.string()),
       signedContractSubmittedAt: v.optional(v.number()),
+      /**
+       * Veredicto de lib/signedContractAi. Sin allow=true atado a
+       * signedContractUrl, submitSignedContract rechaza.
+       */
+      signedContractCheck: v.optional(
+        v.object({
+          photoUrl: v.string(),
+          allow: v.boolean(),
+          needsReview: v.boolean(),
+          reason: v.optional(v.string()),
+          isContract: v.optional(v.boolean()),
+          hasClientSignature: v.optional(v.boolean()),
+          confidence: v.optional(v.number()),
+          note: v.optional(v.string()),
+          checkedAt: v.number(),
+        }),
+      ),
       crUrl: v.optional(v.string()),
       crGeneratedAt: v.optional(v.number()),
       bookingId: v.optional(v.id('bookings')),

@@ -54,7 +54,11 @@ type PreviewProperty = {
 type PreviewFormSlice = {
   contractNumber: string;
   clientName: string;
+  clientFirstName?: string;
+  clientLastName?: string;
   clientId: string;
+  clientDocType?: string;
+  clientDocIssuedAt?: string;
   clientEmail: string;
   clientPhone: string;
   clientCity: string;
@@ -157,6 +161,11 @@ export function buildReservationPreviewFincaData(
   const cedulaPropietario = cedulaManual || "—";
   const ciudadCedulaPropietario = ciudadCedulaManual || "—";
 
+  const clienteNombre =
+    `${form.clientFirstName ?? ""} ${form.clientLastName ?? ""}`.trim() ||
+    form.clientName.trim() ||
+    "—";
+
   return {
     nombreFinca: property?.title || "—",
     municipioFinca: property?.location || "—",
@@ -172,8 +181,13 @@ export function buildReservationPreviewFincaData(
     ciudadCedulaPropietario,
     contratoNumero: form.contractNumber.trim() || `C${property?.code || "XXXX"}-01`,
     fechaGeneracion: formatSpanishContractGenerationDate(),
-    clienteNombre: form.clientName.trim() || "—",
+    clienteNombre: clienteNombre.toUpperCase(),
+    clienteNombres: (form.clientFirstName || "").trim().toUpperCase() || "—",
+    clienteApellidos: (form.clientLastName || "").trim().toUpperCase() || "—",
     clienteCedula: form.clientId.trim() || "—",
+    tipoDocumento: (form.clientDocType || "CC").trim().toUpperCase(),
+    fechaExpedicion: form.clientDocIssuedAt?.trim() || "—",
+    fechaExpedicionCedula: form.clientDocIssuedAt?.trim() || "—",
     ciudadCliente: form.clientCity.trim() || "—",
     clientCorreo: form.clientEmail.trim() || "—",
     clienteCelular: form.clientPhone.trim() || "—",

@@ -28,6 +28,7 @@ import {
   Star,
   Link2,
   FolderOpen,
+  Hash,
   Bell,
   History,
   ShoppingBag,
@@ -155,6 +156,11 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         href: "/admin/contracts",
         icon: FolderOpen,
       },
+      {
+        label: "Numeración CR",
+        href: "/admin/numeracion-contratos",
+        icon: Hash,
+      },
     ],
   },
   {
@@ -191,12 +197,12 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
       },
     ],
   },
-  //{
-  // title: "REDES SOCIALES",
-  // items: [
-  //   { label: "Bandeja social", href: "/admin/canales", icon: Share2 },
-  // ],
-  //},
+  {
+   title: "Bandeja social",
+   items: [
+    { label: "Canales", href: "/admin/canales", icon: Share2 },
+  ],
+  },
   {
     title: "COMUNICACIÓN",
     items: [

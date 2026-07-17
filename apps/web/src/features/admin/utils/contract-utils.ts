@@ -315,7 +315,12 @@ export interface FincaData {
   fechaSalidaMini?: string;
   horaSalida?: string;
   clienteNombre?: string;
+  clienteNombres?: string;
+  clienteApellidos?: string;
   clienteCedula?: string;
+  tipoDocumento?: string;
+  fechaExpedicion?: string;
+  fechaExpedicionCedula?: string;
   ciudadCliente?: string;
   clientCorreo?: string;
   clienteCelular?: string;

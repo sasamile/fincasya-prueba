@@ -39,16 +39,18 @@ import {
   getContractSettingsSnapshot,
   useContractSettingsStore,
 } from "@/features/admin/store/contract-settings.store";
+import { ContractCodeSellerButtons } from "@/features/admin/components/contracts/contract-code-seller-buttons";
 import {
   buildContractHTML,
   formatFincaFeatures,
   type FincaData,
 } from "@/features/admin/utils/contract-utils";
-import {
-  buildReservationPreviewFincaData,
-} from "@/features/admin/utils/contract-preview-helpers";
+import { buildReservationPreviewFincaData } from "@/features/admin/utils/contract-preview-helpers";
 import { ContractGlobalSetupSections } from "@/features/admin/components/contracts/contract-global-setup-sections";
-import { ContractWordEditor, type ContractWordEditorHandle } from "@/features/admin/components/contracts/contract-word-editor";
+import {
+  ContractWordEditor,
+  type ContractWordEditorHandle,
+} from "@/features/admin/components/contracts/contract-word-editor";
 import { ContractCodeHistoryModal } from "@/features/admin/components/contracts/contract-code-history-modal";
 import {
   generateContractDocxAction,
@@ -129,8 +131,13 @@ type FormState = {
   contractNumber: string;
   contractTotalInput: string;
   nightlyPrice: string;
+  /** Nombre completo (se arma con nombres + apellidos). */
   clientName: string;
+  clientFirstName: string;
+  clientLastName: string;
   clientId: string;
+  clientDocType: string;
+  clientDocIssuedAt: string;
   clientEmail: string;
   clientPhone: string;
   clientCity: string;
@@ -171,7 +178,11 @@ const INITIAL: FormState = {
   contractTotalInput: "",
   nightlyPrice: "",
   clientName: "",
+  clientFirstName: "",
+  clientLastName: "",
   clientId: "",
+  clientDocType: "CC",
+  clientDocIssuedAt: "",
   clientEmail: "",
   clientPhone: "",
   clientCity: "",
@@ -205,6 +216,29 @@ const INITIAL: FormState = {
   additionalGuests: "NO",
 };
 
+const CLIENT_DOC_TYPES = [
+  { value: "CC", label: "Cédula de ciudadanía" },
+  { value: "CE", label: "Cédula de extranjería" },
+  { value: "TI", label: "Tarjeta de identidad" },
+  { value: "RC", label: "Registro civil" },
+  { value: "PA", label: "Pasaporte" },
+  { value: "NIT", label: "NIT" },
+] as const;
+
+function assembleClientFullName(first: string, last: string, fallback = "") {
+  return `${first} ${last}`.trim() || fallback.trim();
+}
+
+function splitClientFullName(full: string): { first: string; last: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first: "", last: "" };
+  if (parts.length === 1) return { first: parts[0]!, last: "" };
+  return {
+    first: parts.slice(0, -1).join(" "),
+    last: parts[parts.length - 1]!,
+  };
+}
+
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
   const mins = index * 30;
   const h24 = Math.floor(mins / 60);
@@ -223,6 +257,15 @@ const normSeason = (value?: string) =>
 
 const money = (value: number) =>
   `$${Math.round(value || 0).toLocaleString("es-CO")}`;
+
+/** Hoy en yyyy-MM-dd (zona local) para `min` de inputs date. */
+function localTodayYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 /** Borrador interno: mismos datos que luego crearán la reserva al confirmar pago. */
 function buildContractSnapshotPayload(input: {
@@ -250,7 +293,11 @@ function buildContractSnapshotPayload(input: {
         ]
       : [];
   const payload: Record<string, unknown> = {
-    nombreCompleto: f.clientName,
+    nombreCompleto: assembleClientFullName(
+      f.clientFirstName,
+      f.clientLastName,
+      f.clientName,
+    ),
     cedula: f.clientId,
     celular: f.clientPhone,
     correo: f.clientEmail,
@@ -291,10 +338,10 @@ function buildContractSnapshotPayload(input: {
 }
 
 /** Texto para UI (evita "1 noches"). */
-const nochesResumenEs = (n: number) =>
-  n === 1 ? "1 noche" : `${n} noches`;
+const nochesResumenEs = (n: number) => (n === 1 ? "1 noche" : `${n} noches`);
 
-/** Número de contrato para API: nunca vacío (el backend también rellena si falta). */
+/** Número de contrato para API: nunca vacío. Si ya hay CR tipado, se reutiliza.
+ *  Sin CR: clave estable por finca+fechas (regenerar no inventa otro DIR-random). */
 function ensureApiContractNumber(
   draft: FormState,
   props: PropertyLike[],
@@ -306,10 +353,18 @@ function ensureApiContractNumber(
     .replace(/[^\w-]+/g, "")
     .slice(0, 16)
     .replace(/^$/, "FN");
+  const inPart = String(draft.checkIn || "")
+    .replace(/\D/g, "")
+    .slice(0, 8);
+  const outPart = String(draft.checkOut || "")
+    .replace(/\D/g, "")
+    .slice(0, 8);
+  if (inPart && outPart) {
+    return `DIR-${codePart}-${inPart}-${outPart}`;
+  }
   const d = new Date();
   const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  const r = Math.floor(Math.random() * 90000 + 10000);
-  return `DIR-${codePart}-${stamp}-${r}`;
+  return `DIR-${codePart}-${stamp}`;
 }
 
 const getErrorMessage = (error: unknown, fallback: string) => {
@@ -408,7 +463,10 @@ export function ContractsReservationSection({
   const [confModalOpen, setConfModalOpen] = useState(false);
   const [confSearchNumber, setConfSearchNumber] = useState("");
   const [confSearchLoading, setConfSearchLoading] = useState(false);
-  const [confFoundBooking, setConfFoundBooking] = useState<Record<string, any> | null>(null);
+  const [confFoundBooking, setConfFoundBooking] = useState<Record<
+    string,
+    any
+  > | null>(null);
   const [confForm, setConfForm] = useState({
     depositAmount: "",
     depositDate: "",
@@ -455,10 +513,9 @@ export function ContractsReservationSection({
         ? {
             ...selectedProperty,
             ...propertyDetail,
-            features:
-              propertyDetail.features?.length
-                ? propertyDetail.features
-                : selectedProperty?.features,
+            features: propertyDetail.features?.length
+              ? propertyDetail.features
+              : selectedProperty?.features,
           }
         : selectedProperty,
     [propertyDetail, selectedProperty],
@@ -489,6 +546,15 @@ export function ContractsReservationSection({
   const [selectedFirmanteId, setSelectedFirmanteId] = useState<string>("");
   // Paso actual del asistente (stepper) de generación de contrato.
   const [step, setStep] = useState(0);
+
+  // Precarga SuperDoc en pasos previos al editor Word (paso 5).
+  useEffect(() => {
+    if (step >= 3) {
+      void import("@/features/admin/utils/preload-superdoc").then((m) =>
+        m.preloadSuperDoc(),
+      );
+    }
+  }, [step]);
   const CONTRACT_STEPS = [
     "Finca",
     "Propietario",
@@ -505,7 +571,10 @@ export function ContractsReservationSection({
     Cliente: "Datos de quien firma el contrato.",
     Editar: "Edita el contrato como en Word y descárgalo o genera la reserva.",
   };
-  const CONTRACT_STEP_ICONS: Record<(typeof CONTRACT_STEPS)[number], LucideIcon> = {
+  const CONTRACT_STEP_ICONS: Record<
+    (typeof CONTRACT_STEPS)[number],
+    LucideIcon
+  > = {
     Finca: Home,
     Propietario: User,
     Estadía: CalendarDays,
@@ -523,7 +592,10 @@ export function ContractsReservationSection({
   );
 
   const bankIdsForContract = useMemo(
-    () => contractBankAccountIds.filter((id) => bankAccounts.some((a) => a.id === id)),
+    () =>
+      contractBankAccountIds.filter((id) =>
+        bankAccounts.some((a) => a.id === id),
+      ),
     [contractBankAccountIds, bankAccounts],
   );
 
@@ -576,9 +648,31 @@ export function ContractsReservationSection({
           clientName: toClientFieldUpper(
             rec.clienteNombre || draft.nombreCompleto || prev.clientName,
           ),
+          clientFirstName: (() => {
+            const full = String(
+              rec.clienteNombre ||
+                draft.nombreCompleto ||
+                prev.clientName ||
+                "",
+            );
+            const split = splitClientFullName(full);
+            return toClientFieldUpper(prev.clientFirstName || split.first);
+          })(),
+          clientLastName: (() => {
+            const full = String(
+              rec.clienteNombre ||
+                draft.nombreCompleto ||
+                prev.clientName ||
+                "",
+            );
+            const split = splitClientFullName(full);
+            return toClientFieldUpper(prev.clientLastName || split.last);
+          })(),
           clientId: toClientFieldUpper(
             rec.clienteCedula || draft.cedula || prev.clientId,
           ),
+          clientDocType: prev.clientDocType || "CC",
+          clientDocIssuedAt: prev.clientDocIssuedAt || "",
           clientEmail: toClientFieldUpper(
             rec.clienteEmail || draft.correo || prev.clientEmail,
           ),
@@ -611,7 +705,9 @@ export function ContractsReservationSection({
         const fNom = String(rec.firmanteNombre ?? draft.adminName ?? "")
           .trim()
           .toLowerCase();
-        const fCed = String(rec.firmanteCedula ?? draft.adminCedula ?? "").trim();
+        const fCed = String(
+          rec.firmanteCedula ?? draft.adminCedula ?? "",
+        ).trim();
         if (fNom || fCed) {
           const match = firmantes.find(
             (f) =>
@@ -809,9 +905,7 @@ export function ContractsReservationSection({
   const staySubtotal = useMemo(() => {
     const fromNightly = Number(form.nightlyPrice || 0) * nights;
     if (fromNightly > 0) return fromNightly;
-    return Number(
-      (stayPriceData as StayPriceLike | undefined)?.subtotal || 0,
-    );
+    return Number((stayPriceData as StayPriceLike | undefined)?.subtotal || 0);
   }, [stayPriceData, form.nightlyPrice, nights]);
 
   useEffect(() => {
@@ -843,7 +937,6 @@ export function ContractsReservationSection({
       };
     });
   }, [stayPriceData]);
-
 
   const ownerResolved = useMemo(() => {
     const contractOwnerRow = form.propertyId
@@ -893,7 +986,11 @@ export function ContractsReservationSection({
       {
         contractNumber: form.contractNumber,
         clientName: form.clientName,
+        clientFirstName: form.clientFirstName,
+        clientLastName: form.clientLastName,
         clientId: form.clientId,
+        clientDocType: form.clientDocType,
+        clientDocIssuedAt: form.clientDocIssuedAt,
         clientEmail: form.clientEmail,
         clientPhone: form.clientPhone,
         clientCity: form.clientCity,
@@ -936,7 +1033,11 @@ export function ContractsReservationSection({
     form.propertyId,
     form.contractNumber,
     form.clientName,
+    form.clientFirstName,
+    form.clientLastName,
     form.clientId,
+    form.clientDocType,
+    form.clientDocIssuedAt,
     form.clientEmail,
     form.clientPhone,
     form.clientCity,
@@ -972,9 +1073,7 @@ export function ContractsReservationSection({
                 ? money(Number(form.refundableDeposit || 0))
                 : undefined,
             precioPorMasota:
-              petDepositForCalc > 0
-                ? money(petDepositForCalc)
-                : undefined,
+              petDepositForCalc > 0 ? money(petDepositForCalc) : undefined,
           },
           manillaCondominioCop: Number(form.manillaCondominio || 0),
           otherChargesCop: Number(form.otherCharges || 0),
@@ -1023,19 +1122,40 @@ export function ContractsReservationSection({
     clearError(field);
   };
 
-  const setClientField = <K extends keyof Pick<
-    FormState,
-    | "clientName"
-    | "clientId"
-    | "clientEmail"
-    | "clientPhone"
-    | "clientCity"
-    | "clientAddress"
-  >>(
+  const setClientField = <
+    K extends keyof Pick<
+      FormState,
+      | "clientName"
+      | "clientFirstName"
+      | "clientLastName"
+      | "clientId"
+      | "clientEmail"
+      | "clientPhone"
+      | "clientCity"
+      | "clientAddress"
+    >,
+  >(
     field: K,
     value: FormState[K],
   ) => {
-    setField(field, toClientFieldUpper(String(value)) as FormState[K]);
+    const next = toClientFieldUpper(String(value)) as FormState[K];
+    if (field === "clientFirstName" || field === "clientLastName") {
+      setForm((prev) => {
+        const first =
+          field === "clientFirstName" ? String(next) : prev.clientFirstName;
+        const last =
+          field === "clientLastName" ? String(next) : prev.clientLastName;
+        return {
+          ...prev,
+          [field]: next,
+          clientName: assembleClientFullName(first, last),
+        };
+      });
+      clearError(field);
+      clearError("clientName");
+      return;
+    }
+    setField(field, next);
   };
 
   const handleNightlyPriceChange = (next: string) => {
@@ -1049,10 +1169,7 @@ export function ContractsReservationSection({
 
   const applySuggestedContractTotal = () => {
     setContractTotalManual(false);
-    setField(
-      "contractTotalInput",
-      String(Math.round(suggestedContractTotal)),
-    );
+    setField("contractTotalInput", String(Math.round(suggestedContractTotal)));
   };
 
   useEffect(() => {
@@ -1111,8 +1228,7 @@ export function ContractsReservationSection({
     const nextErrors: FieldErrors = {};
     if (!draft.propertyId) nextErrors.propertyId = "Selecciona una finca.";
     if (!draft.contractTotalInput || Number(draft.contractTotalInput) <= 0)
-      nextErrors.contractTotalInput =
-        "Ingresa el valor total del contrato.";
+      nextErrors.contractTotalInput = "Ingresa el valor total del contrato.";
     if (!draft.nightlyPrice || Number(draft.nightlyPrice) <= 0)
       nextErrors.nightlyPrice =
         "Ingresa el valor por noche o revisa total, fechas y cargos.";
@@ -1126,13 +1242,39 @@ export function ContractsReservationSection({
       nextErrors.bankAccounts =
         "Selecciona al menos 1 cuenta bancaria en Ajustes globales del contrato.";
     if (!isLinkMode) {
-      if (!draft.clientName.trim())
+      if (
+        !draft.clientName.trim() &&
+        !assembleClientFullName(draft.clientFirstName, draft.clientLastName)
+      )
         nextErrors.clientName = "El nombre del arrendatario es obligatorio.";
+      if (!draft.clientFirstName.trim() && !draft.clientName.trim())
+        nextErrors.clientFirstName = "Los nombres son obligatorios.";
+      if (!draft.clientId.trim())
+        nextErrors.clientId = "El número de documento es obligatorio.";
+      if (!draft.clientDocIssuedAt.trim())
+        nextErrors.clientDocIssuedAt =
+          "La fecha de expedición del documento es obligatoria.";
+      if (!draft.clientCity.trim())
+        nextErrors.clientCity =
+          "La ciudad de expedición de la cédula es obligatoria.";
+      if (!draft.clientPhone.trim())
+        nextErrors.clientPhone = "El celular es obligatorio.";
+      if (!draft.clientEmail.trim())
+        nextErrors.clientEmail = "El correo es obligatorio.";
+      if (!draft.clientAddress.trim())
+        nextErrors.clientAddress = "La dirección es obligatoria.";
     }
     if (!draft.checkInDate)
       nextErrors.checkInDate = "La fecha de entrada es obligatoria.";
+    else if (draft.checkInDate < localTodayYmd())
+      nextErrors.checkInDate = "La fecha de entrada no puede ser pasada.";
     if (!draft.checkOutDate)
       nextErrors.checkOutDate = "La fecha de salida es obligatoria.";
+    else if (draft.checkOutDate < localTodayYmd())
+      nextErrors.checkOutDate = "La fecha de salida no puede ser pasada.";
+    else if (draft.checkInDate && draft.checkOutDate < draft.checkInDate)
+      nextErrors.checkOutDate =
+        "La fecha de salida debe ser posterior o igual a la de entrada.";
     if (!draft.checkInTime.trim())
       nextErrors.checkInTime = "La hora de entrada es obligatoria.";
     if (!draft.checkOutTime.trim())
@@ -1187,8 +1329,16 @@ export function ContractsReservationSection({
     // # habitaciones manual (opcional). Si vacío, el servidor cuenta zonas
     // "Habitación N" de la finca y las antepone a las características.
     habitaciones: draft.habitaciones?.trim() || undefined,
-    clientName: draft.clientName,
+    clientName: assembleClientFullName(
+      draft.clientFirstName,
+      draft.clientLastName,
+      draft.clientName,
+    ),
+    clientFirstName: draft.clientFirstName,
+    clientLastName: draft.clientLastName,
     clientId: draft.clientId,
+    clientDocType: draft.clientDocType || "CC",
+    clientDocIssuedAt: draft.clientDocIssuedAt,
     clientEmail: draft.clientEmail,
     clientPhone: draft.clientPhone,
     clientCity: draft.clientCity,
@@ -1239,7 +1389,7 @@ export function ContractsReservationSection({
             ? { firmaArrendadorUrl: selectedFirmante.firmaUrl }
             : {}),
         }
-        : {}),
+      : {}),
   });
 
   const download = (blob: Blob, filename: string) => {
@@ -1330,12 +1480,11 @@ export function ContractsReservationSection({
         const half = Math.round(total * 0.5);
         setConfForm((prev) => ({
           ...prev,
-          depositAmount:
-            prev.depositAmount || formatPriceInput(half),
+          depositAmount: prev.depositAmount || formatPriceInput(half),
           balanceAmount:
-            prev.balanceAmount ||
-            formatPriceInput(Math.max(total - half, 0)),
-          depositDate: prev.depositDate || new Date().toISOString().split("T")[0],
+            prev.balanceAmount || formatPriceInput(Math.max(total - half, 0)),
+          depositDate:
+            prev.depositDate || new Date().toISOString().split("T")[0],
           balanceDate:
             prev.balanceDate ||
             (res.data.fechaEntrada
@@ -1348,11 +1497,14 @@ export function ContractsReservationSection({
           queryCode !== raw
             ? ` (buscamos el código «${queryCode}» a partir de lo que escribiste)`
             : "";
-        toast.error(`No encontramos borrador ni reserva con ese número.${hint}`, {
-          duration: 9000,
-          description:
-            "El código debe ser el del contrato que acabas de generar (se guarda como borrador hasta confirmar pago). Si es una reserva antigua creada antes de este cambio, sigue apareciendo aquí igual.",
-        });
+        toast.error(
+          `No encontramos borrador ni reserva con ese número.${hint}`,
+          {
+            duration: 9000,
+            description:
+              "El código debe ser el del contrato que acabas de generar (se guarda como borrador hasta confirmar pago). Si es una reserva antigua creada antes de este cambio, sigue apareciendo aquí igual.",
+          },
+        );
       }
     } catch (e) {
       if (axios.isAxiosError(e) && e.response?.status === 403) {
@@ -1368,7 +1520,10 @@ export function ContractsReservationSection({
         typeof d === "object" &&
         d !== null &&
         ("message" in d || "error" in d)
-          ? [String((d as { message?: string }).message || ""), String((d as { error?: string }).error || "")]
+          ? [
+              String((d as { message?: string }).message || ""),
+              String((d as { error?: string }).error || ""),
+            ]
               .filter(Boolean)
               .join(" — ")
           : "";
@@ -1392,8 +1547,7 @@ export function ContractsReservationSection({
       const depositoMascotas = Number(b.depositoMascotas ?? 0) || 0;
       const petCleaningFee = petCount >= 3 ? 70_000 : 0;
       const cleaningFee = 100_000 + petCleaningFee;
-      let damageDeposit =
-        Number(b.depositoGarantia ?? 0) || 0;
+      let damageDeposit = Number(b.depositoGarantia ?? 0) || 0;
       if (!damageDeposit && property?.depositoDanosReembolsable) {
         damageDeposit = Number(property.depositoDanosReembolsable);
       }
@@ -1439,26 +1593,29 @@ export function ContractsReservationSection({
         petCleaningFee,
         refundableDeposit,
         depositAmount: parseCOP(confForm.depositAmount),
-        depositDate: confForm.depositDate || new Date().toISOString().split("T")[0],
+        depositDate:
+          confForm.depositDate || new Date().toISOString().split("T")[0],
         balanceAmount: parseCOP(confForm.balanceAmount),
         balanceDate: confForm.balanceDate || "",
         paymentMethod: confForm.paymentMethod,
-        paymentStatus:
-          confForm.paymentStatus === "PAID" ? "paid" : "pending",
+        paymentStatus: confForm.paymentStatus === "PAID" ? "paid" : "pending",
         persistConfirmation: true,
       };
 
-      const confResult = await inboxService.generateReservationConfirmationPreview(
-        "direct-reservation",
-        payload,
-      );
+      const confResult =
+        await inboxService.generateReservationConfirmationPreview(
+          "direct-reservation",
+          payload,
+        );
       await assertPdfBlob(confResult.blob, "confirmación de reserva");
 
       const blobUrl = URL.createObjectURL(confResult.blob);
       setConfirmationUrl(blobUrl);
       setConfirmationFilename(confResult.filename);
       download(confResult.blob, confResult.filename);
-      toast.success("Confirmación PDF generada y descargada.", { duration: 6000 });
+      toast.success("Confirmación PDF generada y descargada.", {
+        duration: 6000,
+      });
 
       if (b.isContractSnapshot) {
         try {
@@ -1483,13 +1640,18 @@ export function ContractsReservationSection({
             }
           }
           if (fin.data?.bookingId) {
-            toast.success("Reserva registrada en el calendario con el pago indicado.", {
-              duration: 8000,
-            });
+            toast.success(
+              "Reserva registrada en el calendario con el pago indicado.",
+              {
+                duration: 8000,
+              },
+            );
           }
         } catch (finErr) {
           console.error(finErr);
-          const d = axios.isAxiosError(finErr) ? finErr.response?.data : undefined;
+          const d = axios.isAxiosError(finErr)
+            ? finErr.response?.data
+            : undefined;
           const msg =
             d && typeof d === "object" && d !== null && "error" in d
               ? String((d as { error?: string }).error || "")
@@ -1504,7 +1666,10 @@ export function ContractsReservationSection({
         }
       }
     } catch (error: unknown) {
-      const msg = await getBlobErrorMessage(error, "No se pudo generar la confirmación PDF.");
+      const msg = await getBlobErrorMessage(
+        error,
+        "No se pudo generar la confirmación PDF.",
+      );
       toast.error(msg, { duration: 12_000 });
     } finally {
       toast.dismiss(loadingId);
@@ -1530,7 +1695,8 @@ export function ContractsReservationSection({
     setForm((prev) => ({
       ...prev,
       propertyId,
-      contractTotalInput: prev.propertyId === propertyId ? prev.contractTotalInput : "",
+      contractTotalInput:
+        prev.propertyId === propertyId ? prev.contractTotalInput : "",
       nightlyPrice:
         property?.priceBase !== undefined && property?.priceBase !== null
           ? String(property.priceBase)
@@ -1587,11 +1753,9 @@ export function ContractsReservationSection({
     guestCount: number,
     isEvent?: boolean,
   ) => {
-    const warning = getGuestCapacityWarning(
-      guestCount,
-      selectedProperty,
-      { isEvent },
-    );
+    const warning = getGuestCapacityWarning(guestCount, selectedProperty, {
+      isEvent,
+    });
     if (!warning) return;
     toast.warning(`⚠️ Cupo excedido. ${warning}`, {
       duration: 14_000,
@@ -1637,9 +1801,7 @@ export function ContractsReservationSection({
     setLoadingGenerate(true);
     let contractDocxDownloadedEarly = false;
     try {
-      loadingToastId = toast.loading(
-        "Generando contrato…",
-      );
+      loadingToastId = toast.loading("Generando contrato…");
 
       const availability = await axios.post(
         "/api/bookings/check-availability",
@@ -1859,7 +2021,9 @@ export function ContractsReservationSection({
       // --- AUTOMATIC DOWNLOAD (fallback si no vino fileBase64 en la respuesta) ---
       if (contractUrlResult && !contractDocxDownloadedEarly) {
         try {
-          const resp = await axios.get(contractUrlResult, { responseType: "blob" });
+          const resp = await axios.get(contractUrlResult, {
+            responseType: "blob",
+          });
           const downloadName =
             contractDownloadFilename ||
             `Contrato_${generatedContractNumber}.${
@@ -1873,7 +2037,10 @@ export function ContractsReservationSection({
         }
       } else if (contractLocalBlob && !contractDocxDownloadedEarly) {
         const ext = contractArtifactKind === "pdf" ? "pdf" : "docx";
-        download(contractLocalBlob, `Contrato_${generatedContractNumber}.${ext}`);
+        download(
+          contractLocalBlob,
+          `Contrato_${generatedContractNumber}.${ext}`,
+        );
       }
 
       setForm((prev) => ({ ...prev, contractNumber: generatedContractNumber }));
@@ -1934,9 +2101,8 @@ export function ContractsReservationSection({
           | { ownerName?: string; nombrePropietario?: string }
           | undefined
       )?.ownerName ||
-      (
-        selectedProperty as { nombrePropietario?: string } | undefined
-      )?.nombrePropietario ||
+      (selectedProperty as { nombrePropietario?: string } | undefined)
+        ?.nombrePropietario ||
       "";
     if (ownerInfo?.ownerUserId && propietarios) {
       const owner = propietarios.find(
@@ -2047,8 +2213,12 @@ export function ContractsReservationSection({
       setGeneratedLink(link);
 
       try {
-        const inMs = new Date(`${nextFormState.checkInDate}T10:00:00`).getTime();
-        const outMs = new Date(`${nextFormState.checkOutDate}T10:00:00`).getTime();
+        const inMs = new Date(
+          `${nextFormState.checkInDate}T10:00:00`,
+        ).getTime();
+        const outMs = new Date(
+          `${nextFormState.checkOutDate}T10:00:00`,
+        ).getTime();
         await axios.post(
           "/api/bookings/contract-snapshot",
           {
@@ -2133,242 +2303,278 @@ export function ContractsReservationSection({
     "h-11 shrink-0 rounded-xl border border-zinc-200 bg-white px-4 text-xs font-bold text-zinc-700 hover:bg-zinc-50";
 
   const ownerFieldClass = (hasError?: boolean) =>
-    cn(
-      formControlClass,
-      hasError ? "border-red-500" : "border-zinc-100",
-    );
+    cn(formControlClass, hasError ? "border-red-500" : "border-zinc-100");
 
   const sectionTitleClass = "text-lg font-bold tracking-tight text-zinc-950";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-
       {/* ── CONFIRMAR PAGO (modal) ─────────────────────────────────────── */}
       {!isLinkMode && (
-      <>
-      <Dialog open={confModalOpen} onOpenChange={setConfModalOpen}>
-        <DialogContent
-          showCloseButton
-          className="flex max-h-[min(90vh,760px)] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden border-orange-100 bg-white p-0 sm:max-w-xl"
-        >
-          <DialogHeader className="shrink-0 border-b border-orange-100 bg-orange-50/90 px-5 py-4 text-left dark:border-zinc-800 dark:bg-zinc-900">
-            <DialogTitle className="text-lg font-bold text-orange-950 dark:text-zinc-50">
-              Confirmar pago
-            </DialogTitle>
-          </DialogHeader>
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-white px-5 py-4">
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <Label className="mb-1.5 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400 dark:text-zinc-500">
-                  Número de contrato
-                </Label>
-                <Input
-                  placeholder="Ej: FY-2005 o DIR-FINCA-…"
-                  value={confSearchNumber}
-                  onChange={(e) => setConfSearchNumber(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void searchContractBooking();
-                  }}
-                  className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
-                />
-              </div>
-              <div className="flex items-end">
-                <Button
-                  type="button"
-                  onClick={() => void searchContractBooking()}
-                  disabled={confSearchLoading || !confSearchNumber.trim()}
-                  className="h-12 rounded-xl bg-orange-600 px-5 font-bold text-white hover:bg-orange-700 dark:bg-orange-500 dark:hover:bg-orange-400"
-                >
-                  {confSearchLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Search className="h-4 w-4" />
-                  )}
-                  <span className="ml-2">Buscar</span>
-                </Button>
-              </div>
-            </div>
+        <>
+          <Dialog open={confModalOpen} onOpenChange={setConfModalOpen}>
+            <DialogContent
+              showCloseButton
+              className="flex max-h-[min(90vh,760px)] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden border-orange-100 bg-white p-0 sm:max-w-xl"
+            >
+              <DialogHeader className="shrink-0 border-b border-orange-100 bg-orange-50/90 px-5 py-4 text-left dark:border-zinc-800 dark:bg-zinc-900">
+                <DialogTitle className="text-lg font-bold text-orange-950 dark:text-zinc-50">
+                  Confirmar pago
+                </DialogTitle>
+              </DialogHeader>
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-white px-5 py-4">
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Label className="mb-1.5 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400 dark:text-zinc-500">
+                      Número de contrato
+                    </Label>
+                    <Input
+                      placeholder="Ej: FY-2005 o DIR-FINCA-…"
+                      value={confSearchNumber}
+                      onChange={(e) => setConfSearchNumber(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void searchContractBooking();
+                      }}
+                      className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      onClick={() => void searchContractBooking()}
+                      disabled={confSearchLoading || !confSearchNumber.trim()}
+                      className="h-12 rounded-xl bg-orange-600 px-5 font-bold text-white hover:bg-orange-700 dark:bg-orange-500 dark:hover:bg-orange-400"
+                    >
+                      {confSearchLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Search className="h-4 w-4" />
+                      )}
+                      <span className="ml-2">Buscar</span>
+                    </Button>
+                  </div>
+                </div>
 
-            {!confFoundBooking && !confSearchLoading && (
-              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-orange-200 bg-orange-50/60 px-4 py-8 text-center dark:border-zinc-700 dark:bg-zinc-900/40">
-                <Search className="h-7 w-7 text-orange-300" />
-                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                  Ingresa el número de contrato y presiona <span className="text-orange-600">Buscar</span>
-                </p>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                  Ej: FY-2005, DIR-VILLA-PALMA-… o el número asignado al contrato
-                </p>
-              </div>
-            )}
+                {!confFoundBooking && !confSearchLoading && (
+                  <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-orange-200 bg-orange-50/60 px-4 py-8 text-center dark:border-zinc-700 dark:bg-zinc-900/40">
+                    <Search className="h-7 w-7 text-orange-300" />
+                    <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                      Ingresa el número de contrato y presiona{" "}
+                      <span className="text-orange-600">Buscar</span>
+                    </p>
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                      Ej: FY-2005, DIR-VILLA-PALMA-… o el número asignado al
+                      contrato
+                    </p>
+                  </div>
+                )}
 
-            {confFoundBooking && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="space-y-4"
-              >
-                {confFoundBooking.isContractSnapshot ? (
-                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
-                    Borrador del contrato (aún no hay reserva en el calendario). Al generar la confirmación PDF se creará la reserva con el pago indicado.
-                  </p>
-                ) : null}
-                <div className="flex divide-x divide-orange-100 overflow-hidden rounded-xl border border-orange-100 bg-orange-50 dark:divide-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/80">
-                  {[
-                    { label: "Cliente", value: confFoundBooking.nombreCompleto },
-                    { label: "Finca", value: confFoundBooking.propertyTitle },
-                    {
-                      label: "Entrada",
-                      value: confFoundBooking.fechaEntrada
-                        ? new Date(confFoundBooking.fechaEntrada).toLocaleDateString("es-CO")
-                        : "-",
-                    },
-                    {
-                      label: "Salida",
-                      value: confFoundBooking.fechaSalida
-                        ? new Date(confFoundBooking.fechaSalida).toLocaleDateString("es-CO")
-                        : "-",
-                    },
-                    {
-                      label: "Total",
-                      value: confFoundBooking.precioTotal
-                        ? `$${Number(confFoundBooking.precioTotal).toLocaleString("es-CO")}`
-                        : "-",
-                    },
-                  ].map(({ label, value }) => (
-                    <div key={label} className="min-w-0 flex-1 px-3 py-2" title={value ?? ""}>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">
-                        {label}
+                {confFoundBooking && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-4"
+                  >
+                    {confFoundBooking.isContractSnapshot ? (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+                        Borrador del contrato (aún no hay reserva en el
+                        calendario). Al generar la confirmación PDF se creará la
+                        reserva con el pago indicado.
                       </p>
-                      <p className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">{value}</p>
+                    ) : null}
+                    <div className="flex divide-x divide-orange-100 overflow-hidden rounded-xl border border-orange-100 bg-orange-50 dark:divide-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/80">
+                      {[
+                        {
+                          label: "Cliente",
+                          value: confFoundBooking.nombreCompleto,
+                        },
+                        {
+                          label: "Finca",
+                          value: confFoundBooking.propertyTitle,
+                        },
+                        {
+                          label: "Entrada",
+                          value: confFoundBooking.fechaEntrada
+                            ? new Date(
+                                confFoundBooking.fechaEntrada,
+                              ).toLocaleDateString("es-CO")
+                            : "-",
+                        },
+                        {
+                          label: "Salida",
+                          value: confFoundBooking.fechaSalida
+                            ? new Date(
+                                confFoundBooking.fechaSalida,
+                              ).toLocaleDateString("es-CO")
+                            : "-",
+                        },
+                        {
+                          label: "Total",
+                          value: confFoundBooking.precioTotal
+                            ? `$${Number(confFoundBooking.precioTotal).toLocaleString("es-CO")}`
+                            : "-",
+                        },
+                      ].map(({ label, value }) => (
+                        <div
+                          key={label}
+                          className="min-w-0 flex-1 px-3 py-2"
+                          title={value ?? ""}
+                        >
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">
+                            {label}
+                          </p>
+                          <p className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                            {value}
+                          </p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
 
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  <div>
-                    <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-                      Abono / Anticipo
-                    </Label>
-                    <Input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0"
-                      value={confForm.depositAmount}
-                      onChange={(e) =>
-                        setConfForm((p) => ({
-                          ...p,
-                          depositAmount: formatPriceInput(e.target.value),
-                        }))
-                      }
-                      className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                    />
-                  </div>
-                  <div>
-                    <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-                      Fecha abono
-                    </Label>
-                    <Input
-                      type="date"
-                      value={confForm.depositDate}
-                      onChange={(e) =>
-                        setConfForm((p) => ({ ...p, depositDate: e.target.value }))
-                      }
-                      className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                    />
-                  </div>
-                  <div>
-                    <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-                      Saldo restante
-                    </Label>
-                    <Input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0"
-                      value={confForm.balanceAmount}
-                      onChange={(e) =>
-                        setConfForm((p) => ({
-                          ...p,
-                          balanceAmount: formatPriceInput(e.target.value),
-                        }))
-                      }
-                      className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                    />
-                  </div>
-                  <div>
-                    <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-                      Fecha saldo
-                    </Label>
-                    <Input
-                      type="date"
-                      value={confForm.balanceDate}
-                      onChange={(e) =>
-                        setConfForm((p) => ({ ...p, balanceDate: e.target.value }))
-                      }
-                      className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                    />
-                  </div>
-                  <div>
-                    <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-                      Método de pago
-                    </Label>
-                    <Select
-                      value={confForm.paymentMethod}
-                      onValueChange={(v) => setConfForm((p) => ({ ...p, paymentMethod: v }))}
-                    >
-                      <SelectTrigger className="h-12! w-full rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="bancolombia">Bancolombia</SelectItem>
-                        <SelectItem value="bbva">BBVA</SelectItem>
-                        <SelectItem value="davivienda">Davivienda</SelectItem>
-                        <SelectItem value="nequi">Nequi</SelectItem>
-                        <SelectItem value="pse">PSE</SelectItem>
-                        <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-                      Estado pago
-                    </Label>
-                    <Select
-                      value={confForm.paymentStatus}
-                      onValueChange={(v) => setConfForm((p) => ({ ...p, paymentStatus: v }))}
-                    >
-                      <SelectTrigger className="h-12! w-full rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="PARTIAL">Abono parcial</SelectItem>
-                        <SelectItem value="PAID">Pago completo</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      <div>
+                        <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Abono / Anticipo
+                        </Label>
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="0"
+                          value={confForm.depositAmount}
+                          onChange={(e) =>
+                            setConfForm((p) => ({
+                              ...p,
+                              depositAmount: formatPriceInput(e.target.value),
+                            }))
+                          }
+                          className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                        />
+                      </div>
+                      <div>
+                        <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Fecha abono
+                        </Label>
+                        <Input
+                          type="date"
+                          value={confForm.depositDate}
+                          onChange={(e) =>
+                            setConfForm((p) => ({
+                              ...p,
+                              depositDate: e.target.value,
+                            }))
+                          }
+                          className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                        />
+                      </div>
+                      <div>
+                        <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Saldo restante
+                        </Label>
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="0"
+                          value={confForm.balanceAmount}
+                          onChange={(e) =>
+                            setConfForm((p) => ({
+                              ...p,
+                              balanceAmount: formatPriceInput(e.target.value),
+                            }))
+                          }
+                          className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                        />
+                      </div>
+                      <div>
+                        <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Fecha saldo
+                        </Label>
+                        <Input
+                          type="date"
+                          value={confForm.balanceDate}
+                          onChange={(e) =>
+                            setConfForm((p) => ({
+                              ...p,
+                              balanceDate: e.target.value,
+                            }))
+                          }
+                          className="h-12 rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                        />
+                      </div>
+                      <div>
+                        <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Método de pago
+                        </Label>
+                        <Select
+                          value={confForm.paymentMethod}
+                          onValueChange={(v) =>
+                            setConfForm((p) => ({ ...p, paymentMethod: v }))
+                          }
+                        >
+                          <SelectTrigger className="h-12! w-full rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="bancolombia">
+                              Bancolombia
+                            </SelectItem>
+                            <SelectItem value="bbva">BBVA</SelectItem>
+                            <SelectItem value="davivienda">
+                              Davivienda
+                            </SelectItem>
+                            <SelectItem value="nequi">Nequi</SelectItem>
+                            <SelectItem value="pse">PSE</SelectItem>
+                            <SelectItem value="tarjeta_credito">
+                              Tarjeta Crédito
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="mb-1 block text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Estado pago
+                        </Label>
+                        <Select
+                          value={confForm.paymentStatus}
+                          onValueChange={(v) =>
+                            setConfForm((p) => ({ ...p, paymentStatus: v }))
+                          }
+                        >
+                          <SelectTrigger className="h-12! w-full rounded-xl border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="PARTIAL">
+                              Abono parcial
+                            </SelectItem>
+                            <SelectItem value="PAID">Pago completo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
 
-                <Button
-                  type="button"
-                  onClick={() => void generateConfirmationPdf()}
-                  disabled={loadingConfirmation}
-                  className="h-14 w-full rounded-2xl bg-orange-600 text-base font-bold text-white shadow hover:bg-orange-700"
-                >
-                  {loadingConfirmation ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generando PDF…
-                    </>
-                  ) : (
-                    <>
-                      <FileCheck className="mr-2 h-5 w-5" /> Generar confirmación PDF
-                    </>
-                  )}
-                </Button>
-              </motion.div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-      </>
+                    <Button
+                      type="button"
+                      onClick={() => void generateConfirmationPdf()}
+                      disabled={loadingConfirmation}
+                      className="h-14 w-full rounded-2xl bg-orange-600 text-base font-bold text-white shadow hover:bg-orange-700"
+                    >
+                      {loadingConfirmation ? (
+                        <>
+                          <Loader2 className="mr-2 h-5 w-5 animate-spin" />{" "}
+                          Generando PDF…
+                        </>
+                      ) : (
+                        <>
+                          <FileCheck className="mr-2 h-5 w-5" /> Generar
+                          confirmación PDF
+                        </>
+                      )}
+                    </Button>
+                  </motion.div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+        </>
       )}
 
       {/* ── CONTRATOS ─────────────────────────────────────────────────── */}
@@ -2400,48 +2606,48 @@ export function ContractsReservationSection({
             </div>
 
             <div className="shrink-0 px-5 pt-3 pb-3 md:px-6">
-            <div className="flex gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50/80 p-1">
-              {CONTRACT_STEPS.map((label, i) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => setStep(i)}
-                  title={label}
-                  className={cn(
-                    "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-1.5 py-1.5 transition-colors",
-                    i === step ? "bg-primary/10" : "hover:bg-muted",
-                  )}
-                >
-                  <span
+              <div className="flex gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50/80 p-1">
+                {CONTRACT_STEPS.map((label, i) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setStep(i)}
+                    title={label}
                     className={cn(
-                      "grid h-5 w-5 flex-none place-items-center rounded-full",
-                      i <= step
-                        ? "bg-primary text-white"
-                        : "bg-muted text-muted-foreground",
+                      "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-1.5 py-1.5 transition-colors",
+                      i === step ? "bg-primary/10" : "hover:bg-muted",
                     )}
                   >
-                    {i < step ? (
-                      <CheckCircle2 className="h-3 w-3" />
-                    ) : (
-                      (() => {
-                        const StepIcon = CONTRACT_STEP_ICONS[label];
-                        return <StepIcon className="h-3 w-3" />;
-                      })()
-                    )}
-                  </span>
-                  <span
-                    className={cn(
-                      "truncate text-[10px] font-semibold",
-                      i === step ? "text-primary" : "text-muted-foreground",
-                      // En pantallas angostas solo se lee el paso activo.
-                      i === step ? "inline" : "hidden sm:inline",
-                    )}
-                  >
-                    {label}
-                  </span>
-                </button>
-              ))}
-            </div>
+                    <span
+                      className={cn(
+                        "grid h-5 w-5 flex-none place-items-center rounded-full",
+                        i <= step
+                          ? "bg-primary text-white"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {i < step ? (
+                        <CheckCircle2 className="h-3 w-3" />
+                      ) : (
+                        (() => {
+                          const StepIcon = CONTRACT_STEP_ICONS[label];
+                          return <StepIcon className="h-3 w-3" />;
+                        })()
+                      )}
+                    </span>
+                    <span
+                      className={cn(
+                        "truncate text-[10px] font-semibold",
+                        i === step ? "text-primary" : "text-muted-foreground",
+                        // En pantallas angostas solo se lee el paso activo.
+                        i === step ? "inline" : "hidden sm:inline",
+                      )}
+                    >
+                      {label}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="shrink-0 border-b border-zinc-100 px-5 py-2.5 md:px-6">
@@ -2454,954 +2660,1097 @@ export function ContractsReservationSection({
             </div>
 
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5 md:p-6 scrollbar-hide">
-            {step === 0 && (
-            <>
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("propertyId")}>
-                    Buscar finca
-                  </Label>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    <Input
-                      placeholder="Escribe nombre o codigo"
-                      value={searchTerm}
-                      onChange={(event) => setSearchTerm(event.target.value)}
-                      onFocus={() => setIsSearchFocused(true)}
-                      onBlur={() =>
-                        setTimeout(() => setIsSearchFocused(false), 200)
-                      }
-                      className={cn(fieldClass("propertyId"), "pl-10")}
-                    />
-                  </div>
-                  {errors.propertyId && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.propertyId}
-                    </p>
-                  )}
-                </div>
+              {step === 0 && (
+                <>
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label className={fieldLabelClass("propertyId")}>
+                        Buscar finca
+                      </Label>
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                        <Input
+                          placeholder="Escribe nombre o codigo"
+                          value={searchTerm}
+                          onChange={(event) =>
+                            setSearchTerm(event.target.value)
+                          }
+                          onFocus={() => setIsSearchFocused(true)}
+                          onBlur={() =>
+                            setTimeout(() => setIsSearchFocused(false), 200)
+                          }
+                          className={cn(fieldClass("propertyId"), "pl-10")}
+                        />
+                      </div>
+                      {errors.propertyId && (
+                        <p className="ml-1 text-[11px] font-semibold text-red-500">
+                          {errors.propertyId}
+                        </p>
+                      )}
+                    </div>
 
-                {!isSearchFocused && !selectedProperty && (
-                  <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 py-8 text-center">
-                    <Home className="h-7 w-7 text-zinc-300" />
-                    <p className="text-[13px] font-medium text-zinc-400">
-                      Escribe el nombre o código de la finca
-                    </p>
-                    <p className="text-[11px] text-zinc-300">
-                      El campo de búsqueda está arriba
-                    </p>
-                  </div>
-                )}
+                    {!isSearchFocused && !selectedProperty && (
+                      <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 py-8 text-center">
+                        <Home className="h-7 w-7 text-zinc-300" />
+                        <p className="text-[13px] font-medium text-zinc-400">
+                          Escribe el nombre o código de la finca
+                        </p>
+                        <p className="text-[11px] text-zinc-300">
+                          El campo de búsqueda está arriba
+                        </p>
+                      </div>
+                    )}
 
-                <AnimatePresence>
-                  {isSearchFocused && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden"
-                    >
-                      <ScrollArea className="h-[240px] rounded-xl border border-zinc-100 bg-white p-2.5">
-                        <div className="space-y-2.5">
-                          {isLoading ? (
-                            <div className="p-4 text-sm text-zinc-500">
-                              Cargando inventario de fincas...
-                            </div>
-                          ) : filtered.length === 0 ? (
-                            <div className="p-4 text-sm text-zinc-500">
-                              No se encontraron fincas.
-                            </div>
-                          ) : (
-                            filtered.map((property) => {
-                              const active = form.propertyId === property.id;
-                              return (
-                                <button
-                                  key={property.id}
-                                  type="button"
-                                  onClick={() => {
-                                    onSelectProperty(property.id);
-                                    setIsSearchFocused(false);
-                                  }}
-                                  className={cn(
-                                    "flex w-full items-center gap-3.5 rounded-xl border px-3 py-3 text-left transition-all",
-                                    active
-                                      ? "border-zinc-900 bg-zinc-900 text-white shadow-sm"
-                                      : "border-zinc-100 bg-white hover:border-zinc-300 hover:bg-zinc-50",
-                                  )}
-                                >
-                                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-black/5 bg-zinc-100">
-                                    {property.images?.[0] ? (
-                                      <img
-                                        src={property.images[0]}
-                                        alt={property.title}
-                                        className="h-full w-full object-cover"
-                                      />
-                                    ) : (
-                                      <div className="flex h-full w-full items-center justify-center">
-                                        <Home
-                                          className={cn(
-                                            "h-5 w-5",
-                                            active
-                                              ? "text-white/80"
-                                              : "text-zinc-400",
-                                          )}
-                                        />
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <p className="truncate text-xs font-bold">
-                                      {property.title}
-                                    </p>
-                                    <p
+                    <AnimatePresence>
+                      {isSearchFocused && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <ScrollArea className="h-[240px] rounded-xl border border-zinc-100 bg-white p-2.5">
+                            <div className="space-y-2.5">
+                              {isLoading ? (
+                                <div className="p-4 text-sm text-zinc-500">
+                                  Cargando inventario de fincas...
+                                </div>
+                              ) : filtered.length === 0 ? (
+                                <div className="p-4 text-sm text-zinc-500">
+                                  No se encontraron fincas.
+                                </div>
+                              ) : (
+                                filtered.map((property) => {
+                                  const active =
+                                    form.propertyId === property.id;
+                                  return (
+                                    <button
+                                      key={property.id}
+                                      type="button"
+                                      onClick={() => {
+                                        onSelectProperty(property.id);
+                                        setIsSearchFocused(false);
+                                      }}
                                       className={cn(
-                                        "truncate text-[10px] font-semibold uppercase tracking-wider",
+                                        "flex w-full items-center gap-3.5 rounded-xl border px-3 py-3 text-left transition-all",
                                         active
-                                          ? "text-white/70"
-                                          : "text-zinc-400",
+                                          ? "border-zinc-900 bg-zinc-900 text-white shadow-sm"
+                                          : "border-zinc-100 bg-white hover:border-zinc-300 hover:bg-zinc-50",
                                       )}
                                     >
-                                      {property.code || "SIN CODIGO"}{" "}
-                                      {property.location
-                                        ? `• ${property.location}`
-                                        : ""}
-                                    </p>
-                                  </div>
-                                </button>
-                              );
-                            })
+                                      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-black/5 bg-zinc-100">
+                                        {property.images?.[0] ? (
+                                          <img
+                                            src={property.images[0]}
+                                            alt={property.title}
+                                            className="h-full w-full object-cover"
+                                          />
+                                        ) : (
+                                          <div className="flex h-full w-full items-center justify-center">
+                                            <Home
+                                              className={cn(
+                                                "h-5 w-5",
+                                                active
+                                                  ? "text-white/80"
+                                                  : "text-zinc-400",
+                                              )}
+                                            />
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="truncate text-xs font-bold">
+                                          {property.title}
+                                        </p>
+                                        <p
+                                          className={cn(
+                                            "truncate text-[10px] font-semibold uppercase tracking-wider",
+                                            active
+                                              ? "text-white/70"
+                                              : "text-zinc-400",
+                                          )}
+                                        >
+                                          {property.code || "SIN CODIGO"}{" "}
+                                          {property.location
+                                            ? `• ${property.location}`
+                                            : ""}
+                                        </p>
+                                      </div>
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </ScrollArea>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {selectedProperty && (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-4 rounded-2xl bg-white p-3 border border-zinc-100 shadow-sm">
+                          {selectedProperty.images?.[0] ? (
+                            <div className="relative h-16 w-16 overflow-hidden rounded-xl border border-zinc-100 shrink-0">
+                              <img
+                                src={selectedProperty.images[0]}
+                                alt={selectedProperty.title}
+                                className="h-full w-full object-cover"
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-zinc-50 border border-zinc-100 shrink-0">
+                              <Home className="h-7 w-7 text-zinc-300" />
+                            </div>
                           )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge
+                                variant="secondary"
+                                className="h-5 px-2 text-[9px] font-black tracking-widest uppercase bg-zinc-100 text-zinc-600 border-0"
+                              >
+                                {selectedProperty.code || "SELECCIONADA"}
+                              </Badge>
+                              <span className="text-[11px] font-bold text-zinc-400 truncate">
+                                {selectedProperty.location ||
+                                  "Ubicacion no definida"}
+                              </span>
+                            </div>
+                            <h4 className="truncate text-sm font-bold text-zinc-950 leading-tight">
+                              {selectedProperty.title}
+                            </h4>
+                          </div>
                         </div>
-                      </ScrollArea>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {selectedProperty && (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-4 rounded-2xl bg-white p-3 border border-zinc-100 shadow-sm">
-                      {selectedProperty.images?.[0] ? (
-                        <div className="relative h-16 w-16 overflow-hidden rounded-xl border border-zinc-100 shrink-0">
-                          <img
-                            src={selectedProperty.images[0]}
-                            alt={selectedProperty.title}
-                            className="h-full w-full object-cover"
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-zinc-50 border border-zinc-100 shrink-0">
-                          <Home className="h-7 w-7 text-zinc-300" />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge
-                            variant="secondary"
-                            className="h-5 px-2 text-[9px] font-black tracking-widest uppercase bg-zinc-100 text-zinc-600 border-0"
-                          >
-                            {selectedProperty.code || "SELECCIONADA"}
-                          </Badge>
-                          <span className="text-[11px] font-bold text-zinc-400 truncate">
-                            {selectedProperty.location ||
-                              "Ubicacion no definida"}
-                          </span>
-                        </div>
-                        <h4 className="truncate text-sm font-bold text-zinc-950 leading-tight">
-                          {selectedProperty.title}
-                        </h4>
                       </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-            )}
-
-            {step === 1 && (
-            <>
-            {selectedProperty && form.propertyId ? (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="space-y-2 md:col-span-2">
-                    <Label className="ml-1 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-                      Nombre completo del propietario *
-                    </Label>
-                    <Input
-                      value={
-                        propertyContractOwnerOverrides[form.propertyId]
-                          ?.nombreCompleto ?? ""
-                      }
-                      onChange={(event) =>
-                        setPropertyContractOwnerOverride(form.propertyId, {
-                          nombreCompleto: event.target.value,
-                        })
-                      }
-                      placeholder={
-                        ownerResolved.name
-                          ? ownerResolved.name
-                          : "Ej. María Pérez"
-                      }
-                      className={ownerFieldClass(Boolean(errors.propertyOwnerName))}
-                    />
-                    {errors.propertyOwnerName && (
-                      <p className="ml-1 text-[11px] font-semibold text-red-500">
-                        {errors.propertyOwnerName}
-                      </p>
                     )}
                   </div>
-                  <div className="space-y-2">
-                    <Label className="ml-1 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-                      Cédula
-                    </Label>
-                    <Input
-                      value={
-                        propertyContractOwnerOverrides[form.propertyId]
-                          ?.cedula ?? ""
-                      }
-                      onChange={(event) =>
-                        setPropertyContractOwnerOverride(form.propertyId, {
-                          cedula: event.target.value,
-                        })
-                      }
-                      placeholder="Número de documento"
-                      className={ownerFieldClass()}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="ml-1 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-                      Ciudad de expedición
-                    </Label>
-                    <Input
-                      value={
-                        propertyContractOwnerOverrides[form.propertyId]
-                          ?.ciudadCedula ?? ""
-                      }
-                      onChange={(event) =>
-                        setPropertyContractOwnerOverride(form.propertyId, {
-                          ciudadCedula: event.target.value,
-                        })
-                      }
-                      placeholder="Ej. Bogotá D.C."
-                      className={ownerFieldClass()}
-                    />
-                  </div>
-                </div>
-            ) : (
-              <p className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-4 text-sm text-zinc-500">
-                Primero selecciona una finca en el paso anterior.
-              </p>
-            )}
-            </>
-            )}
+                </>
+              )}
 
-            {step === 2 && (
-            <>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div className="space-y-2 md:col-span-2">
-                  <Label className={fieldLabelClass("contractNumber")}>
-                    Codigo contrato
-                  </Label>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <Input
-                      value={form.contractNumber}
-                      onChange={(event) =>
-                        setField("contractNumber", event.target.value)
-                      }
-                      placeholder="Ej: CFINCA-01 o DIR-FINCA-…"
-                      className={cn(fieldClass("contractNumber"), "sm:flex-1")}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className={formButtonClass}
-                      onClick={() => setCodeHistoryOpen(true)}
-                    >
-                      <History className="mr-2 h-4 w-4" />
-                      Ver historial
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("nightlyPrice")}>
-                    Valor por noche
-                  </Label>
-                  <CopMoneyInput
-                    value={form.nightlyPrice}
-                    onChange={handleNightlyPriceChange}
-                    className={fieldClass("nightlyPrice")}
-                    placeholder="0"
-                  />
-                  <p className="ml-1 text-[11px] font-medium text-zinc-400">
-                    Según tarifa y noches (o precio automático de la finca). Al
-                    cambiarlo, el total se recalcula abajo salvo que lo hayas
-                    editado manualmente.
-                  </p>
-                  {errors.nightlyPrice && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.nightlyPrice}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("checkInDate")}>
-                    Fecha entrada
-                  </Label>
-                  <Input
-                    type="date"
-                    value={form.checkInDate}
-                    onChange={(event) => {
-                      setField("checkInDate", event.target.value);
-                      setSeasonManual(false);
-                    }}
-                    className={fieldClass("checkInDate")}
-                  />
-                  {errors.checkInDate && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.checkInDate}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("checkOutDate")}>
-                    Fecha salida
-                  </Label>
-                  <Input
-                    type="date"
-                    min={form.checkInDate || undefined}
-                    value={form.checkOutDate}
-                    onChange={(event) => {
-                      setField("checkOutDate", event.target.value);
-                      setSeasonManual(false);
-                    }}
-                    className={fieldClass("checkOutDate")}
-                  />
-                  {errors.checkOutDate && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.checkOutDate}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("checkInTime")}>
-                    Hora check-in
-                  </Label>
-                  <Input
-                    list="contracts-time-options"
-                    value={form.checkInTime}
-                    onChange={(event) =>
-                      setField("checkInTime", event.target.value.toUpperCase())
-                    }
-                    placeholder="10:00 AM"
-                    className={fieldClass("checkInTime")}
-                  />
-                  <p className="ml-1 text-[11px] font-medium text-zinc-400">
-                    Puedes escribir la hora o elegir una sugerencia.
-                  </p>
-                  {errors.checkInTime && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.checkInTime}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("checkOutTime")}>
-                    Hora check-out
-                  </Label>
-                  <Input
-                    list="contracts-time-options"
-                    value={form.checkOutTime}
-                    onChange={(event) =>
-                      setField("checkOutTime", event.target.value.toUpperCase())
-                    }
-                    placeholder="04:00 PM"
-                    className={fieldClass("checkOutTime")}
-                  />
-                  <p className="ml-1 text-[11px] font-medium text-zinc-400">
-                    Puedes escribir la hora o elegir una sugerencia.
-                  </p>
-                  {errors.checkOutTime && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.checkOutTime}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("guests")}>
-                    Numero de huespedes
-                  </Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={form.guests}
-                    onChange={(event) => setField("guests", event.target.value)}
-                    className={fieldClass("guests")}
-                  />
-                  {errors.guests && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.guests}
-                    </p>
-                  )}
-                  {selectedProperty?.capacity != null &&
-                    selectedProperty.capacity > 0 && (
-                      <p className="ml-1 text-[11px] font-medium text-zinc-400">
-                        Capacidad declarada: {selectedProperty.capacity}{" "}
-                        personas
-                        {form.isEvento &&
-                        selectedProperty.eventCapacity != null &&
-                        selectedProperty.eventCapacity > 0
-                          ? ` · evento: ${selectedProperty.eventCapacity}`
-                          : ""}
-                      </p>
-                    )}
-                  <GuestCapacityWarningAlert message={guestCapacityWarning} />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("habitaciones")}>
-                    N° de habitaciones (opcional)
-                  </Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    inputMode="numeric"
-                    placeholder="Vacío = zonas Habitación N de la finca"
-                    value={form.habitaciones}
-                    onChange={(event) =>
-                      setField("habitaciones", event.target.value)
-                    }
-                    className={fieldClass("habitaciones")}
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    Si lo dejas vacío, el contrato cuenta las zonas Habitación
-                    1, 2… de la finca y las suma a las demás características.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("temporada")}>
-                    Temporada
-                  </Label>
-                  <Select
-                    value={form.temporada}
-                    onValueChange={(value) => {
-                      setField("temporada", value);
-                      setSeasonManual(true);
-                    }}
-                  >
-                    <SelectTrigger className={fieldClass("temporada")}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {seasonOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {errors.temporada && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.temporada}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("groupType")}>
-                    Tipo de Grupo
-                  </Label>
-                  <Select
-                    value={form.groupType}
-                    onValueChange={(value) => setField("groupType", value)}
-                  >
-                    <SelectTrigger className={fieldClass("groupType")}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="FAMILIAR">Familiar</SelectItem>
-                      <SelectItem value="AMIGOS">Amigos</SelectItem>
-                      <SelectItem value="EMPRESA">Empresa</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {errors.groupType && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.groupType}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </>
-            )}
-
-            {step === 3 && (
-            <>
-              <div className="grid gap-3">
-                <div className="rounded-xl border border-zinc-100 bg-white p-3">
-                  <div className="mb-2.5 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-bold text-zinc-950">
-                        Cargos por Mascotas
-                      </p>
-                      <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
-                        Primeras 2: deposito de $100k | 3ra en adelante: tarifa
-                        $30k
-                      </p>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
-                    >
-                      {canConfigurePetCharges
-                        ? propertyAllowsPets
-                          ? "Configurables"
-                          : "Temporalmente habilitadas"
-                        : "No permitidas"}
-                    </Badge>
-                  </div>
-
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <Label className={fieldLabelClass("petCount")}>
-                        Numero de mascotas
-                      </Label>
-                      <p className="mt-0.5 text-[11px] leading-snug text-zinc-500">
-                        {canConfigurePetCharges
-                          ? propertyAllowsPets
-                            ? "Define aqui el cargo que debe entrar al contrato antes de generar el PDF."
-                            : "Temporal: esta finca marcaba no permitidas, pero aqui puedes configurarlas manualmente."
-                          : "Esta finca no permite mascotas. Los cargos de mascotas se mantienen en 0."}
-                      </p>
-                      {errors.petCount && (
-                        <p className="mt-1 text-[11px] font-semibold text-red-500">
-                          {errors.petCount}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 rounded-full"
-                        disabled={
-                          !canConfigurePetCharges ||
-                          Number(form.petCount || 0) <= 0
-                        }
-                        onClick={() =>
-                          setField(
-                            "petCount",
-                            String(Math.max(0, Number(form.petCount || 0) - 1)),
-                          )
-                        }
-                      >
-                        <Minus className="h-4 w-4" />
-                      </Button>
-                      <div className="min-w-8 text-center text-sm font-bold">
-                        {form.petCount || "0"}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 rounded-full"
-                        disabled={!canConfigurePetCharges}
-                        onClick={() =>
-                          setField(
-                            "petCount",
-                            String(Number(form.petCount || 0) + 1),
-                          )
-                        }
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                {propertyServiceAvailable && (
-                  <div className="rounded-xl border border-zinc-100 bg-white p-3">
-                    <div className="mb-2.5 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-bold text-zinc-950">
-                          Personal de aseo / cocina
-                        </p>
-                        <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
-                          Se incluye en el resumen si la finca lo requiere
-                        </p>
-                      </div>
-                      {propertyServiceMandatory && (
-                        <Badge className="rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-700">
-                          Obligatorio
-                        </Badge>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:items-end">
-                      <Button
-                        type="button"
-                        variant={
-                          form.serviceStaffIncluded ? "default" : "outline"
-                        }
-                        className="h-11 w-full rounded-xl"
-                        disabled={propertyServiceMandatory}
-                        onClick={() =>
-                          setField(
-                            "serviceStaffIncluded",
-                            !form.serviceStaffIncluded,
-                          )
-                        }
-                      >
-                        {form.serviceStaffIncluded
-                          ? "No incluir servicio"
-                          : "Incluir servicio"}
-                      </Button>
-
-                      <div className="space-y-1.5">
-                        <Label className={fieldLabelClass("serviceStaffFee")}>
-                          Valor servicio
+              {step === 1 && (
+                <>
+                  {selectedProperty && form.propertyId ? (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div className="space-y-2 md:col-span-2">
+                        <Label className="ml-1 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Nombre completo del propietario *
                         </Label>
-                        <p className="ml-1 text-xs font-semibold text-zinc-500">
-                          Estado:{" "}
-                          {propertyServiceMandatory
-                            ? "Incluido obligatorio"
-                            : form.serviceStaffIncluded
-                              ? "Incluido"
-                              : "No incluido"}
-                        </p>
-                        <CopMoneyInput
-                          value={form.serviceStaffFee}
-                          onChange={(next) => setField("serviceStaffFee", next)}
-                          disabled={
-                            !form.serviceStaffIncluded &&
-                            !propertyServiceMandatory
+                        <Input
+                          value={
+                            propertyContractOwnerOverrides[form.propertyId]
+                              ?.nombreCompleto ?? ""
                           }
-                          className={fieldClass("serviceStaffFee")}
+                          onChange={(event) =>
+                            setPropertyContractOwnerOverride(form.propertyId, {
+                              nombreCompleto: event.target.value,
+                            })
+                          }
+                          placeholder={
+                            ownerResolved.name
+                              ? ownerResolved.name
+                              : "Ej. María Pérez"
+                          }
+                          className={ownerFieldClass(
+                            Boolean(errors.propertyOwnerName),
+                          )}
                         />
-                        {errors.serviceStaffFee && (
+                        {errors.propertyOwnerName && (
                           <p className="ml-1 text-[11px] font-semibold text-red-500">
-                            {errors.serviceStaffFee}
+                            {errors.propertyOwnerName}
                           </p>
                         )}
                       </div>
+                      <div className="space-y-2">
+                        <Label className="ml-1 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Cédula
+                        </Label>
+                        <Input
+                          value={
+                            propertyContractOwnerOverrides[form.propertyId]
+                              ?.cedula ?? ""
+                          }
+                          onChange={(event) =>
+                            setPropertyContractOwnerOverride(form.propertyId, {
+                              cedula: event.target.value,
+                            })
+                          }
+                          placeholder="Número de documento"
+                          className={ownerFieldClass()}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="ml-1 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Ciudad de expedición
+                        </Label>
+                        <Input
+                          value={
+                            propertyContractOwnerOverrides[form.propertyId]
+                              ?.ciudadCedula ?? ""
+                          }
+                          onChange={(event) =>
+                            setPropertyContractOwnerOverride(form.propertyId, {
+                              ciudadCedula: event.target.value,
+                            })
+                          }
+                          placeholder="Ej. Bogotá D.C."
+                          className={ownerFieldClass()}
+                        />
+                      </div>
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <p className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-4 text-sm text-zinc-500">
+                      Primero selecciona una finca en el paso anterior.
+                    </p>
+                  )}
+                </>
+              )}
 
-                <div className="rounded-xl border border-zinc-100 bg-white p-3">
-                  <div className="mb-2.5">
-                    <p className="text-xs font-bold text-zinc-950">
-                      Cargos adicionales al total del contrato
-                    </p>
-                    <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
-                      Manilla y otros cobros se suman al resumen de cobro y aparecen en el contrato antes de las firmas. El aseo se edita abajo en «Configuración del contrato».
-                    </p>
-                  </div>
+              {step === 2 && (
+                <>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label className={fieldLabelClass("manillaCondominio")}>
-                        Manilla condominio
+                    <div className="space-y-2 md:col-span-2">
+                      <Label className={fieldLabelClass("contractNumber")}>
+                        Codigo contrato
                       </Label>
-                      <CopMoneyInput
-                        value={form.manillaCondominio}
-                        onChange={(next) => setField("manillaCondominio", next)}
-                        className={fieldClass("manillaCondominio")}
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <Input
+                          value={form.contractNumber}
+                          onChange={(event) =>
+                            setField("contractNumber", event.target.value)
+                          }
+                          placeholder="Ej: CR 291 o CFINCA-01"
+                          className={cn(
+                            fieldClass("contractNumber"),
+                            "sm:flex-1",
+                          )}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className={formButtonClass}
+                          onClick={() => setCodeHistoryOpen(true)}
+                        >
+                          <History className="mr-2 h-4 w-4" />
+                          Ver historial
+                        </Button>
+                      </div>
+                      <ContractCodeSellerButtons
+                        onAssign={(code) => setField("contractNumber", code)}
                       />
-                      <p className="ml-1 text-[11px] text-zinc-500">
-                        En el contrato: bloque «Cargos adicionales acordados».
-                      </p>
                     </div>
-                    <div className="space-y-1.5 md:col-span-2">
-                      <Label className={fieldLabelClass("otherCharges")}>
-                        Otros cobros (no alojamiento)
+
+                    <div className="space-y-2">
+                      <Label className={fieldLabelClass("nightlyPrice")}>
+                        Valor por noche
                       </Label>
                       <CopMoneyInput
-                        value={form.otherCharges}
-                        onChange={(next) => setField("otherCharges", next)}
-                        className={fieldClass("otherCharges")}
+                        value={form.nightlyPrice}
+                        onChange={handleNightlyPriceChange}
+                        className={fieldClass("nightlyPrice")}
                         placeholder="0"
                       />
-                      <p className="ml-1 text-[11px] text-zinc-500">
-                        En el contrato: mismo bloque, línea «Otros cobros acordados».
+                      <p className="ml-1 text-[11px] font-medium text-zinc-400">
+                        Según tarifa y noches (o precio automático de la finca).
+                        Al cambiarlo, el total se recalcula abajo salvo que lo
+                        hayas editado manualmente.
                       </p>
+                      {errors.nightlyPrice && (
+                        <p className="ml-1 text-[11px] font-semibold text-red-500">
+                          {errors.nightlyPrice}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className={fieldLabelClass("checkInDate")}>
+                        Fecha entrada
+                      </Label>
+                      <Input
+                        type="date"
+                        min={localTodayYmd()}
+                        value={form.checkInDate}
+                        onChange={(event) => {
+                          setField("checkInDate", event.target.value);
+                          setSeasonManual(false);
+                        }}
+                        className={fieldClass("checkInDate")}
+                      />
+                      {errors.checkInDate && (
+                        <p className="ml-1 text-[11px] font-semibold text-red-500">
+                          {errors.checkInDate}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className={fieldLabelClass("checkOutDate")}>
+                        Fecha salida
+                      </Label>
+                      <Input
+                        type="date"
+                        min={
+                          form.checkInDate && form.checkInDate > localTodayYmd()
+                            ? form.checkInDate
+                            : localTodayYmd()
+                        }
+                        value={form.checkOutDate}
+                        onChange={(event) => {
+                          setField("checkOutDate", event.target.value);
+                          setSeasonManual(false);
+                        }}
+                        className={fieldClass("checkOutDate")}
+                      />
+                      {errors.checkOutDate && (
+                        <p className="ml-1 text-[11px] font-semibold text-red-500">
+                          {errors.checkOutDate}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className={fieldLabelClass("checkInTime")}>
+                        Hora check-in
+                      </Label>
+                      <Input
+                        list="contracts-time-options"
+                        value={form.checkInTime}
+                        onChange={(event) =>
+                          setField(
+                            "checkInTime",
+                            event.target.value.toUpperCase(),
+                          )
+                        }
+                        placeholder="10:00 AM"
+                        className={fieldClass("checkInTime")}
+                      />
+                      <p className="ml-1 text-[11px] font-medium text-zinc-400">
+                        Puedes escribir la hora o elegir una sugerencia.
+                      </p>
+                      {errors.checkInTime && (
+                        <p className="ml-1 text-[11px] font-semibold text-red-500">
+                          {errors.checkInTime}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className={fieldLabelClass("checkOutTime")}>
+                        Hora check-out
+                      </Label>
+                      <Input
+                        list="contracts-time-options"
+                        value={form.checkOutTime}
+                        onChange={(event) =>
+                          setField(
+                            "checkOutTime",
+                            event.target.value.toUpperCase(),
+                          )
+                        }
+                        placeholder="04:00 PM"
+                        className={fieldClass("checkOutTime")}
+                      />
+                      <p className="ml-1 text-[11px] font-medium text-zinc-400">
+                        Puedes escribir la hora o elegir una sugerencia.
+                      </p>
+                      {errors.checkOutTime && (
+                        <p className="ml-1 text-[11px] font-semibold text-red-500">
+                          {errors.checkOutTime}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className={fieldLabelClass("guests")}>
+                        Numero de huespedes
+                      </Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={form.guests}
+                        onChange={(event) =>
+                          setField("guests", event.target.value)
+                        }
+                        className={fieldClass("guests")}
+                      />
+                      {errors.guests && (
+                        <p className="ml-1 text-[11px] font-semibold text-red-500">
+                          {errors.guests}
+                        </p>
+                      )}
+                      {selectedProperty?.capacity != null &&
+                        selectedProperty.capacity > 0 && (
+                          <p className="ml-1 text-[11px] font-medium text-zinc-400">
+                            Capacidad declarada: {selectedProperty.capacity}{" "}
+                            personas
+                            {form.isEvento &&
+                            selectedProperty.eventCapacity != null &&
+                            selectedProperty.eventCapacity > 0
+                              ? ` · evento: ${selectedProperty.eventCapacity}`
+                              : ""}
+                          </p>
+                        )}
+                      <GuestCapacityWarningAlert
+                        message={guestCapacityWarning}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className={fieldLabelClass("habitaciones")}>
+                        N° de habitaciones (opcional)
+                      </Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        inputMode="numeric"
+                        placeholder="Vacío = zonas Habitación N de la finca"
+                        value={form.habitaciones}
+                        onChange={(event) =>
+                          setField("habitaciones", event.target.value)
+                        }
+                        className={fieldClass("habitaciones")}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Si lo dejas vacío, el contrato cuenta las zonas
+                        Habitación 1, 2… de la finca y las suma a las demás
+                        características.
+                      </p>
+                    </div>
+
+                    {seasonOptions.length > 1 ? (
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("temporada")}>
+                          Temporada
+                        </Label>
+                        <Select
+                          value={form.temporada}
+                          onValueChange={(value) => {
+                            setField("temporada", value);
+                            setSeasonManual(true);
+                          }}
+                        >
+                          <SelectTrigger className={fieldClass("temporada")}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {seasonOptions.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {errors.temporada && (
+                          <p className="ml-1 text-[11px] font-semibold text-red-500">
+                            {errors.temporada}
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-2">
+                      <Label className={fieldLabelClass("groupType")}>
+                        Tipo de Grupo
+                      </Label>
+                      <Select
+                        value={form.groupType}
+                        onValueChange={(value) => setField("groupType", value)}
+                      >
+                        <SelectTrigger className={fieldClass("groupType")}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="FAMILIAR">Familiar</SelectItem>
+                          <SelectItem value="AMIGOS">Amigos</SelectItem>
+                          <SelectItem value="EMPRESA">Empresa</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {errors.groupType && (
+                        <p className="ml-1 text-[11px] font-semibold text-red-500">
+                          {errors.groupType}
+                        </p>
+                      )}
                     </div>
                   </div>
-                </div>
+                </>
+              )}
 
-                <div className="rounded-xl border border-orange-400/40 bg-orange-500 p-3 text-white">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-xs font-bold text-white">
-                        ¿Es un Evento?
-                      </p>
-                      <p className="text-[10px] font-medium uppercase tracking-wider text-white/70">
-                        Define si el alquiler es para un evento
-                      </p>
-                    </div>
-                    <div
-                      className="flex shrink-0 rounded-xl bg-black/25 p-1"
-                      role="group"
-                      aria-label="Tipo de alquiler"
-                    >
-                      {(
-                        [
-                          { value: true, label: "SÍ, ES EVENTO" },
-                          { value: false, label: "NETAMENTE FAMILIAR" },
-                        ] as const
-                      ).map((option) => {
-                        const selected = form.isEvento === option.value;
-                        return (
-                          <button
-                            key={option.label}
+              {step === 3 && (
+                <>
+                  <div className="grid gap-3">
+                    <div className="rounded-xl border border-zinc-100 bg-white p-3">
+                      <div className="mb-2.5 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-bold text-zinc-950">
+                            Cargos por Mascotas
+                          </p>
+                          <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                            Primeras 2: deposito de $100k | 3ra en adelante:
+                            tarifa $30k
+                          </p>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                        >
+                          {canConfigurePetCharges
+                            ? propertyAllowsPets
+                              ? "Configurables"
+                              : "Temporalmente habilitadas"
+                            : "No permitidas"}
+                        </Badge>
+                      </div>
+
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <Label className={fieldLabelClass("petCount")}>
+                            Numero de mascotas
+                          </Label>
+                          <p className="mt-0.5 text-[11px] leading-snug text-zinc-500">
+                            {canConfigurePetCharges
+                              ? propertyAllowsPets
+                                ? "Define aqui el cargo que debe entrar al contrato antes de generar el PDF."
+                                : "Temporal: esta finca marcaba no permitidas, pero aqui puedes configurarlas manualmente."
+                              : "Esta finca no permite mascotas. Los cargos de mascotas se mantienen en 0."}
+                          </p>
+                          {errors.petCount && (
+                            <p className="mt-1 text-[11px] font-semibold text-red-500">
+                              {errors.petCount}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button
                             type="button"
-                            aria-pressed={selected}
-                            className={cn(
-                              "flex h-11 items-center rounded-lg px-3 text-[10px] font-bold transition-all sm:px-4 sm:text-xs",
-                              selected
-                                ? "bg-white text-orange-700 shadow-md"
-                                : "text-white/55 hover:text-white",
-                            )}
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9 rounded-full"
+                            disabled={
+                              !canConfigurePetCharges ||
+                              Number(form.petCount || 0) <= 0
+                            }
                             onClick={() =>
-                              setField("isEvento", option.value)
+                              setField(
+                                "petCount",
+                                String(
+                                  Math.max(0, Number(form.petCount || 0) - 1),
+                                ),
+                              )
                             }
                           >
-                            {option.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {form.isEvento && (
-                    <div className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-white/25 bg-orange-600/40 p-3 md:grid-cols-2">
-                      {[
-                        { id: "extraSound", label: "¿Sonido adicional?" },
-                        { id: "liveMusic", label: "¿Música en vivo?" },
-                        { id: "dj", label: "¿DJ?" },
-                        { id: "decoration", label: "¿Decoración?" },
-                        { id: "additionalGuests", label: "¿Invitados extra?" },
-                      ].map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between gap-3"
-                        >
-                          <Label className="text-xs font-bold text-white">
-                            {item.label}
-                          </Label>
-                          <div
-                            className="flex shrink-0 rounded-lg bg-black/25 p-0.5"
-                            role="group"
-                            aria-label={item.label}
+                            <Minus className="h-4 w-4" />
+                          </Button>
+                          <div className="min-w-8 text-center text-sm font-bold">
+                            {form.petCount || "0"}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9 rounded-full"
+                            disabled={!canConfigurePetCharges}
+                            onClick={() =>
+                              setField(
+                                "petCount",
+                                String(Number(form.petCount || 0) + 1),
+                              )
+                            }
                           >
-                            {["SI", "NO"].map((opt) => {
-                              const selected =
-                                form[item.id as keyof FormState] === opt;
-                              return (
-                                <button
-                                  key={opt}
-                                  type="button"
-                                  aria-pressed={selected}
-                                  className={cn(
-                                    "min-w-[40px] rounded-md px-3 py-1.5 text-[10px] font-bold transition-all",
-                                    selected
-                                      ? "bg-white text-orange-700 shadow-md"
-                                      : "text-white/55 hover:text-white",
-                                  )}
-                                  onClick={() =>
-                                    setField(item.id as any, opt)
-                                  }
-                                >
-                                  {opt}
-                                </button>
-                              );
-                            })}
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {propertyServiceAvailable && (
+                      <div className="rounded-xl border border-zinc-100 bg-white p-3">
+                        <div className="mb-2.5 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-bold text-zinc-950">
+                              Personal de aseo / cocina
+                            </p>
+                            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                              Se incluye en el resumen si la finca lo requiere
+                            </p>
+                          </div>
+                          {propertyServiceMandatory && (
+                            <Badge className="rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-700">
+                              Obligatorio
+                            </Badge>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:items-end">
+                          <Button
+                            type="button"
+                            variant={
+                              form.serviceStaffIncluded ? "default" : "outline"
+                            }
+                            className="h-11 w-full rounded-xl"
+                            disabled={propertyServiceMandatory}
+                            onClick={() =>
+                              setField(
+                                "serviceStaffIncluded",
+                                !form.serviceStaffIncluded,
+                              )
+                            }
+                          >
+                            {form.serviceStaffIncluded
+                              ? "No incluir servicio"
+                              : "Incluir servicio"}
+                          </Button>
+
+                          <div className="space-y-1.5">
+                            <Label
+                              className={fieldLabelClass("serviceStaffFee")}
+                            >
+                              Valor servicio
+                            </Label>
+                            <p className="ml-1 text-xs font-semibold text-zinc-500">
+                              Estado:{" "}
+                              {propertyServiceMandatory
+                                ? "Incluido obligatorio"
+                                : form.serviceStaffIncluded
+                                  ? "Incluido"
+                                  : "No incluido"}
+                            </p>
+                            <CopMoneyInput
+                              value={form.serviceStaffFee}
+                              onChange={(next) =>
+                                setField("serviceStaffFee", next)
+                              }
+                              disabled={
+                                !form.serviceStaffIncluded &&
+                                !propertyServiceMandatory
+                              }
+                              className={fieldClass("serviceStaffFee")}
+                            />
+                            {errors.serviceStaffFee && (
+                              <p className="ml-1 text-[11px] font-semibold text-red-500">
+                                {errors.serviceStaffFee}
+                              </p>
+                            )}
                           </div>
                         </div>
-                      ))}
+                      </div>
+                    )}
+
+                    <div className="rounded-xl border border-zinc-100 bg-white p-3">
+                      <div className="mb-2.5">
+                        <p className="text-xs font-bold text-zinc-950">
+                          Cargos adicionales al total del contrato
+                        </p>
+                        <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                          Manilla y otros cobros se suman al resumen de cobro y
+                          aparecen en el contrato antes de las firmas. El aseo
+                          se edita abajo en «Configuración del contrato».
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label
+                            className={fieldLabelClass("manillaCondominio")}
+                          >
+                            Manilla condominio
+                          </Label>
+                          <CopMoneyInput
+                            value={form.manillaCondominio}
+                            onChange={(next) =>
+                              setField("manillaCondominio", next)
+                            }
+                            className={fieldClass("manillaCondominio")}
+                          />
+                          <p className="ml-1 text-[11px] text-zinc-500">
+                            En el contrato: bloque «Cargos adicionales
+                            acordados».
+                          </p>
+                        </div>
+                        <div className="space-y-1.5 md:col-span-2">
+                          <Label className={fieldLabelClass("otherCharges")}>
+                            Otros cobros (no alojamiento)
+                          </Label>
+                          <CopMoneyInput
+                            value={form.otherCharges}
+                            onChange={(next) => setField("otherCharges", next)}
+                            className={fieldClass("otherCharges")}
+                            placeholder="0"
+                          />
+                          <p className="ml-1 text-[11px] text-zinc-500">
+                            En el contrato: mismo bloque, línea «Otros cobros
+                            acordados».
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-orange-400/40 bg-orange-500 p-3 text-white">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-xs font-bold text-white">
+                            ¿Es un Evento?
+                          </p>
+                          <p className="text-[10px] font-medium uppercase tracking-wider text-white/70">
+                            Define si el alquiler es para un evento
+                          </p>
+                        </div>
+                        <div
+                          className="flex shrink-0 rounded-xl bg-black/25 p-1"
+                          role="group"
+                          aria-label="Tipo de alquiler"
+                        >
+                          {(
+                            [
+                              { value: true, label: "SÍ, ES EVENTO" },
+                              { value: false, label: "NETAMENTE FAMILIAR" },
+                            ] as const
+                          ).map((option) => {
+                            const selected = form.isEvento === option.value;
+                            return (
+                              <button
+                                key={option.label}
+                                type="button"
+                                aria-pressed={selected}
+                                className={cn(
+                                  "flex h-11 items-center rounded-lg px-3 text-[10px] font-bold transition-all sm:px-4 sm:text-xs",
+                                  selected
+                                    ? "bg-white text-orange-700 shadow-md"
+                                    : "text-white/55 hover:text-white",
+                                )}
+                                onClick={() =>
+                                  setField("isEvento", option.value)
+                                }
+                              >
+                                {option.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {form.isEvento && (
+                        <div className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-white/25 bg-orange-600/40 p-3 md:grid-cols-2">
+                          {[
+                            { id: "extraSound", label: "¿Sonido adicional?" },
+                            { id: "liveMusic", label: "¿Música en vivo?" },
+                            { id: "dj", label: "¿DJ?" },
+                            { id: "decoration", label: "¿Decoración?" },
+                            {
+                              id: "additionalGuests",
+                              label: "¿Invitados extra?",
+                            },
+                          ].map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between gap-3"
+                            >
+                              <Label className="text-xs font-bold text-white">
+                                {item.label}
+                              </Label>
+                              <div
+                                className="flex shrink-0 rounded-lg bg-black/25 p-0.5"
+                                role="group"
+                                aria-label={item.label}
+                              >
+                                {["SI", "NO"].map((opt) => {
+                                  const selected =
+                                    form[item.id as keyof FormState] === opt;
+                                  return (
+                                    <button
+                                      key={opt}
+                                      type="button"
+                                      aria-pressed={selected}
+                                      className={cn(
+                                        "min-w-[40px] rounded-md px-3 py-1.5 text-[10px] font-bold transition-all",
+                                        selected
+                                          ? "bg-white text-orange-700 shadow-md"
+                                          : "text-white/55 hover:text-white",
+                                      )}
+                                      onClick={() =>
+                                        setField(item.id as any, opt)
+                                      }
+                                    >
+                                      {opt}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {step === 4 && (
+                <>
+                  {!isLinkMode && (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("clientFirstName")}>
+                          Nombres
+                        </Label>
+                        <Input
+                          value={form.clientFirstName}
+                          onChange={(event) =>
+                            setClientField(
+                              "clientFirstName",
+                              event.target.value,
+                            )
+                          }
+                          placeholder="NOMBRES"
+                          className={fieldClass("clientFirstName")}
+                        />
+                        {errors.clientFirstName && (
+                          <p className="ml-1 text-[11px] font-semibold text-red-500">
+                            {errors.clientFirstName}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("clientLastName")}>
+                          Apellidos
+                        </Label>
+                        <Input
+                          value={form.clientLastName}
+                          onChange={(event) =>
+                            setClientField("clientLastName", event.target.value)
+                          }
+                          placeholder="APELLIDOS"
+                          className={fieldClass("clientLastName")}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("clientDocType")}>
+                          Tipo documento
+                        </Label>
+                        <Select
+                          value={form.clientDocType || "CC"}
+                          onValueChange={(value) =>
+                            setField("clientDocType", value)
+                          }
+                        >
+                          <SelectTrigger
+                            className={fieldClass("clientDocType")}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CLIENT_DOC_TYPES.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("clientId")}>
+                          N° documento
+                        </Label>
+                        <Input
+                          value={form.clientId}
+                          onChange={(event) =>
+                            setClientField("clientId", event.target.value)
+                          }
+                          placeholder="—"
+                          className={fieldClass("clientId")}
+                        />
+                        {errors.clientId && (
+                          <p className="ml-1 text-[11px] font-semibold text-red-500">
+                            {errors.clientId}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("clientDocIssuedAt")}>
+                          Fecha expedición
+                        </Label>
+                        <Input
+                          type="date"
+                          value={form.clientDocIssuedAt}
+                          onChange={(event) =>
+                            setField("clientDocIssuedAt", event.target.value)
+                          }
+                          className={fieldClass("clientDocIssuedAt")}
+                        />
+                        {errors.clientDocIssuedAt && (
+                          <p className="ml-1 text-[11px] font-semibold text-red-500">
+                            {errors.clientDocIssuedAt}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("clientCity")}>
+                          Ciudad expedición
+                        </Label>
+                        <Input
+                          value={form.clientCity}
+                          onChange={(event) =>
+                            setClientField("clientCity", event.target.value)
+                          }
+                          placeholder="Ej. Bogotá"
+                          className={fieldClass("clientCity")}
+                        />
+                        <p className="ml-1 text-[11px] font-medium text-zinc-400">
+                          Aparece en el contrato después del número de cédula
+                          (DE …).
+                        </p>
+                        {errors.clientCity && (
+                          <p className="ml-1 text-[11px] font-semibold text-red-500">
+                            {errors.clientCity}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("clientPhone")}>
+                          Teléfono
+                        </Label>
+                        <Input
+                          value={form.clientPhone}
+                          onChange={(event) =>
+                            setClientField("clientPhone", event.target.value)
+                          }
+                          placeholder="—"
+                          className={fieldClass("clientPhone")}
+                        />
+                        {errors.clientPhone && (
+                          <p className="ml-1 text-[11px] font-semibold text-red-500">
+                            {errors.clientPhone}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("clientEmail")}>
+                          Correo
+                        </Label>
+                        <Input
+                          value={form.clientEmail}
+                          onChange={(event) =>
+                            setClientField("clientEmail", event.target.value)
+                          }
+                          placeholder="—"
+                          className={fieldClass("clientEmail")}
+                        />
+                        {errors.clientEmail && (
+                          <p className="ml-1 text-[11px] font-semibold text-red-500">
+                            {errors.clientEmail}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label className={fieldLabelClass("clientAddress")}>
+                          Dirección
+                        </Label>
+                        <Input
+                          value={form.clientAddress}
+                          onChange={(event) =>
+                            setClientField("clientAddress", event.target.value)
+                          }
+                          placeholder="—"
+                          className={fieldClass("clientAddress")}
+                        />
+                        {errors.clientAddress && (
+                          <p className="ml-1 text-[11px] font-semibold text-red-500">
+                            {errors.clientAddress}
+                          </p>
+                        )}
+                      </div>
+                      {(form.clientFirstName ||
+                        form.clientLastName ||
+                        form.clientName) && (
+                        <p className="md:col-span-2 text-[11px] text-zinc-500">
+                          En el contrato el nombre sale en mayúsculas:{" "}
+                          <span className="font-semibold text-zinc-800">
+                            {assembleClientFullName(
+                              form.clientFirstName,
+                              form.clientLastName,
+                              form.clientName,
+                            ).toUpperCase() || "—"}
+                          </span>
+                        </p>
+                      )}
                     </div>
                   )}
-                </div>
-              </div>
-            </>
-            )}
 
-            {step === 4 && (
-            <>
-            {!isLinkMode && (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("clientName")}>
-                    Nombre completo
-                  </Label>
-                  <Input
-                    value={form.clientName}
-                    onChange={(event) =>
-                      setClientField("clientName", event.target.value)
+                  <ContractGlobalSetupSections
+                    clausePreviewFincaData={reservationFincaPreviewData}
+                    reservationCleaningFee={form.cleaningFee}
+                    onReservationCleaningFeeChange={(digits) =>
+                      setField("cleaningFee", digits)
                     }
-                    className={fieldClass("clientName")}
+                    reservationSecurityDeposit={form.refundableDeposit}
+                    onReservationSecurityDepositChange={(digits) =>
+                      setField("refundableDeposit", digits)
+                    }
+                    reservationPetDepositCop={petDepositForCalc}
+                    reservationContractTotal={form.contractTotalInput}
+                    onReservationContractTotalChange={handleContractTotalChange}
+                    reservationSuggestedContractTotalCop={
+                      suggestedContractTotal
+                    }
+                    onReservationContractTotalUseSuggested={
+                      applySuggestedContractTotal
+                    }
+                    reservationContractTotalError={errors.contractTotalInput}
                   />
-                  {errors.clientName && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.clientName}
+                  {errors.bankAccounts && (
+                    <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">
+                      {errors.bankAccounts}
                     </p>
                   )}
-                </div>
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("clientId")}>
-                    Identificacion
-                  </Label>
-                  <Input
-                    value={form.clientId}
-                    onChange={(event) =>
-                      setClientField("clientId", event.target.value)
-                    }
-                    className={fieldClass("clientId")}
-                  />
-                  {errors.clientId && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.clientId}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("clientPhone")}>
-                    Celular / WhatsApp
-                  </Label>
-                  <Input
-                    value={form.clientPhone}
-                    onChange={(event) =>
-                      setClientField("clientPhone", event.target.value)
-                    }
-                    className={fieldClass("clientPhone")}
-                  />
-                  {errors.clientPhone && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.clientPhone}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("clientEmail")}>
-                    Correo electronico
-                  </Label>
-                  <Input
-                    value={form.clientEmail}
-                    onChange={(event) =>
-                      setClientField("clientEmail", event.target.value)
-                    }
-                    className={fieldClass("clientEmail")}
-                  />
-                  {errors.clientEmail && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.clientEmail}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("clientCity")}>
-                    Ciudad de expedición de cédula
-                  </Label>
-                  <Input
-                    value={form.clientCity}
-                    onChange={(event) =>
-                      setClientField("clientCity", event.target.value)
-                    }
-                    placeholder="Ej. Bogotá D.C."
-                    className={fieldClass("clientCity")}
-                  />
-                  <p className="ml-1 text-[11px] font-medium text-zinc-400">
-                    Aparece en el contrato después del número de cédula (DE …).
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label className={fieldLabelClass("clientAddress")}>
-                    Direccion
-                  </Label>
-                  <Input
-                    value={form.clientAddress}
-                    onChange={(event) =>
-                      setClientField("clientAddress", event.target.value)
-                    }
-                    className={fieldClass("clientAddress")}
-                  />
-                  {errors.clientAddress && (
-                    <p className="ml-1 text-[11px] font-semibold text-red-500">
-                      {errors.clientAddress}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
+                </>
+              )}
 
-            <ContractGlobalSetupSections
-              clausePreviewFincaData={reservationFincaPreviewData}
-              reservationCleaningFee={form.cleaningFee}
-              onReservationCleaningFeeChange={(digits) =>
-                setField("cleaningFee", digits)
-              }
-              reservationSecurityDeposit={form.refundableDeposit}
-              onReservationSecurityDepositChange={(digits) =>
-                setField("refundableDeposit", digits)
-              }
-              reservationPetDepositCop={petDepositForCalc}
-              reservationContractTotal={form.contractTotalInput}
-              onReservationContractTotalChange={handleContractTotalChange}
-              reservationSuggestedContractTotalCop={suggestedContractTotal}
-              onReservationContractTotalUseSuggested={applySuggestedContractTotal}
-              reservationContractTotalError={errors.contractTotalInput}
-            />
-            {errors.bankAccounts && (
-              <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">
-                {errors.bankAccounts}
-              </p>
-            )}
-            </>
-            )}
-
-            {step === 5 && (
-            <>
-              {!form.propertyId ? (
-                <p className="text-sm text-muted-foreground">
-                  Selecciona una finca para armar el contrato editable.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  <div className="rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-3">
-                    <p className="text-xs font-bold text-foreground">
-                      Vista previa editable (como Word)
+              {step === 5 && (
+                <>
+                  {!form.propertyId ? (
+                    <p className="text-sm text-muted-foreground">
+                      Selecciona una finca para armar el contrato editable.
                     </p>
-                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-                      Puedes corregir texto, tipografía y formato aquí. Al
-                      generar el contrato se usará esta versión editada.
-                      Si cambias datos en pasos anteriores, pulsa «Regenerar».
-                    </p>
-                  </div>
-                  <ContractWordEditor
-                    ref={wordEditorRef}
-                    propertyId={form.propertyId}
-                    payload={buildContractPayload(
-                      {
-                        ...form,
-                        petDeposit: String(petDepositTotal),
-                        petSurcharge: String(petSurchargeTotal),
-                        serviceStaffFee: form.serviceStaffIncluded
-                          ? String(serviceStaffTotal)
-                          : "0",
-                      },
-                      form.contractNumber.trim() || "BORRADOR",
-                    )}
-                    active={step === 5 && Boolean(form.propertyId)}
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-3">
+                        <p className="text-xs font-bold text-foreground">
+                          Vista previa editable (como Word)
+                        </p>
+                        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                          Puedes corregir texto, tipografía y formato aquí. Al
+                          generar el contrato se usará esta versión editada. Si
+                          cambias datos en pasos anteriores, pulsa «Regenerar».
+                        </p>
+                      </div>
+                      <ContractWordEditor
+                        ref={wordEditorRef}
+                        propertyId={form.propertyId}
+                        payload={buildContractPayload(
+                          {
+                            ...form,
+                            petDeposit: String(petDepositTotal),
+                            petSurcharge: String(petSurchargeTotal),
+                            serviceStaffFee: form.serviceStaffIncluded
+                              ? String(serviceStaffTotal)
+                              : "0",
+                          },
+                          form.contractNumber.trim() || "BORRADOR",
+                        )}
+                        active={step === 5 && Boolean(form.propertyId)}
                     documentKey={[
                       form.propertyId,
                       form.contractNumber,
                       form.nightlyPrice,
                       form.contractTotalInput,
+                      form.clientFirstName,
+                      form.clientLastName,
                       form.clientName,
                       form.clientId,
+                      form.clientDocType,
+                      form.clientDocIssuedAt,
                       form.clientEmail,
                       form.clientPhone,
                       form.clientCity,
@@ -3427,14 +3776,13 @@ export function ContractsReservationSection({
                       ownerResolved.name,
                       ownerResolved.cedula,
                     ].join("|")}
-                    onReadyChange={setWordEditorReady}
-                    heightClassName="h-[min(68vh,780px)]"
-                  />
-                </div>
+                        onReadyChange={setWordEditorReady}
+                        heightClassName="h-[min(68vh,780px)]"
+                      />
+                    </div>
+                  )}
+                </>
               )}
-            </>
-            )}
-
             </div>
 
             {/* ── Navegación (siempre al fondo) ──────────────────────── */}
@@ -3487,121 +3835,119 @@ export function ContractsReservationSection({
 
                 <div className="mt-2 space-y-2 border-t border-zinc-100/60 pt-2">
                   <div className="space-y-0 text-[11px]">
-                        <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
-                          <span className="font-medium text-zinc-500">
-                            Finca ({nochesResumenEs(nights)})
-                          </span>
-                          <span className="font-bold text-zinc-950">
-                            {money(staySubtotal)}
-                          </span>
-                        </div>
+                    <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
+                      <span className="font-medium text-zinc-500">
+                        Finca ({nochesResumenEs(nights)})
+                      </span>
+                      <span className="font-bold text-zinc-950">
+                        {money(staySubtotal)}
+                      </span>
+                    </div>
 
-                        {petDepositTotal > 0 && (
-                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
-                            <span className="font-bold text-emerald-600">
-                              Deposito mascotas
-                            </span>
-                            <span className="font-bold text-emerald-600">
-                              + {money(petDepositTotal)}
-                            </span>
-                          </div>
-                        )}
-
-                        {petSurchargeTotal > 0 && (
-                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
-                            <span className="font-medium italic text-zinc-500">
-                              Tarifa ingreso mascotas (3ª+)
-                            </span>
-                            <span className="font-bold text-zinc-950">
-                              + {money(petSurchargeTotal)}
-                            </span>
-                          </div>
-                        )}
-
-                        {petCleaningTotal > 0 && (
-                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
-                            <span className="font-medium text-zinc-500">
-                              Aseo por mascotas (3+)
-                            </span>
-                            <span className="font-bold text-zinc-950">
-                              + {money(petCleaningTotal)}
-                            </span>
-                          </div>
-                        )}
-
-                        {serviceStaffTotal > 0 && (
-                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
-                            <span className="font-medium text-indigo-600">
-                              Personal de servicio (sujeto a disponibilidad)
-                            </span>
-                            <span className="font-bold text-indigo-600">
-                              + {money(serviceStaffTotal)}
-                            </span>
-                          </div>
-                        )}
-
-                        {Number(form.cleaningFee || 0) > 0 && (
-                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
-                            <span className="font-medium text-zinc-500">
-                              Aseo final (propiedad)
-                            </span>
-                            <span className="font-bold text-zinc-950">
-                              + {money(Number(form.cleaningFee || 0))}
-                            </span>
-                          </div>
-                        )}
-
-                        {Number(form.refundableDeposit || 0) > 0 && (
-                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
-                            <span className="font-medium text-zinc-500">
-                              Depósito por daños
-                            </span>
-                            <span className="font-bold text-zinc-950">
-                              + {money(Number(form.refundableDeposit || 0))}
-                            </span>
-                          </div>
-                        )}
-
-                        {Number(form.manillaCondominio || 0) > 0 && (
-                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
-                            <span className="font-medium text-zinc-500">
-                              Manilla condominio
-                            </span>
-                            <span className="font-bold text-zinc-950">
-                              + {money(Number(form.manillaCondominio || 0))}
-                            </span>
-                          </div>
-                        )}
-
-                        {Number(form.otherCharges || 0) > 0 && (
-                          <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
-                            <span className="font-medium text-zinc-500">
-                              Otros cobros
-                            </span>
-                            <span className="font-bold text-zinc-950">
-                              + {money(Number(form.otherCharges || 0))}
-                            </span>
-                          </div>
-                        )}
+                    {petDepositTotal > 0 && (
+                      <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
+                        <span className="font-bold text-emerald-600">
+                          Deposito mascotas
+                        </span>
+                        <span className="font-bold text-emerald-600">
+                          + {money(petDepositTotal)}
+                        </span>
                       </div>
+                    )}
 
-                      <div className="rounded-xl border border-primary/25 bg-primary p-2.5 text-primary-foreground shadow-sm">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <p className="text-[8px] font-bold uppercase tracking-wider text-primary-foreground/70">
-                              Total contrato
-                            </p>
-                            <p className="mt-0.5 text-lg font-semibold tracking-tight text-primary-foreground">
-                              {contractTotal > 0
-                                ? money(contractTotal)
-                                : "—"}
-                            </p>
-                          </div>
-                          <div className="rounded-lg bg-primary-foreground/15 p-1 text-primary-foreground">
-                            <CreditCard className="h-4 w-4" />
-                          </div>
-                        </div>
+                    {petSurchargeTotal > 0 && (
+                      <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
+                        <span className="font-medium italic text-zinc-500">
+                          Tarifa ingreso mascotas (3ª+)
+                        </span>
+                        <span className="font-bold text-zinc-950">
+                          + {money(petSurchargeTotal)}
+                        </span>
                       </div>
+                    )}
+
+                    {petCleaningTotal > 0 && (
+                      <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
+                        <span className="font-medium text-zinc-500">
+                          Aseo por mascotas (3+)
+                        </span>
+                        <span className="font-bold text-zinc-950">
+                          + {money(petCleaningTotal)}
+                        </span>
+                      </div>
+                    )}
+
+                    {serviceStaffTotal > 0 && (
+                      <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
+                        <span className="font-medium text-indigo-600">
+                          Personal de servicio (sujeto a disponibilidad)
+                        </span>
+                        <span className="font-bold text-indigo-600">
+                          + {money(serviceStaffTotal)}
+                        </span>
+                      </div>
+                    )}
+
+                    {Number(form.cleaningFee || 0) > 0 && (
+                      <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
+                        <span className="font-medium text-zinc-500">
+                          Aseo final (propiedad)
+                        </span>
+                        <span className="font-bold text-zinc-950">
+                          + {money(Number(form.cleaningFee || 0))}
+                        </span>
+                      </div>
+                    )}
+
+                    {Number(form.refundableDeposit || 0) > 0 && (
+                      <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
+                        <span className="font-medium text-zinc-500">
+                          Depósito por daños
+                        </span>
+                        <span className="font-bold text-zinc-950">
+                          + {money(Number(form.refundableDeposit || 0))}
+                        </span>
+                      </div>
+                    )}
+
+                    {Number(form.manillaCondominio || 0) > 0 && (
+                      <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
+                        <span className="font-medium text-zinc-500">
+                          Manilla condominio
+                        </span>
+                        <span className="font-bold text-zinc-950">
+                          + {money(Number(form.manillaCondominio || 0))}
+                        </span>
+                      </div>
+                    )}
+
+                    {Number(form.otherCharges || 0) > 0 && (
+                      <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
+                        <span className="font-medium text-zinc-500">
+                          Otros cobros
+                        </span>
+                        <span className="font-bold text-zinc-950">
+                          + {money(Number(form.otherCharges || 0))}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-primary/25 bg-primary p-2.5 text-primary-foreground shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[8px] font-bold uppercase tracking-wider text-primary-foreground/70">
+                          Total contrato
+                        </p>
+                        <p className="mt-0.5 text-lg font-semibold tracking-tight text-primary-foreground">
+                          {contractTotal > 0 ? money(contractTotal) : "—"}
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-primary-foreground/15 p-1 text-primary-foreground">
+                        <CreditCard className="h-4 w-4" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="mt-3 shrink-0 space-y-2 border-t border-zinc-100/60 pt-3">
@@ -3614,7 +3960,8 @@ export function ContractsReservationSection({
                     </Badge>
                     {!isLinkMode && contractSnapshotSaved && (
                       <Badge className="rounded-full border-0 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                        <CheckCircle2 className="mr-1 h-3 w-3" /> Borrador guardado (confirmar pago)
+                        <CheckCircle2 className="mr-1 h-3 w-3" /> Borrador
+                        guardado (confirmar pago)
                       </Badge>
                     )}
                     {isLinkMode && generatedLink && (
@@ -3624,36 +3971,7 @@ export function ContractsReservationSection({
                     )}
                   </div>
 
-                  {firmantes.length > 0 ? (
-                    <div className="mb-2">
-                      <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                        Firma del contrato
-                      </label>
-                      <select
-                        value={selectedFirmante?.id ?? ""}
-                        onChange={(e) => setSelectedFirmanteId(e.target.value)}
-                        className={cn(formControlClass, "h-10 border-zinc-200 bg-white px-2.5 text-xs dark:border-zinc-700 dark:bg-zinc-900")}
-                      >
-                        {firmantes.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.nombre}
-                            {f.cedula ? ` · C.C. ${f.cedula}` : ""}
-                            {f.esDefault ? " (por defecto)" : ""}
-                          </option>
-                        ))}
-                      </select>
-                      {selectedFirmante && !selectedFirmante.firmaUrl ? (
-                        <p className="mt-1 text-[10px] text-amber-600">
-                          Este firmante no tiene imagen de firma cargada.
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] leading-snug text-amber-700">
-                      No hay firmantes configurados. Agrégalos en Ajustes del
-                      contrato → Firmantes.
-                    </p>
-                  )}
+                  {/* Selector de firmante oculto por ahora; se usa el default al generar. */}
 
                   {isLinkMode ? (
                     <>
@@ -3680,51 +3998,52 @@ export function ContractsReservationSection({
                         )}
                       </Button>
                       <p className="text-center text-[9px] font-bold uppercase leading-snug tracking-wider text-zinc-400">
-                        El cliente completará sus datos y descargará el PDF para firmarlo
+                        El cliente completará sus datos y descargará el PDF para
+                        firmarlo
                       </p>
                     </>
                   ) : (
                     <>
-                  <Button
-                    type="button"
-                    className="h-10 w-full rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-md transition-all hover:bg-primary/90 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      void generateContractAndReserve();
-                    }}
-                    disabled={loadingGenerate}
-                  >
-                    {loadingGenerate ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />{" "}
-                        Generando...
-                      </>
-                    ) : wordEditorReady ? (
-                      "Generar contrato editado"
-                    ) : (
-                      "Generar contrato"
-                    )}
-                  </Button>
+                      <Button
+                        type="button"
+                        className="h-10 w-full rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-md transition-all hover:bg-primary/90 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void generateContractAndReserve();
+                        }}
+                        disabled={loadingGenerate}
+                      >
+                        {loadingGenerate ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />{" "}
+                            Generando...
+                          </>
+                        ) : wordEditorReady ? (
+                          "Generar contrato editado"
+                        ) : (
+                          "Generar contrato"
+                        )}
+                      </Button>
 
-                  {!wordEditorReady && form.propertyId ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-10 w-full rounded-xl border-primary/30 bg-primary/5 text-xs font-bold text-primary hover:bg-primary/10"
-                      onClick={() => setStep(5)}
-                    >
-                      <PenLine className="mr-2 h-4 w-4" />
-                      Ir a editar (Word)
-                    </Button>
-                  ) : null}
+                      {!wordEditorReady && form.propertyId ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-10 w-full rounded-xl border-primary/30 bg-primary/5 text-xs font-bold text-primary hover:bg-primary/10"
+                          onClick={() => setStep(5)}
+                        >
+                          <PenLine className="mr-2 h-4 w-4" />
+                          Ir a editar (Word)
+                        </Button>
+                      ) : null}
 
-                  <p className="text-center text-[9px] font-bold uppercase leading-snug tracking-wider text-zinc-400">
-                    {wordEditorReady
-                      ? "Usará el contrato editado del paso Editar."
-                      : "Ve al paso Editar para revisar el Word antes de generar."}{" "}
-                    Usa «Confirmar pago» cuando el cliente haya abonado.
-                  </p>
+                      <p className="text-center text-[9px] font-bold uppercase leading-snug tracking-wider text-zinc-400">
+                        {wordEditorReady
+                          ? "Usará el contrato editado del paso Editar."
+                          : "Ve al paso Editar para revisar el Word antes de generar."}{" "}
+                        Usa «Confirmar pago» cuando el cliente haya abonado.
+                      </p>
                     </>
                   )}
                 </div>
@@ -3801,7 +4120,8 @@ export function ContractsReservationSection({
                         className="h-11 w-full rounded-xl bg-[#25D366] font-bold text-white hover:bg-[#1ebe57]"
                         onClick={shareGeneratedLinkWhatsApp}
                       >
-                        <MessageCircle className="mr-2 h-4 w-4" /> Compartir por WhatsApp
+                        <MessageCircle className="mr-2 h-4 w-4" /> Compartir por
+                        WhatsApp
                       </Button>
                     </div>
                   </div>

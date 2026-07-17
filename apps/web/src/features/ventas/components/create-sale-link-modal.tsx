@@ -36,6 +36,9 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  SaleLinkCheckinOptions,
+} from "./sale-link-checkin-options";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { cn, formatPriceInput, parseCOP } from "@/lib/utils";
@@ -68,6 +71,7 @@ import {
   type BankAccount,
 } from "@/features/admin/store/contract-settings.store";
 import { BankAccountDialog } from "@/features/admin/components/contracts/bank-account-dialog";
+import { ContractCodeSellerButtons } from "@/features/admin/components/contracts/contract-code-seller-buttons";
 import { BankLogoBadge } from "@/features/checkin/components/bank-logo-badge";
 import { splitGlobalHolders } from "../utils/payment-holder-groups";
 import { createSaleLink } from "../api/sale-links.api";
@@ -101,6 +105,9 @@ const schema = z
     generateBoldLink: z.boolean(),
     selectedBankAccountIds: z.array(z.string()),
     notes: z.string(),
+    checkinClientPaymentProofUploadEnabled: z.boolean(),
+    checkinGuestListUnlocked: z.boolean(),
+    checkinOwnerShareGuestList: z.boolean(),
   })
   .superRefine((data, ctx) => {
     if (!data.checkIn) {
@@ -166,6 +173,9 @@ const DEFAULT_VALUES: FormValues = {
   generateBoldLink: true,
   selectedBankAccountIds: [],
   notes: "",
+  checkinClientPaymentProofUploadEnabled: true,
+  checkinGuestListUnlocked: false,
+  checkinOwnerShareGuestList: true,
 };
 
 interface Props {
@@ -749,6 +759,10 @@ export function CreateSaleLinkModal({
         portalOrigin: window.location.origin,
         selectedBankAccountIds: values.selectedBankAccountIds,
         notes: values.notes || undefined,
+        checkinClientPaymentProofUploadEnabled:
+          values.checkinClientPaymentProofUploadEnabled,
+        checkinGuestListUnlocked: values.checkinGuestListUnlocked,
+        checkinOwnerShareGuestList: values.checkinOwnerShareGuestList,
       });
 
       const saleUrl = `${window.location.origin}/venta/${result.token}`;
@@ -1110,7 +1124,7 @@ export function CreateSaleLinkModal({
                   <FormLabel>Codificación (CR / contrato) *</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="Ej: 2656, V-A0523, C1123"
+                      placeholder="Ej: CR 291, CRA 12"
                       {...field}
                       value={field.value ?? ""}
                       onChange={(e) =>
@@ -1119,9 +1133,13 @@ export function CreateSaleLinkModal({
                       className="font-semibold tracking-wide"
                     />
                   </FormControl>
+                  <ContractCodeSellerButtons
+                    onAssign={(code) => field.onChange(code)}
+                  />
                   <p className="text-[11px] text-muted-foreground">
-                    Este código se usa en el contrato, la CR y la reserva. No se
-                    genera automáticamente.
+                    Usa las iniciales del vendedor para el siguiente número, o
+                    escríbelo a mano. Este código va en el contrato, la CR y la
+                    reserva.
                   </p>
                   <FormMessage />
                 </FormItem>
@@ -1573,6 +1591,46 @@ export function CreateSaleLinkModal({
                   </span>
                 </div>
               ) : null}
+            </section>
+
+            <Separator />
+
+            {/* Opciones de check-in (mismas que al enviar /checkin) */}
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight">
+                  Check-in del cliente
+                </h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Qué ve el turista cuando llega al paso de check-in del link.
+                </p>
+              </div>
+              <SaleLinkCheckinOptions
+                value={{
+                  checkinClientPaymentProofUploadEnabled:
+                    form.watch("checkinClientPaymentProofUploadEnabled"),
+                  checkinGuestListUnlocked: form.watch(
+                    "checkinGuestListUnlocked",
+                  ),
+                  checkinOwnerShareGuestList: form.watch(
+                    "checkinOwnerShareGuestList",
+                  ),
+                }}
+                onChange={(next) => {
+                  form.setValue(
+                    "checkinClientPaymentProofUploadEnabled",
+                    next.checkinClientPaymentProofUploadEnabled,
+                  );
+                  form.setValue(
+                    "checkinGuestListUnlocked",
+                    next.checkinGuestListUnlocked,
+                  );
+                  form.setValue(
+                    "checkinOwnerShareGuestList",
+                    next.checkinOwnerShareGuestList,
+                  );
+                }}
+              />
             </section>
 
             <Separator />

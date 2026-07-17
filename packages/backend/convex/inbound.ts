@@ -522,6 +522,10 @@ export const ingestInboundMessage = internalMutation({
       lastMessageAt: now,
       inboxUnreadCount: (conversation.inboxUnreadCount ?? 0) + 1,
       ...(conversation.archived ? { archived: false } : {}),
+      // Finca de referencia pegajosa: el cliente llegó/preguntó desde una ficha.
+      ...(pickRetailerId
+        ? { lastReferredRetailerId: pickRetailerId, lastReferredAt: now }
+        : {}),
     });
 
     // Nota de voz del cliente cuando ya lo atiende un HUMANO (status !== 'ai'):
@@ -736,24 +740,32 @@ export const ingestInboundMessage = internalMutation({
         );
       }
 
-      // NUEVO + fuera de horario: tras la atención del bot, enviar el cierre
-      // (una sola vez). No en el PRIMER mensaje (la bienvenida) para no
-      // contradecir. El precheck evita duplicados y respeta si un humano toma.
-      if (
-        fueraDeHorario &&
-        !esRecurrente &&
-        !isNewConversation &&
-        !(
-          conversation.outOfHoursClosingSentAt != null &&
-          now - conversation.outOfHoursClosingSentAt < OUT_OF_HOURS_DEDUP_MS
-        )
-      ) {
-        await ctx.scheduler.runAfter(
-          AGENT_DEBOUNCE_MS + 12000,
-          internal.businessHours.sendOutOfHoursClosing,
-          { conversationId: conversation._id },
-        );
-      }
+    }
+
+    // NUEVO + fuera de horario: el cierre SOLO cuando el flujo ya llegó a
+    // "opciones entregadas" (catálogo enviado antes o ya escalado) y el cliente
+    // VUELVE a escribir. Nunca pegado al catálogo ni en pleno perfilamiento —
+    // se veía feo: catálogo y de una "no necesitas escribir más" (queja real).
+    // Sale después de la respuesta del bot a este mensaje; el precheck evita
+    // duplicados y respeta si un Experto ya escribió.
+    const flujoRematado =
+      (conversation.lastSentCatalogPropertyIds?.length ?? 0) > 0 ||
+      conversation.status === 'human';
+    if (
+      fueraDeHorario &&
+      !esRecurrente &&
+      !isNewConversation &&
+      flujoRematado &&
+      !(
+        conversation.outOfHoursClosingSentAt != null &&
+        now - conversation.outOfHoursClosingSentAt < OUT_OF_HOURS_DEDUP_MS
+      )
+    ) {
+      await ctx.scheduler.runAfter(
+        AGENT_DEBOUNCE_MS + 12000,
+        internal.businessHours.sendOutOfHoursClosing,
+        { conversationId: conversation._id },
+      );
     }
     return { duplicate: false };
   },

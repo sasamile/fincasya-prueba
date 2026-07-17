@@ -13,7 +13,9 @@ import {
   internalMutation,
   internalQuery,
 } from './_generated/server';
+import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
+import { formatScheduleText, isOutOfHours } from './lib/businessHours';
 import type { Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import {
@@ -89,6 +91,18 @@ type AgentContext = {
    * ya atendió y ahora quiere que el bot continúe la conversación.
    */
   aiManualOverride: boolean;
+  /**
+   * FINCA DE REFERENCIA: el cliente llegó (o preguntó) desde la ficha de UNA
+   * finca puntual (mensaje tipo product con productRetailerId). Mientras
+   * exista, la venta gira alrededor de ESA finca: nada de catálogo de otras
+   * opciones, salvo que el cliente las pida o su grupo no quepa.
+   */
+  fincaConsultada: {
+    finca: string;
+    capacidad: number;
+    /** DESPUÉS de la ficha, el cliente pidió ver otras/más opciones. */
+    pidioOtrasOpciones: boolean;
+  } | null;
 };
 
 type FincaResult = {
@@ -134,6 +148,21 @@ function addDaysIso(iso: string, days: number): string | null {
   const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * ¿El cliente pidió ver OTRAS/MÁS opciones? (después de llegar por una finca
+ * puntual). Incluye "más barato/económico": pedir algo más barato es pedir
+ * alternativas.
+ */
+function pideMasOpciones(text: string): boolean {
+  const t = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  return /(otra finca|otras fincas|otra opcion|otras opciones|opciones|alternativ|diferente|mas fincas|mas casas|mas propiedades|que mas (tienes|hay|manejan)|ver mas|muestrame|muestreme|ensename|mas barat|mas economic)/.test(
+    t,
+  );
 }
 
 /** "YYYY-MM-DD" → "martes 21 de julio" (es-CO). */
@@ -195,6 +224,51 @@ export const getAgentContext = internalQuery({
       .withIndex('by_contact', (q) => q.eq('contactId', conversation.contactId))
       .collect();
     const returning = allConvs.some((c) => c._id !== conversationId);
+
+    // FINCA DE REFERENCIA: el mensaje MÁS RECIENTE del cliente que vino de una
+    // ficha (metadata.productRetailerId) manda. Si después de esa ficha pidió
+    // "otras opciones", el candado del catálogo se levanta. Fallback: el campo
+    // pegajoso de la conversación (por si la ficha ya salió de la ventana de
+    // historial).
+    let fincaConsultada: AgentContext['fincaConsultada'] = null;
+    let refRetailerId: string | null = null;
+    let refCreatedAt = 0;
+    for (const m of ordered) {
+      if (m.sender !== 'user' || m.deletedAt) continue;
+      const rid = (m.metadata as { productRetailerId?: string } | null)
+        ?.productRetailerId;
+      if (rid?.trim()) {
+        refRetailerId = rid.trim();
+        refCreatedAt = m.createdAt;
+      }
+    }
+    if (!refRetailerId && conversation.lastReferredRetailerId) {
+      refRetailerId = conversation.lastReferredRetailerId;
+      refCreatedAt = conversation.lastReferredAt ?? 0;
+    }
+    if (refRetailerId) {
+      const mapping = await ctx.db
+        .query('propertyWhatsAppCatalog')
+        .withIndex('by_retailer', (q) =>
+          q.eq('productRetailerId', refRetailerId),
+        )
+        .first();
+      const prop = mapping ? await ctx.db.get(mapping.propertyId) : null;
+      if (prop) {
+        const pidioOtrasOpciones = ordered.some(
+          (m) =>
+            m.sender === 'user' &&
+            !m.deletedAt &&
+            m.createdAt > refCreatedAt &&
+            pideMasOpciones(m.content),
+        );
+        fincaConsultada = {
+          finca: prop.title,
+          capacidad: prop.capacity,
+          pidioOtrasOpciones,
+        };
+      }
+    }
     return {
       status: conversation.status,
       contactPhone: contact?.phone ?? '',
@@ -206,6 +280,7 @@ export const getAgentContext = internalQuery({
       lastRequestedZone: conversation.lastRequestedZone ?? null,
       humanHandling,
       aiManualOverride: conversation.aiManualOverride === true,
+      fincaConsultada,
     };
   },
 });
@@ -1122,6 +1197,33 @@ function buildPriceHandoffReply(contactName: string): string {
     : `¡Claro que sí! Un Experto de nuestro equipo te confirma el valor exacto y los detalles de la finca 🤝✨`;
 }
 
+/**
+ * FUERA DE HORARIO: las despedidas de escalado prometen "en breve" o "de
+ * inmediato" — de noche eso es falso (queja real: interés de compra a las
+ * 8:19 p.m. respondido con "un Experto te atenderá en breve"). Si el
+ * comportamiento de fuera de horario está activo y aplica, la despedida se
+ * REEMPLAZA por el cierre oficial de fuera de servicio (promete la próxima
+ * jornada laboral) y se marca como enviado para que no se duplique después.
+ * En horario normal devuelve null y la despedida sale tal cual.
+ */
+async function outOfHoursHandoffOverride(
+  ctx: ActionCtx,
+  conversationId: Id<'conversations'>,
+): Promise<string | null> {
+  try {
+    const s = await ctx.runQuery(internal.businessHours.getSettingsInternal, {});
+    if (!s.enabled || !isOutOfHours(Date.now(), s.schedule)) return null;
+    await ctx.runMutation(internal.businessHours.markClosingSent, {
+      conversationId,
+    });
+    return `${s.newClosingMsg}\n\n${formatScheduleText(s.schedule)}`;
+  } catch (err) {
+    // Si la config falla, mejor la despedida normal que dejar sin respuesta.
+    console.error('[agent] fallo el override de fuera de horario', err);
+    return null;
+  }
+}
+
 export const runAgentTurn = internalAction({
   args: {
     conversationId: v.id('conversations'),
@@ -1182,7 +1284,9 @@ export const runAgentTurn = internalAction({
         conversationId,
         motivo: priceLoopMotivo,
       });
-      const handoff = buildPriceHandoffReply(context.contactName);
+      const handoff =
+        (await outOfHoursHandoffOverride(ctx, conversationId)) ??
+        buildPriceHandoffReply(context.contactName);
       let handoffWamid: string | undefined;
       if (context.contactPhone) {
         try {
@@ -1210,9 +1314,11 @@ export const runAgentTurn = internalAction({
     const overloadMotivo = detectQuestionOverload(context.history, last.content);
     if (overloadMotivo) {
       const formal = formalSalutationName(context.contactName ?? undefined);
-      const overloadText = formal
-        ? `¡Listo, ${formal}! Para brindarte una atención más personalizada, te vamos a escalar con un Experto del equipo para que continúe contigo y resuelva todas tus dudas 🤝✨`
-        : `¡Listo! Para brindarte una atención más personalizada, te vamos a escalar con un Experto del equipo para que continúe contigo y resuelva todas tus dudas 🤝✨`;
+      const overloadText =
+        (await outOfHoursHandoffOverride(ctx, conversationId)) ??
+        (formal
+          ? `¡Listo, ${formal}! Para brindarte una atención más personalizada, te vamos a escalar con un Experto del equipo para que continúe contigo y resuelva todas tus dudas 🤝✨`
+          : `¡Listo! Para brindarte una atención más personalizada, te vamos a escalar con un Experto del equipo para que continúe contigo y resuelva todas tus dudas 🤝✨`);
       let overloadWamid: string | undefined;
       if (context.contactPhone) {
         try {
@@ -1250,7 +1356,9 @@ export const runAgentTurn = internalAction({
       /product_retailer_id/i.test(last.content) ||
       /seleccion[oó].*(cat[aá]logo|finca)/i.test(last.content);
     if (isCatalogPick) {
-      const handoffText = buildPropertySelectionHandoff(context.contactName);
+      const handoffText =
+        (await outOfHoursHandoffOverride(ctx, conversationId)) ??
+        buildPropertySelectionHandoff(context.contactName);
       let handoffWamid: string | undefined;
       if (context.contactPhone) {
         try {
@@ -1285,7 +1393,9 @@ export const runAgentTurn = internalAction({
       /\bc[oó]digo\s+de\s+reserva\b/i.test(last.content) ||
       /\btengo\s+(mi\s+|una\s+)?reserva\s+(confirmada|lista|hecha|activa)\b/i.test(last.content);
     if (isExistingBookingRef) {
-      const reservaHandoff = `Un Experto de nuestro equipo revisará tu reserva y te atenderá de inmediato. ⏳🙏`;
+      const reservaHandoff =
+        (await outOfHoursHandoffOverride(ctx, conversationId)) ??
+        `Un Experto de nuestro equipo revisará tu reserva y te atenderá de inmediato. ⏳🙏`;
       let reservaWamid: string | undefined;
       if (context.contactPhone) {
         try {
@@ -1389,6 +1499,20 @@ export const runAgentTurn = internalAction({
           : { role: 'assistant', content: m.content },
       ),
     ];
+    // FINCA DE REFERENCIA: el cliente vino por UNA finca (ficha del catálogo).
+    // Regla situacional DURA — el flujo genérico de "fechas+personas → catálogo"
+    // NO aplica: la venta gira alrededor de esa finca (queja real del equipo:
+    // el bot mandaba otras opciones a quien ya sabía qué finca quería).
+    if (context.fincaConsultada && !context.fincaConsultada.pidioOtrasOpciones) {
+      const fc = context.fincaConsultada;
+      messages.splice(1, 0, {
+        role: 'system',
+        content: `FINCA DE REFERENCIA — EL CLIENTE VINO POR UNA FINCA PUNTUAL: «${fc.finca}» (capacidad máxima ${fc.capacidad} personas). TODO gira alrededor de ESA finca:
+- Perfila fechas y personas normal, pero SIEMPRE hablando de esa finca; PROHIBIDO ofrecer "opciones para tu grupo" o enviar catálogo de otras fincas.
+- Si pregunta PRECIO, TARIFA o DISPONIBILIDAD: NO des cifras ni promesas — llama escalar_a_humano EN ESE MISMO TURNO (motivo: "cliente vino por ${fc.finca} — experto cotiza y confirma disponibilidad") y cierra con calidez: un Experto le confirma el valor exacto para sus fechas.
+- SOLO se envían otras opciones (enviar_catalogo) si el cliente las pide expresamente o si su grupo NO cabe (más de ${fc.capacidad} personas) o sus fechas no cumplen — y en ese caso explícale primero el porqué.`,
+      });
+    }
 
     let escalated = false;
     let mascotasSentThisTurn = false;
@@ -1440,7 +1564,26 @@ export const runAgentTurn = internalAction({
               });
             }
           }
-          if (call.function.name === 'buscar_fincas') {
+          if (
+            call.function.name === 'enviar_catalogo' &&
+            context.fincaConsultada &&
+            !context.fincaConsultada.pidioOtrasOpciones &&
+            (typeof args.personas !== 'number' ||
+              args.personas <= context.fincaConsultada.capacidad)
+          ) {
+            // CANDADO FINCA DE REFERENCIA: vino por una finca puntual, cabe su
+            // grupo y NO ha pedido otras opciones → el catálogo NO sale (el
+            // modelo no puede saltarse la regla).
+            const fc = context.fincaConsultada;
+            result = {
+              enviado: false,
+              nota: `CANDADO: el cliente vino por la finca puntual «${fc.finca}» y NO ha pedido otras opciones — NO se envió ningún catálogo. NO digas que enviaste opciones. Responde SOLO sobre esa finca; si su pregunta es de precio/tarifa/disponibilidad, llama escalar_a_humano AHORA (motivo: "cliente vino por ${fc.finca} — experto cotiza y confirma disponibilidad") y cierra con calidez. Solo si pide expresamente MÁS opciones, o su grupo supera las ${fc.capacidad} personas de la finca, se envía catálogo.`,
+            };
+            console.log('[agent] enviar_catalogo bloqueado: finca de referencia', {
+              conversationId,
+              finca: fc.finca,
+            });
+          } else if (call.function.name === 'buscar_fincas') {
             result = await ctx.runQuery(internal.agent.toolBuscarFincas, {
               personas: typeof args.personas === 'number' ? args.personas : undefined,
               zona: typeof args.zona === 'string' ? args.zona : undefined,
@@ -1872,9 +2015,9 @@ export const runAgentTurn = internalAction({
               nota: 'El mensaje oficial del proceso de reserva YA se envio TAL CUAL y la conversacion fue escalada a un experto. NO escribas texto final — el mensaje oficial ya cubre todo.',
             };
           } else if (call.function.name === 'iniciar_reserva') {
-            const handoffText = buildPropertySelectionHandoff(
-              context.contactName,
-            );
+            const handoffText =
+              (await outOfHoursHandoffOverride(ctx, conversationId)) ??
+              buildPropertySelectionHandoff(context.contactName);
             let handoffWamid: string | undefined;
             try {
               const sentHandoff = await sendWhatsappText({
@@ -1979,6 +2122,20 @@ export const runAgentTurn = internalAction({
       // "¡Hola...!" otra vez, se recorta el prefijo (el resto queda intacto).
       const stripped = stripRedundantHolaPrefix(reply);
       if (stripped) reply = stripped;
+    }
+
+    // ESCALADO FUERA DE HORARIO: la respuesta del LLM promete "un Experto te
+    // atenderá en breve" — de noche eso es falso. Se reemplaza por el cierre
+    // oficial de fuera de servicio (en horario normal sale la respuesta tal cual).
+    if (escalated) {
+      const override = await outOfHoursHandoffOverride(ctx, conversationId);
+      if (override) {
+        reply = override;
+        console.log(
+          '[agent] despedida de escalado reemplazada por cierre de fuera de horario',
+          { conversationId },
+        );
+      }
     }
 
     let wamid: string | undefined;

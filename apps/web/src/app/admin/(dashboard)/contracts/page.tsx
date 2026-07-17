@@ -61,6 +61,9 @@ import {
 type ContractItem = {
   _id: string;
   contractNumber: string;
+  /** CR legible (booking / código tipado); no mostrar INBOX-timestamp. */
+  displayNumber?: string;
+  bookingReference?: string;
   propertyId?: string;
   propertyTitle?: string;
   propertyLocation?: string;
@@ -256,6 +259,9 @@ export default function ContractsManagerPage() {
               <Plus className="w-3.5 h-3.5 mr-1.5" />
               Nuevo contrato
             </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm" className="rounded-xl h-9">
+            <Link href="/admin/numeracion-contratos">Numeración CR</Link>
           </Button>
         </div>
       </div>
@@ -499,7 +505,7 @@ export default function ContractsManagerPage() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-sm tabular-nums">
-                          {c.contractNumber}
+                          {c.displayNumber ?? c.contractNumber}
                         </span>
                       </div>
                       <div className="flex items-center gap-1 mt-1">

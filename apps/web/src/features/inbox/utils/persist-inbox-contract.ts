@@ -42,11 +42,23 @@ function money(raw: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** Arma el payload de `contracts.upsert` para un contrato del inbox. */
+/** Clave estable por conversación cuando aún no tiparon el CR. */
+export function inboxDraftContractNumber(conversationId: string): string {
+  const safe = conversationId.trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48);
+  return `INBOX-${safe || "draft"}`;
+}
+
+/**
+ * Arma el payload de `contracts.upsert` para un contrato del inbox.
+ * - Con CR tipado → upsert por ese código.
+ * - Sin CR → clave estable por conversación (regenerar actualiza, no duplica).
+ * - Sin enviar al cliente → estado `borrador`; al enviar WA → `enviado`.
+ */
 export function buildInboxContractUpsertArgs(
   draft: InboxContractDraftLike,
   opts: {
-    estado: "generado" | "enviado";
+    estado: "borrador" | "enviado";
+    conversationId?: string | null;
     propertyTitle?: string;
     propertyLocation?: string;
     pdfUrl?: string;
@@ -73,11 +85,17 @@ export function buildInboxContractUpsertArgs(
     money(draft.otherCharges) +
     extraPeopleTotal;
 
+  const typedCode = draft.contractCode.trim();
+  const conversationId = opts.conversationId?.trim() || undefined;
   const contractNumber =
-    draft.contractCode.trim() || `INBOX-${Date.now()}`;
+    typedCode ||
+    (conversationId
+      ? inboxDraftContractNumber(conversationId)
+      : `INBOX-draft`);
 
   return {
     contractNumber,
+    ...(conversationId ? { conversationId } : {}),
     ...(draft.fincaId
       ? { propertyId: draft.fincaId as Id<"properties"> }
       : {}),
@@ -101,6 +119,7 @@ export function buildInboxContractUpsertArgs(
       nights,
       valorTotal,
       savedFrom: "inbox",
+      conversationId,
     }),
   };
 }

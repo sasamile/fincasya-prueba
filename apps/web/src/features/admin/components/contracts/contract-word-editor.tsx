@@ -16,6 +16,10 @@ import { Download, FileWarning, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  loadSuperDocModules,
+  preloadSuperDoc,
+} from "@/features/admin/utils/preload-superdoc";
 import "@harbour-enterprises/superdoc/style.css";
 
 // SuperDoc se carga dinámico (solo cliente); su API no está tipada aquí.
@@ -45,6 +49,8 @@ type Props = {
   onReadyChange?: (ready: boolean) => void;
 };
 
+type LoadPhase = "idle" | "docx" | "editor" | "ready" | "error";
+
 export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
   function ContractWordEditor(
     {
@@ -66,11 +72,13 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
     const payloadRef = useRef(payload);
     payloadRef.current = payload;
     const [ready, setReady] = useState(false);
-    const [loading, setLoading] = useState(false);
+    const [phase, setPhase] = useState<LoadPhase>("idle");
     const [error, setError] = useState<string | null>(null);
     const [baseName, setBaseName] = useState("contrato");
     const [busy, setBusy] = useState<null | "pdf" | "docx">(null);
     const [manualReload, setManualReload] = useState(0);
+
+    const loading = phase === "docx" || phase === "editor";
 
     useImperativeHandle(
       ref,
@@ -131,9 +139,13 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
     }, [ready, onReadyChange]);
 
     useEffect(() => {
+      void preloadSuperDoc();
+    }, []);
+
+    useEffect(() => {
       if (!active || !propertyId) {
         setReady(false);
-        setLoading(false);
+        setPhase("idle");
         setError(null);
         onReadyChange?.(false);
         return;
@@ -142,7 +154,7 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
       let cancelled = false;
 
       async function init() {
-        setLoading(true);
+        setPhase("docx");
         setError(null);
         setReady(false);
         try {
@@ -153,7 +165,7 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
           }
           superdocRef.current = null;
 
-          const res = await fetch(
+          const docxFetch = fetch(
             `/api/fincas/${propertyId}/direct-booking-contract`,
             {
               method: "POST",
@@ -165,32 +177,33 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
                 propertyId,
               }),
             },
-          );
-          const data = (await res.json().catch(() => ({}))) as {
-            fileBase64?: string;
-            filename?: string;
-            error?: string;
-          };
-          if (!res.ok || !data.fileBase64) {
-            throw new Error(data.error || "No se pudo generar el contrato.");
-          }
+          ).then(async (res) => {
+            const data = (await res.json().catch(() => ({}))) as {
+              fileBase64?: string;
+              filename?: string;
+              error?: string;
+            };
+            if (!res.ok || !data.fileBase64) {
+              throw new Error(data.error || "No se pudo generar el contrato.");
+            }
+            return data;
+          });
+
+          const [data, { SuperDoc, fontsMod }] = await Promise.all([
+            docxFetch,
+            loadSuperDocModules(),
+          ]);
           if (cancelled) return;
 
+          setPhase("editor");
           const filename = data.filename || "contrato.docx";
           setBaseName(filename.replace(/\.docx$/i, ""));
-          const bytes = Uint8Array.from(atob(data.fileBase64), (c) =>
+          const bytes = Uint8Array.from(atob(data.fileBase64!), (c) =>
             c.charCodeAt(0),
           );
           const file = new File([bytes], filename, {
             type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           });
-
-          const [{ SuperDoc }, fontsMod] = await Promise.all([
-            import("@harbour-enterprises/superdoc"),
-            import("@superdoc-dev/fonts"),
-          ]);
-          if (cancelled) return;
-          setLoading(false);
 
           const fonts = fontsMod.createSuperDocFonts();
           (
@@ -204,13 +217,16 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
             fonts,
             documents: [{ id: "contract", type: "docx", data: file }],
             onReady: () => {
-              if (!cancelled) setReady(true);
+              if (!cancelled) {
+                setReady(true);
+                setPhase("ready");
+              }
             },
           });
           superdocRef.current = instance;
         } catch (e) {
           if (!cancelled) {
-            setLoading(false);
+            setPhase("error");
             setError(
               e instanceof Error ? e.message : "Error al abrir el contrato.",
             );
@@ -228,7 +244,6 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
         }
         superdocRef.current = null;
       };
-      // payload se lee al montar; documentKey + manualReload controlan la regeneración.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [active, propertyId, documentKey, manualReload, editorId, toolbarId]);
 
@@ -318,6 +333,13 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
       );
     }
 
+    const phaseLabel =
+      phase === "docx"
+        ? "Generando el contrato desde la plantilla…"
+        : phase === "editor"
+          ? "Abriendo el editor Word…"
+          : "Abriendo el contrato en el editor Word…";
+
     return (
       <div
         className={cn(
@@ -385,19 +407,14 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
         />
 
         <div
-          className={cn(
-            "relative overflow-auto bg-muted/40",
-            heightClassName,
-          )}
+          className={cn("relative overflow-auto bg-muted/40", heightClassName)}
         >
           <div id={editorId} className="min-h-full" />
 
           {loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/70">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              <p className="text-xs text-muted-foreground">
-                Abriendo el contrato en el editor Word…
-              </p>
+              <p className="text-xs text-muted-foreground">{phaseLabel}</p>
             </div>
           )}
           {!loading && !ready && !error && (

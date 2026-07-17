@@ -70,6 +70,7 @@ import {
 } from "@/features/admin/utils/economic-adjustments";
 import { getGuestCapacityWarning } from "@/features/admin/utils/guest-capacity-warning";
 import { GuestCapacityWarningAlert } from "@/features/admin/components/shared/guest-capacity-warning-alert";
+import { ContractCodeSellerButtons } from "@/features/admin/components/contracts/contract-code-seller-buttons";
 import { computePetFees } from "@/lib/pet-fees";
 import { toClientFieldUpper } from "@/lib/client-field-normalize";
 import { propertyMatchesSearchQuery } from "@/lib/property/property-search";
@@ -2389,8 +2390,14 @@ export function ManualReservationModal({
                   onChange={(e) =>
                     setFormData({ ...formData, contractNumber: e.target.value })
                   }
-                  placeholder="Ej: 1010 (número interno del contrato)"
+                  placeholder="Ej: CR 291"
                   className="rounded-xl border border-input bg-background"
+                />
+                <ContractCodeSellerButtons
+                  compact
+                  onAssign={(code) =>
+                    setFormData((prev) => ({ ...prev, contractNumber: code }))
+                  }
                 />
                 <p className="text-[10px] text-muted-foreground ml-1">
                   Número del contrato PDF. Si el código de reserva es otro (ej.

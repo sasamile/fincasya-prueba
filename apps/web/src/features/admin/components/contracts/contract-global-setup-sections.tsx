@@ -49,7 +49,8 @@ import {
   type FincaData,
 } from "../../utils/contract-utils";
 import { BankAccountDialog } from "./bank-account-dialog";
-import { ContractFirmantesSection } from "./contract-firmantes-section";
+// ContractFirmantesSection — oculto por ahora
+// import { ContractFirmantesSection } from "./contract-firmantes-section";
 
 interface ClauseEditorDialogProps {
   open: boolean;
@@ -471,7 +472,8 @@ export function ContractGlobalSetupSections({
         </div>
       </FormSection>
 
-      <ContractFirmantesSection />
+      {/* Firmantes ocultos por ahora; el contrato sigue usando el firmante por defecto. */}
+      {/* <ContractFirmantesSection /> */}
 
       <FormSection
         title="Cuentas bancarias"

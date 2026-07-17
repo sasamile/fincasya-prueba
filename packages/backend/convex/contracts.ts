@@ -1,6 +1,7 @@
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
-import { mutation, query } from './_generated/server';
+import { internalMutation, mutation, query } from './_generated/server';
+import { internal } from './_generated/api';
 
 /** Orden de avance del contrato; al fusionar, gana el estado más avanzado. */
 const ESTADO_RANK: Record<string, number> = {
@@ -42,7 +43,46 @@ type ContractFields = {
   bookingId?: Id<'bookings'>;
   fillTokenId?: Id<'contractFillTokens'>;
   draftJson?: string;
+  conversationId?: string;
 };
+
+/** ¿Es un código autoinventado del inbox (no un CR real)? */
+function isAutoInboxContractNumber(num: string): boolean {
+  return /^INBOX-/i.test(num.trim());
+}
+
+/** CR legible para la lista: booking.reference, código tipado, o Sin CR. */
+export function resolveContractDisplayNumber(
+  contractNumber: string,
+  opts?: {
+    bookingReference?: string | null;
+    draftContractCode?: string | null;
+  },
+): string {
+  const bookingRef = String(opts?.bookingReference ?? '').trim();
+  if (bookingRef) return bookingRef;
+
+  const draftCode = String(opts?.draftContractCode ?? '').trim();
+  if (draftCode && !isAutoInboxContractNumber(draftCode)) return draftCode;
+
+  const num = contractNumber.trim();
+  if (num && !isAutoInboxContractNumber(num)) return num;
+
+  return 'Sin CR';
+}
+
+function extractDraftContractCode(
+  draftJson?: string | null,
+): string | undefined {
+  if (!draftJson?.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(draftJson) as { contractCode?: unknown };
+    const code = String(parsed.contractCode ?? '').trim();
+    return code || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Extrae PDF de confirmación de reserva en multimedia. */
 function extractConfirmationPdfFromMultimedia(
@@ -103,7 +143,13 @@ function extractContractPdfFromMultimedia(
   return null;
 }
 
-/** Upsert idempotente por contractNumber: solo pisa campos provistos y avanza el estado. */
+/**
+ * Upsert idempotente:
+ * 1) por contractNumber (CR tipado)
+ * 2) si no hay match y hay conversationId, reutiliza el borrador/generado de
+ *    esa conversación (evita duplicar al regenerar sin enviar)
+ * Solo avanza el estado (nunca retrocede) vía ESTADO_RANK.
+ */
 async function upsertContract(
   ctx: any,
   fields: ContractFields,
@@ -111,28 +157,56 @@ async function upsertContract(
   const num = fields.contractNumber.trim();
   if (!num) return;
   const now = Date.now();
+  const convId = fields.conversationId?.trim() || undefined;
 
-  const existing = await ctx.db
+  let existing = await ctx.db
     .query('contracts')
     .withIndex('by_contract_number', (q: any) =>
       q.eq('contractNumber', num),
     )
     .first();
 
+  let draftByConversation: typeof existing = null;
+  if (convId) {
+    draftByConversation = await ctx.db
+      .query('contracts')
+      .withIndex('by_conversation', (q: any) =>
+        q.eq('conversationId', convId),
+      )
+      .first();
+    if (!existing && draftByConversation) {
+      const st = String(draftByConversation.estado ?? '').toLowerCase();
+      const open =
+        st === 'borrador' ||
+        st === 'generado' ||
+        isAutoInboxContractNumber(draftByConversation.contractNumber);
+      if (open) existing = draftByConversation;
+    }
+  }
+
   const cleaned: Record<string, unknown> = {};
   for (const [k, val] of Object.entries(fields)) {
     if (k === 'contractNumber' || k === 'estado') continue;
     if (val !== undefined && val !== null && val !== '') cleaned[k] = val;
   }
+  if (convId) cleaned.conversationId = convId;
 
   if (!existing) {
     await ctx.db.insert('contracts', {
       contractNumber: num,
-      estado: fields.estado || 'generado',
+      estado: fields.estado || 'borrador',
       createdAt: now,
       updatedAt: now,
       ...cleaned,
     });
+    try {
+      await ctx.runMutation(
+        internal.adminContractSettings.commitContractCodeInternal,
+        { code: num },
+      );
+    } catch {
+      /* contador opcional */
+    }
     return;
   }
 
@@ -141,11 +215,52 @@ async function upsertContract(
       ? fields.estado
       : existing.estado;
 
-  await ctx.db.patch(existing._id, {
+  const patch: Record<string, unknown> = {
     ...cleaned,
     estado: nextEstado,
     updatedAt: now,
-  });
+  };
+
+  // Si el asesor tipó un CR real sobre un borrador INBOX-*, renombra la fila.
+  if (
+    num !== existing.contractNumber &&
+    isAutoInboxContractNumber(existing.contractNumber) &&
+    !isAutoInboxContractNumber(num)
+  ) {
+    const taken = await ctx.db
+      .query('contracts')
+      .withIndex('by_contract_number', (q: any) =>
+        q.eq('contractNumber', num),
+      )
+      .first();
+    if (!taken || taken._id === existing._id) {
+      patch.contractNumber = num;
+    }
+  }
+
+  await ctx.db.patch(existing._id, patch);
+
+  // Si actualizamos por CR y quedó un borrador INBOX huérfano de la misma
+  // conversación, elimínalo.
+  if (
+    draftByConversation &&
+    draftByConversation._id !== existing._id &&
+    isAutoInboxContractNumber(draftByConversation.contractNumber)
+  ) {
+    const st = String(draftByConversation.estado ?? '').toLowerCase();
+    if (st === 'borrador' || st === 'generado') {
+      await ctx.db.delete(draftByConversation._id);
+    }
+  }
+
+  try {
+    await ctx.runMutation(
+      internal.adminContractSettings.commitContractCodeInternal,
+      { code: String(patch.contractNumber ?? existing.contractNumber) },
+    );
+  } catch {
+    /* contador opcional */
+  }
 }
 
 export const upsert = mutation({
@@ -174,6 +289,42 @@ export const upsert = mutation({
     bookingId: v.optional(v.id('bookings')),
     fillTokenId: v.optional(v.id('contractFillTokens')),
     draftJson: v.optional(v.string()),
+    conversationId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await upsertContract(ctx, args as ContractFields);
+    return { ok: true };
+  },
+});
+
+/** Uso interno (sale links, etc.): mismo upsert sin exponer la API pública. */
+export const upsertInternal = internalMutation({
+  args: {
+    contractNumber: v.string(),
+    propertyId: v.optional(v.id('properties')),
+    propertyTitle: v.optional(v.string()),
+    propertyLocation: v.optional(v.string()),
+    clienteNombre: v.optional(v.string()),
+    clienteCedula: v.optional(v.string()),
+    clienteEmail: v.optional(v.string()),
+    clienteTelefono: v.optional(v.string()),
+    clienteCiudad: v.optional(v.string()),
+    clienteDireccion: v.optional(v.string()),
+    firmanteNombre: v.optional(v.string()),
+    firmanteCedula: v.optional(v.string()),
+    valorTotal: v.optional(v.number()),
+    fechaEntrada: v.optional(v.string()),
+    fechaSalida: v.optional(v.string()),
+    pdfUrl: v.optional(v.string()),
+    pdfFilename: v.optional(v.string()),
+    confirmationPdfUrl: v.optional(v.string()),
+    confirmationPdfFilename: v.optional(v.string()),
+    estado: v.optional(v.string()),
+    origen: v.optional(v.string()),
+    bookingId: v.optional(v.id('bookings')),
+    fillTokenId: v.optional(v.id('contractFillTokens')),
+    draftJson: v.optional(v.string()),
+    conversationId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await upsertContract(ctx, args as ContractFields);
@@ -402,9 +553,42 @@ export const list = query({
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const safePage = Math.min(page, totalPages);
     const offset = (safePage - 1) * limit;
+    const pageItems = all.slice(offset, offset + limit);
+
+    const bookingRefs = new Map<string, string>();
+    const bookingIds = [
+      ...new Set(
+        pageItems
+          .map((c) => c.bookingId)
+          .filter((id): id is Id<'bookings'> => !!id),
+      ),
+    ];
+    await Promise.all(
+      bookingIds.map(async (id) => {
+        const b = await ctx.db.get(id);
+        const ref = String(b?.reference ?? '').trim();
+        if (ref) bookingRefs.set(String(id), ref);
+      }),
+    );
+
+    const items = pageItems.map((c) => {
+      const bookingReference = c.bookingId
+        ? bookingRefs.get(String(c.bookingId))
+        : undefined;
+      const draftContractCode = extractDraftContractCode(c.draftJson);
+      const displayNumber = resolveContractDisplayNumber(c.contractNumber, {
+        bookingReference,
+        draftContractCode,
+      });
+      return {
+        ...c,
+        bookingReference,
+        displayNumber,
+      };
+    });
 
     return {
-      items: all.slice(offset, offset + limit),
+      items,
       total,
       page: safePage,
       limit,

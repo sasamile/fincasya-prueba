@@ -49,6 +49,11 @@ export async function POST(
     }
 
     if (!isPreview && link.contractUrl) {
+      // Re-adjunta para sincronizar con Gestor de contratos (idempotente).
+      await convex.mutation(api.saleLinks.attachContract, {
+        token,
+        contractUrl: link.contractUrl,
+      });
       return NextResponse.json({ ok: true, contractUrl: link.contractUrl });
     }
     if (!isPreview && !link.paymentValidated) {

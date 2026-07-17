@@ -168,6 +168,21 @@ export const recordOutOfHoursMsg = internalMutation({
 });
 
 /**
+ * Marca el cierre como YA enviado sin insertar mensaje: se usa cuando la
+ * despedida de un escalado fuera de horario ya fue el cierre oficial (el
+ * mensaje lo guarda el agente como su respuesta) — evita el duplicado.
+ */
+export const markClosingSent = internalMutation({
+  args: { conversationId: v.id('conversations') },
+  handler: async (ctx, { conversationId }): Promise<void> => {
+    await ctx.db.patch(conversationId, {
+      outOfHoursClosingSent: true,
+      outOfHoursClosingSentAt: Date.now(),
+    });
+  },
+});
+
+/**
  * ¿Se debe enviar el mensaje de fuera de horario? Dedup por flag + no enviar si
  * ya lo tomó un humano (status human o mensaje de Experto).
  */
@@ -187,8 +202,9 @@ export const outOfHoursPrecheck = internalQuery({
     const yaEnviado =
       sentAt != null && Date.now() - sentAt < OUT_OF_HOURS_DEDUP_MS;
     if (yaEnviado) return { ok: false as const };
-    // El cierre del cliente NUEVO no sale si un humano ya tomó la conversación.
-    if (flag === 'closing' && conv.status !== 'ai') return { ok: false as const };
+    // OJO: status 'human' NO bloquea el cierre — el remate sale justamente
+    // cuando el bot ya escaló. Lo que sí lo calla es que un Experto de carne y
+    // hueso haya escrito (el check de sentByUserId de abajo).
     const msgs = await ctx.db
       .query('messages')
       .withIndex('by_conversation', (q) =>

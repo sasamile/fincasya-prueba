@@ -44,6 +44,25 @@ export interface PdfPreviewResult {
   pageCount: number;
 }
 
+async function renderPdfPageToJpeg(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pdf: any,
+  pageNumber: number,
+  scale = 1.5,
+): Promise<string> {
+  const page = await pdf.getPage(pageNumber);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Could not create canvas context");
+  }
+  canvas.height = viewport.height;
+  canvas.width = viewport.width;
+  await page.render({ canvasContext: context, viewport }).promise;
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
+
 /**
  * Generates a base64 image preview and page count from a PDF File.
  */
@@ -61,18 +80,45 @@ export async function generatePdfPreview(
     const loadingTask = getDocument({ url: fileUrl, ...PDF_DOC_OPTIONS });
     const pdf = await loadingTask.promise;
     const pageCount = pdf.numPages;
-    const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 1.5 });
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-    if (!context) {
-      throw new Error("Could not create canvas context");
-    }
-    canvas.height = viewport.height;
-    canvas.width = viewport.width;
-    await page.render({ canvasContext: context, viewport }).promise;
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-    return { thumbnail: dataUrl, pageCount };
+    const thumbnail = await renderPdfPageToJpeg(pdf, 1);
+    return { thumbnail, pageCount };
+  } finally {
+    URL.revokeObjectURL(fileUrl);
+  }
+}
+
+export interface PdfPagesForAiResult {
+  /** Primera página (cabecera del contrato). */
+  firstPage: string;
+  /** Última página (donde suele ir la firma). */
+  lastPage: string;
+  pageCount: number;
+}
+
+/**
+ * Renderiza 1ª y última página del PDF para verificación por visión.
+ * Si solo hay una página, firstPage === lastPage.
+ */
+export async function generatePdfPagesForAi(
+  file: File,
+): Promise<PdfPagesForAiResult> {
+  if (file.type !== "application/pdf") {
+    throw new Error("File is not a PDF");
+  }
+
+  const { getDocument } = await loadPdfJs();
+  const fileUrl = URL.createObjectURL(file);
+
+  try {
+    const loadingTask = getDocument({ url: fileUrl, ...PDF_DOC_OPTIONS });
+    const pdf = await loadingTask.promise;
+    const pageCount = pdf.numPages;
+    const firstPage = await renderPdfPageToJpeg(pdf, 1);
+    const lastPage =
+      pageCount > 1
+        ? await renderPdfPageToJpeg(pdf, pageCount)
+        : firstPage;
+    return { firstPage, lastPage, pageCount };
   } finally {
     URL.revokeObjectURL(fileUrl);
   }
