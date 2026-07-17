@@ -282,11 +282,11 @@ export function stayOverlapsSoldOutWeekend(
 /** Aviso oficial cuando piden el finde agotado — se envía TAL CUAL. */
 export function buildSoldOutWeekendMessage(): string {
   const { label } = SOLD_OUT_WEEKEND_2026_07;
-  return `Con mucho gusto te ayudo 😊
+  return `¡Claro que sí! Con mucho gusto te ayudo 😊🏡
 
-Para el fin de semana del *${label}* lamentablemente no tenemos disponibilidad en este momento 🗓️.
+Lamentablemente, para el fin de semana del *${label}* no contamos con disponibilidad en este momento 📅
 
-¿Te sirven otras fechas? Con gusto te busco opciones disponibles 🏡✨`;
+✅ Sin embargo, con gusto te buscamos opciones increíbles para otras fechas. ¿Qué fechas te servirían? ✨🤝`;
 }
 
 /**

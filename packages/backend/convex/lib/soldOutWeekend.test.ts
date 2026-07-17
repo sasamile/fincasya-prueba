@@ -22,5 +22,7 @@ describe('stayOverlapsSoldOutWeekend', () => {
 
   test('mensaje menciona el rango', () => {
     expect(buildSoldOutWeekendMessage()).toContain('18 al 20 de julio');
+    expect(buildSoldOutWeekendMessage()).toContain('✅');
+    expect(buildSoldOutWeekendMessage()).toContain('🏡');
   });
 });

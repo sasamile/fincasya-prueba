@@ -270,11 +270,11 @@ A la mayor brevedad te compartiremos la información detallada de esta casa y ot
       'Tienen algo del 18 al 20?',
       'Del 17 al 20 de julio para 15 personas',
     ],
-    response: `Con mucho gusto te ayudo 😊
+    response: `¡Claro que sí! Con mucho gusto te ayudo 😊🏡
 
-Para el fin de semana del *18 al 20 de julio* lamentablemente no tenemos disponibilidad en este momento 🗓️.
+Lamentablemente, para el fin de semana del *18 al 20 de julio* no contamos con disponibilidad en este momento 📅
 
-¿Te sirven otras fechas? Con gusto te busco opciones disponibles 🏡✨`,
+✅ Sin embargo, con gusto te buscamos opciones increíbles para otras fechas. ¿Qué fechas te servirían? ✨🤝`,
   },
   {
     key: 'sit:temporada-especial',
