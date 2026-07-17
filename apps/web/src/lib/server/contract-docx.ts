@@ -111,6 +111,15 @@ export type WordBankAccountSnippet = {
   ownerCedula?: string;
 };
 
+export type WordFirmaImage = {
+  bytes: Buffer;
+  /** Extensión del archivo en word/media (png | jpg | jpeg). */
+  ext: "png" | "jpg" | "jpeg";
+  /** Ancho/alto en EMUs (opcional). 1 cm ≈ 360_000 EMUs. */
+  widthEmu?: number;
+  heightEmu?: number;
+};
+
 /** Una cuenta válida para el párrafo del 50% (número, banco o titular). */
 function isUsableBankSnippet(a: WordBankAccountSnippet): boolean {
   return Boolean(
@@ -327,6 +336,224 @@ function applyWordTemplateReplacements(
   return s;
 }
 
+/** Siguiente rId libre en document.xml.rels. */
+function nextDocumentRelationshipId(relsXml: string): string {
+  let max = 0;
+  for (const m of relsXml.matchAll(/\bId="rId(\d+)"/g)) {
+    max = Math.max(max, Number(m[1]) || 0);
+  }
+  return `rId${max + 1}`;
+}
+
+/** DrawingML inline para la firma del arrendador (~5×2.5 cm). */
+function buildSignatureDrawingRun(
+  rId: string,
+  docPrId: number,
+  widthEmu: number,
+  heightEmu: number,
+): string {
+  // Namespaces en los nodos que SuperDoc/Word esperan (igual que imágenes
+  // nativas de Word). IDs únicos evitan que el preview colapse dibujos.
+  return (
+    `<w:r><w:rPr><w:noProof/></w:rPr><w:drawing>` +
+    `<wp:inline distT="0" distB="0" distL="0" distR="0" ` +
+    `xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ` +
+    `xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ` +
+    `xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" ` +
+    `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+    `<wp:extent cx="${widthEmu}" cy="${heightEmu}"/>` +
+    `<wp:effectExtent l="0" t="0" r="0" b="0"/>` +
+    `<wp:docPr id="${docPrId}" name="FirmaArrendador"/>` +
+    `<wp:cNvGraphicFramePr>` +
+    `<a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/>` +
+    `</wp:cNvGraphicFramePr>` +
+    `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+    `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+    `<pic:nvPicPr>` +
+    `<pic:cNvPr id="${docPrId}" name="firma-arrendador.png"/>` +
+    `<pic:cNvPicPr><a:picLocks noChangeAspect="1"/></pic:cNvPicPr>` +
+    `</pic:nvPicPr>` +
+    `<pic:blipFill>` +
+    `<a:blip r:embed="${rId}"/>` +
+    `<a:stretch><a:fillRect/></a:stretch>` +
+    `</pic:blipFill>` +
+    `<pic:spPr>` +
+    `<a:xfrm><a:off x="0" y="0"/><a:ext cx="${widthEmu}" cy="${heightEmu}"/></a:xfrm>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
+    `</pic:spPr>` +
+    `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`
+  );
+}
+
+/**
+ * Sustituye `{{Firma}}` / `{{firma}}` por la imagen embebida, o por vacío
+ * si no hay firma (opcional en la plantilla).
+ */
+/**
+ * Dado un match de {{Firma}} en posición [matchStart, matchEnd) dentro de xml,
+ * busca el <w:r> que lo contiene (hacia atrás desde matchStart) y el </w:r>
+ * que lo cierra (hacia adelante desde matchEnd). Devuelve los índices del
+ * <w:r> completo para que el caller pueda reemplazarlo.
+ * Si no encuentra el run devuelve null → el caller puede hacer fallback.
+ */
+function findEnclosingWordRun(
+  xml: string,
+  matchStart: number,
+  matchEnd: number,
+): { start: number; end: number } | null {
+  let rStart = -1;
+  let searchPos = matchStart;
+  while (searchPos >= 0) {
+    const idx = xml.lastIndexOf("<w:r", searchPos);
+    if (idx === -1) break;
+    const next = xml.charAt(idx + 4);
+    // <w:r> or <w:r ...> but NOT <w:rPr>, <w:rStyle>, etc.
+    if (next === ">" || next === " ") {
+      rStart = idx;
+      break;
+    }
+    searchPos = idx - 1;
+  }
+  if (rStart === -1) return null;
+
+  const rEndTag = xml.indexOf("</w:r>", matchEnd);
+  if (rEndTag === -1) return null;
+
+  return { start: rStart, end: rEndTag + "</w:r>".length };
+}
+
+function embedFirmaImageInZip(
+  zip: PizZip,
+  documentXml: string,
+  firma: WordFirmaImage | undefined,
+): string {
+  const gap = WORD_TEMPLATE_GAP;
+  const firmaKey = Array.from("Firma")
+    .map((ch) => escapeRegExp(ch))
+    .join(gap);
+  const firmaKeyLower = Array.from("firma")
+    .map((ch) => escapeRegExp(ch))
+    .join(gap);
+  const reFirma = new RegExp(
+    `\\{${gap}\\{${gap}(?:${firmaKey}|${firmaKeyLower})${gap}\\}${gap}\\}|\\{\\{${gap}(?:${firmaKey}|${firmaKeyLower})${gap}\\}\\}`,
+    "g",
+  );
+
+  /**
+   * Reemplaza el <w:r> completo que contiene {{Firma}} con `replacement`.
+   * Si no puede encontrar el run envolvente, reemplaza solo el placeholder.
+   * Necesario porque {{Firma}} está dentro de <w:t>, y meter un <w:drawing>
+   * dentro de <w:t> produce XML inválido que Word/SuperDoc ignora.
+   */
+  function replaceEnclosingRun(xml: string, replacement: string): string {
+    reFirma.lastIndex = 0;
+    const m = reFirma.exec(xml);
+    reFirma.lastIndex = 0;
+    if (!m) return xml;
+
+    const run = findEnclosingWordRun(xml, m.index, m.index + m[0].length);
+    if (!run) return xml.replace(reFirma, replacement);
+
+    return xml.slice(0, run.start) + replacement + xml.slice(run.end);
+  }
+
+  if (!firma?.bytes?.length) {
+    return replaceEnclosingRun(documentXml, "");
+  }
+
+  const ext = firma.ext === "jpeg" ? "jpg" : firma.ext;
+  const mediaName = `word/media/firma-arrendador.${ext}`;
+  zip.file(mediaName, firma.bytes);
+
+  const relsPath = "word/_rels/document.xml.rels";
+  const relsRaw = zip.file(relsPath)?.asText();
+  if (!relsRaw) {
+    return replaceEnclosingRun(documentXml, "");
+  }
+  const rId = nextDocumentRelationshipId(relsRaw);
+  const target = mediaName.replace(/^word\//, "");
+  const relTag =
+    `<Relationship Id="${rId}" ` +
+    `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" ` +
+    `Target="${target}"/>`;
+  const nextRels = relsRaw.includes("</Relationships>")
+    ? relsRaw.replace("</Relationships>", `${relTag}</Relationships>`)
+    : `${relsRaw}${relTag}`;
+  zip.file(relsPath, nextRels);
+
+  // ~5.0 cm × 2.5 cm (firmas típicas).
+  const cx = firma.widthEmu ?? 1_800_000;
+  const cy = firma.heightEmu ?? 900_000;
+  // docPr id alto para no chocar con imágenes ya presentes en la plantilla.
+  const drawing = buildSignatureDrawingRun(rId, 50_001, cx, cy);
+  return replaceEnclosingRun(documentXml, drawing);
+}
+
+/**
+ * Sustituye el tramo bancario del párrafo del 50%: desde después de
+ * "cuentas de ahorros:" hasta antes del run "De" de "De llegar".
+ */
+function replaceBankAccountsParagraphSegment(
+  xml: string,
+  inlineXml: string,
+): string {
+  if (!inlineXml.trim()) return xml;
+  // El ancla final es UN solo <w:r> cuyo texto es "De" (De llegar).
+  // Si el grupo 3 pudiera atravesar varios runs hasta "De", se comía los
+  // placeholders y el replace duplicaba / dejaba basura.
+  const tipRe =
+    /(<w:t[^>]*>[^<]*cuentas de ahorros:\s*<\/w:t><\/w:r>)([\s\S]{0,8000}?)(<w:r\b[^>]*>(?:(?!<\/w:r>)[\s\S])*?<w:t[^>]*>De<\/w:t>(?:(?!<\/w:r>)[\s\S])*?<\/w:r>)/;
+  const m = tipRe.exec(xml);
+  if (!m) return xml;
+  // Confirmar que es "De llegar" (no otro "De" suelto).
+  const after = xml.slice(m.index + m[0].length, m.index + m[0].length + 400);
+  const afterPlain = after.replace(/<[^>]+>/g, " ");
+  if (!/^\s*llegar/i.test(afterPlain)) return xml;
+  // La plantilla tenía "…titularCedula}." antes de "De"; al sustituir el
+  // tramo medio hay que reponer el punto y el espacio.
+  const period = `<w:r><w:t>.</w:t></w:r><w:r><w:t xml:space="preserve"> </w:t></w:r>`;
+  return (
+    xml.slice(0, m.index) +
+    m[1] +
+    inlineXml +
+    period +
+    m[3] +
+    xml.slice(m.index + m[0].length)
+  );
+}
+
+/**
+ * Si el párrafo del 50% quedó sin número de cuenta, mete el texto plano.
+ */
+function patchEmptyBankAccountsParagraph(xml: string, bankText: string): string {
+  const text = bankText.trim();
+  if (!text) return xml;
+
+  const tipRe =
+    /(<w:t[^>]*>[^<]*cuentas de ahorros:\s*<\/w:t><\/w:r>)([\s\S]{0,8000}?)(<w:r\b[^>]*>(?:(?!<\/w:r>)[\s\S])*?<w:t[^>]*>De<\/w:t>(?:(?!<\/w:r>)[\s\S])*?<\/w:r>)/;
+  const m = tipRe.exec(xml);
+  if (!m) return xml;
+
+  const after = xml.slice(m.index + m[0].length, m.index + m[0].length + 400);
+  if (!/^\s*llegar/i.test(after.replace(/<[^>]+>/g, " "))) return xml;
+
+  const middlePlain = m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  if (/\d{5,}/.test(middlePlain)) return xml;
+
+  const escaped = escapeWordPlainText(text);
+  const run = `<w:r><w:rPr><w:b/><w:bCs/></w:rPr><w:t xml:space="preserve">${escaped}</w:t></w:r>`;
+  const period = `<w:r><w:t>.</w:t></w:r><w:r><w:t xml:space="preserve"> </w:t></w:r>`;
+  return (
+    xml.slice(0, m.index) +
+    m[1] +
+    run +
+    period +
+    m[3] +
+    xml.slice(m.index + m[0].length)
+  );
+}
+
 /**
  * Rellena la plantilla .docx con los valores del contrato y devuelve el buffer
  * del documento Word resultante. Procesa document.xml, headers, footers y
@@ -340,6 +567,8 @@ export function fillContractDocx(
     bankAccounts?: WordBankAccountSnippet[];
     ownerName?: string;
     ownerCedula?: string;
+    /** Imagen de firma del arrendador para `{{Firma}}` (opcional). */
+    firmaImage?: WordFirmaImage;
   } = {},
 ): Buffer {
   const zip = new PizZip(templateBytes);
@@ -351,6 +580,18 @@ export function fillContractDocx(
       name === "word/footnotes.xml" ||
       name === "word/endnotes.xml",
   );
+
+  // Firma solo en el cuerpo del documento (placeholder {{Firma}}).
+  const docRaw = zip.file("word/document.xml")?.asText();
+  if (docRaw != null) {
+    let docProcessed = docRaw.replace(/<w:proofErr[^/>]*\/>/g, "");
+    docProcessed = docProcessed.replace(
+      /<w:proofErr[^>]*>[\s\S]*?<\/w:proofErr>/g,
+      "",
+    );
+    docProcessed = embedFirmaImageInZip(zip, docProcessed, opts.firmaImage);
+    zip.file("word/document.xml", docProcessed);
+  }
 
   for (const name of targets) {
     const raw = zip.file(name)?.asText();
@@ -379,31 +620,87 @@ export function fillContractDocx(
       );
     }
 
-    // Varias cuentas: sustituir el bloque entero cuentaNumero→titularCedula.
-    // Nunca reemplazar con vacío (eso dejaba "cuentas de ahorros: .").
+    // Sustituir TODO el tramo "ahorros:" → "De llegar" (no solo placeholders:
+    // Word parte {{cuentaNumero}} con proofErr y el replace a medias dejaba
+    // "cuentas de ahorros: ." o XML inválido / texto duplicado).
     const bankSnippets = opts.bankAccounts ?? [];
     const usableBanks = bankSnippets.filter(isUsableBankSnippet);
     const plainBanks = String(
       values.cuentasBancarias || values.cuentasBancariasContrato || "",
     ).trim();
-    const plainLineCount = plainBanks
-      ? plainBanks.split(/\r?\n/).filter((l) => l.trim()).length
-      : 0;
-    if (usableBanks.length > 1 || plainLineCount > 1) {
-      let inline = buildWordBankAccountsClusterXml(
-        usableBanks,
-        opts.ownerName ?? "",
-        opts.ownerCedula ?? "",
-      );
+    let bankSegmentApplied = false;
+    if (usableBanks.length > 0 || plainBanks) {
+      let inline =
+        usableBanks.length > 0
+          ? buildWordBankAccountsClusterXml(
+              usableBanks,
+              opts.ownerName ?? "",
+              opts.ownerCedula ?? "",
+            )
+          : "";
       if (!inline && plainBanks) {
         inline = buildWordBankAccountsFromPlain(plainBanks);
       }
       if (inline) {
-        processed = replaceWordBankAccountPlaceholderCluster(processed, inline);
+        const before = processed;
+        processed = replaceBankAccountsParagraphSegment(processed, inline);
+        bankSegmentApplied = processed !== before;
+        if (!bankSegmentApplied) {
+          // Fallback: cluster clásico cuentaNumero→titularCedula.
+          processed = replaceWordBankAccountPlaceholderCluster(
+            processed,
+            inline,
+          );
+          bankSegmentApplied = processed !== before;
+        }
       }
     }
 
-    processed = applyWordTemplateReplacements(processed, values);
+    // Por si quedó {{Firma}} sin imagen: borrar el texto.
+    // Si ya metimos el segmento bancario, vaciar placeholders para no duplicar.
+    const valuesWithFirma = {
+      ...values,
+      Firma: values.Firma ?? "",
+      firma: values.firma ?? "",
+      ...(bankSegmentApplied
+        ? {
+            cuentaNumero: "",
+            bancoNombre: "",
+            titularNombre: "",
+            titularCedula: "",
+          }
+        : {}),
+    };
+
+    processed = applyWordTemplateReplacements(processed, valuesWithFirma);
+
+    // Cinturón de seguridad: si el párrafo del 50% quedó vacío (": ."),
+    // inyectar el texto plano de cuentas en ese hueco.
+    if (plainBanks || usableBanks.length > 0) {
+      const fallbackText =
+        plainBanks ||
+        usableBanks
+          .map((a) => {
+            const num = (a.accountNumber ?? "").trim();
+            const bank = (a.bankName ?? "").trim();
+            const holder = (a.ownerName ?? opts.ownerName ?? "").trim();
+            const ced = (a.ownerCedula ?? opts.ownerCedula ?? "").trim();
+            const core = [num, bank ? `de ${bank}` : ""].filter(Boolean).join(" ");
+            const tail = [
+              holder ? `a nombre de ${holder}` : "",
+              ced ? `con la cédula N° ${ced}` : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return [core, tail].filter(Boolean).join(" ");
+          })
+          .filter(Boolean)
+          .join(" o ");
+      if (fallbackText) {
+        processed = patchEmptyBankAccountsParagraph(processed, fallbackText);
+      }
+    }
+
     zip.file(name, processed);
   }
 

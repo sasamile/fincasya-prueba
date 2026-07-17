@@ -16,6 +16,8 @@ import { Download, FileWarning, Loader2, Send, X } from 'lucide-react';
 import '@harbour-enterprises/superdoc/style.css';
 import type { ConversationRow } from '@/features/inbox/types';
 import { buildInboxContractUpsertArgs } from '@/features/inbox/utils/persist-inbox-contract';
+import { resolveSelectedBankPayload } from '@/features/inbox/utils/selected-bank-accounts';
+import { firmaUrlToDataUrl } from '@/features/inbox/utils/firma-to-data-url';
 import { toStoredCopLabel } from '@/features/admin/components/contracts/cop-money-input';
 
 export type PreviewDraft = {
@@ -60,6 +62,7 @@ export function ContractPreviewModal({
   draft,
   selectedBankIds,
   selectedBankAccounts = [],
+  firmanteFields = {},
   conversation,
   propertyTitle,
   propertyLocation,
@@ -75,6 +78,12 @@ export function ContractPreviewModal({
     ownerName?: string;
     ownerCedula?: string;
   }>;
+  firmanteFields?: {
+    adminName?: string;
+    adminCedula?: string;
+    adminCity?: string;
+    firmaArrendadorUrl?: string;
+  };
   conversation: ConversationRow | null;
   propertyTitle?: string;
   propertyLocation?: string;
@@ -109,6 +118,14 @@ export function ContractPreviewModal({
     }
   };
   // 1) Genera el .docx desde la plantilla y 2) lo abre en el editor Word.
+  // Deps estables: evitar re-generar en loop por arrays nuevos cada render.
+  const banksKey = `${selectedBankIds.join(',')}|${selectedBankAccounts
+    .map(
+      (a) =>
+        `${a.id}:${a.accountNumber ?? ''}:${a.bankName ?? ''}:${a.ownerName ?? ''}`,
+    )
+    .join(';')}`;
+
   useEffect(() => {
     let cancelled = false;
 
@@ -117,6 +134,38 @@ export function ContractPreviewModal({
       setError(null);
       setReady(false);
       try {
+        const bankPayload = resolveSelectedBankPayload(
+          selectedBankAccounts,
+          selectedBankIds.length
+            ? selectedBankIds
+            : selectedBankAccounts.map((a) => a.id),
+        );
+        // Si el helper falló pero el padre ya mandó cuentas con datos, úsalas crudas.
+        const banksForRequest =
+          bankPayload.bankAccounts.length > 0
+            ? bankPayload
+            : {
+                bankAccountIds: selectedBankAccounts.map((a) => String(a.id)),
+                bankAccounts: selectedBankAccounts,
+                ...(selectedBankAccounts[0]
+                  ? {
+                      bankName: selectedBankAccounts[0].bankName,
+                      accountNumber: selectedBankAccounts[0].accountNumber,
+                      accountHolder: selectedBankAccounts[0].ownerName,
+                      idNumber: selectedBankAccounts[0].ownerCedula,
+                    }
+                  : {}),
+              };
+        if (banksForRequest.bankAccounts.length === 0) {
+          throw new Error(
+            'Selecciona al menos una cuenta de pago con número o banco antes de generar.',
+          );
+        }
+
+        const firmaDataUrl = await firmaUrlToDataUrl(
+          firmanteFields.firmaArrendadorUrl,
+        );
+
         const nights = (() => {
           const a = new Date(`${draft.checkIn}T12:00:00`).getTime();
           const b = new Date(`${draft.checkOut}T12:00:00`).getTime();
@@ -175,15 +224,10 @@ export function ContractPreviewModal({
                   return !digits || digits === '50000' ? '120000' : digits;
                 })(),
               ),
-              bankAccountIds: selectedBankIds,
-              bankAccounts: selectedBankAccounts,
-              ...(selectedBankAccounts[0]
-                ? {
-                    bankName: selectedBankAccounts[0].bankName,
-                    accountNumber: selectedBankAccounts[0].accountNumber,
-                    accountHolder: selectedBankAccounts[0].ownerName,
-                    idNumber: selectedBankAccounts[0].ownerCedula,
-                  }
+              ...banksForRequest,
+              ...firmanteFields,
+              ...(firmaDataUrl
+                ? { firmaArrendadorBase64: firmaDataUrl }
                 : {}),
             }),
           },
@@ -192,9 +236,31 @@ export function ContractPreviewModal({
           fileBase64?: string;
           filename?: string;
           error?: string;
+          bankAccountsCount?: number;
+          bankPreview?: string;
+          firmaEmbedded?: boolean;
         };
         if (!res.ok || !data.fileBase64) {
           throw new Error(data.error || 'No se pudo generar el contrato.');
+        }
+        if ((data.bankAccountsCount ?? 0) === 0) {
+          console.warn('[contrato] servidor no resolvió cuentas', data.bankPreview);
+          toast.error(
+            'El contrato salió sin cuentas bancarias. Vuelve a marcar la cuenta e intenta de nuevo.',
+          );
+        } else {
+          console.info('[contrato] cuentas OK', data.bankAccountsCount, data.bankPreview);
+        }
+        if (firmanteFields.firmaArrendadorUrl && !data.firmaEmbedded) {
+          console.warn('[contrato] firma no embebida', {
+            url: firmanteFields.firmaArrendadorUrl,
+            clientDataUrl: Boolean(firmaDataUrl),
+          });
+          toast.error(
+            'La firma no se pudo incrustar en el Word. Usa PNG o JPG (no WebP) y vuelve a generar.',
+          );
+        } else if (data.firmaEmbedded) {
+          console.info('[contrato] firma OK');
         }
         if (cancelled) return;
 
@@ -247,7 +313,16 @@ export function ContractPreviewModal({
       superdocRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, selectedBankIds, selectedBankAccounts]);
+  }, [
+    draft.fincaId,
+    draft.contractCode,
+    draft.checkIn,
+    draft.checkOut,
+    banksKey,
+    firmanteFields.firmaArrendadorUrl,
+    firmanteFields.adminName,
+    firmanteFields.adminCedula,
+  ]);
 
   /** Exporta el docx editado del editor como Blob. */
   async function exportEditedDocx(): Promise<Blob> {

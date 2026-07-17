@@ -28,6 +28,9 @@ import {
   Sparkles,
   Trash2,
   Wand2,
+  PenLine,
+  Pencil,
+  Star,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -42,8 +45,13 @@ import {
   getContractSettingsSnapshot,
   useContractSettingsStore,
   type BankAccount as StoreBankAccount,
+  type Firmante as StoreFirmante,
 } from '@/features/admin/store/contract-settings.store';
 import { BankAccountDialog } from '@/features/admin/components/contracts/bank-account-dialog';
+import {
+  FirmanteDialog,
+  type FirmanteFormData,
+} from '@/features/admin/components/contracts/firmante-dialog';
 import { ContractPreviewModal } from '@/features/inbox/components/ContractPreviewModal';
 import { ReservasTool } from '@/features/inbox/components/tools/ReservasTool';
 import { VentaTool } from '@/features/inbox/components/tools/VentaTool';
@@ -53,6 +61,7 @@ import {
   loadInboxContratoDraft,
   saveInboxContratoDraft,
 } from '@/features/inbox/utils/contrato-draft-storage';
+import { resolveSelectedBankPayload } from '@/features/inbox/utils/selected-bank-accounts';
 import { buildInboxContractUpsertArgs } from '@/features/inbox/utils/persist-inbox-contract';
 import { ContractCodeSellerButtons } from '@/features/admin/components/contracts/contract-code-seller-buttons';
 import type { AsesorTool } from '@/features/inbox/components/IconRail';
@@ -380,14 +389,101 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         bankAccounts?: BankAccount[];
         contractBankAccountIds?: string[];
         primaryBankAccountId?: string;
+        firmantes?: Array<{
+          id: string;
+          nombre: string;
+          cargo?: string;
+          cedula?: string;
+          ciudad?: string;
+          firmaUrl?: string;
+          esDefault?: boolean;
+        }>;
+        adminSettings?: {
+          adminName?: string;
+          adminCedula?: string;
+          adminCity?: string;
+        };
         [key: string]: unknown;
       }
     | null
     | undefined;
   const replaceSettings = useMutation(api.adminContractSettings.replaceForAdmin);
-  const bankAccounts: BankAccount[] = settings?.bankAccounts ?? [];
+  const storeBankAccounts = useContractSettingsStore((s) => s.bankAccounts);
+  const storeFirmantes = useContractSettingsStore((s) => s.firmantes);
+  /** Catálogo de cuentas: une Convex + store local (por id). */
+  const bankAccounts: BankAccount[] = useMemo(() => {
+    const map = new Map<string, BankAccount>();
+    for (const a of storeBankAccounts) {
+      if (!a?.id) continue;
+      map.set(String(a.id), {
+        id: String(a.id),
+        bankName: a.bankName,
+        accountType: a.accountType,
+        accountNumber: a.accountNumber,
+        ownerName: a.ownerName,
+        ownerCedula: a.ownerCedula,
+        brebKey: a.brebKey,
+      });
+    }
+    for (const a of (settings?.bankAccounts ?? []) as BankAccount[]) {
+      if (!a?.id) continue;
+      const id = String(a.id);
+      map.set(id, { ...map.get(id), ...a, id });
+    }
+    return Array.from(map.values());
+  }, [settings?.bankAccounts, storeBankAccounts]);
+
+  type InboxFirmante = {
+    id: string;
+    nombre: string;
+    cargo?: string;
+    cedula?: string;
+    ciudad?: string;
+    firmaUrl?: string;
+    esDefault?: boolean;
+  };
+
+  const firmantes: InboxFirmante[] = useMemo(() => {
+    const map = new Map<string, InboxFirmante>();
+    for (const f of storeFirmantes as StoreFirmante[]) {
+      if (!f?.id) continue;
+      map.set(String(f.id), {
+        id: String(f.id),
+        nombre: f.nombre,
+        cargo: f.cargo,
+        cedula: f.cedula,
+        ciudad: f.ciudad,
+        firmaUrl: f.firmaUrl,
+        esDefault: f.esDefault,
+      });
+    }
+    for (const f of settings?.firmantes ?? []) {
+      if (!f?.id) continue;
+      const id = String(f.id);
+      map.set(id, { ...map.get(id), ...f, id });
+    }
+    return Array.from(map.values());
+  }, [settings?.firmantes, storeFirmantes]);
+
   const [draft, setDraft] = useState<ContractDraft>(EMPTY_DRAFT);
   const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
+  const [selectedFirmanteId, setSelectedFirmanteId] = useState<string>('');
+  const selectedBankPayload = useMemo(
+    () => resolveSelectedBankPayload(bankAccounts, selectedBankIds),
+    [bankAccounts, selectedBankIds],
+  );
+
+  /** Solo si el asesor marcó uno y sigue existiendo; vacío = sin imagen. */
+  const selectedFirmante = useMemo(() => {
+    if (!selectedFirmanteId) return null;
+    return firmantes.find((f) => f.id === selectedFirmanteId) ?? null;
+  }, [firmantes, selectedFirmanteId]);
+
+  /** Solo la imagen: nombre/cédula del ARRENDADOR siguen los ajustes globales. */
+  const firmanteContractFields = useMemo(() => {
+    if (!selectedFirmante?.firmaUrl) return {};
+    return { firmaArrendadorUrl: selectedFirmante.firmaUrl };
+  }, [selectedFirmante]);
   const [bankTouched, setBankTouched] = useState(false);
   /** Solo persistir cuando el draft en memoria corresponde a este chat. */
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
@@ -398,6 +494,14 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const [deletingBankId, setDeletingBankId] = useState<string | null>(null);
   const [bankDialogOpen, setBankDialogOpen] = useState(false);
   const [savingBank, setSavingBank] = useState(false);
+  const [firmanteDialogOpen, setFirmanteDialogOpen] = useState(false);
+  const [editingFirmante, setEditingFirmante] = useState<InboxFirmante | null>(
+    null,
+  );
+  const [savingFirmante, setSavingFirmante] = useState(false);
+  const [deletingFirmanteId, setDeletingFirmanteId] = useState<string | null>(
+    null,
+  );
 
   const conversationId = conversation?.conversationId ?? null;
   const draftReady = Boolean(conversationId && hydratedFor === conversationId);
@@ -473,9 +577,12 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   }, [settings, draftReady, bankTouched]);
 
   const toggleBank = (id: string) => {
+    const key = String(id);
     setBankTouched(true);
     setSelectedBankIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+      prev.map(String).includes(key)
+        ? prev.filter((x) => String(x) !== key)
+        : [...prev, key],
     );
   };
 
@@ -572,6 +679,126 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
       );
     } finally {
       setDeletingBankId(null);
+    }
+  };
+
+  const persistFirmantes = async (nextFirmantes: InboxFirmante[]) => {
+    const base =
+      settings ??
+      getContractSettingsSnapshot(useContractSettingsStore.getState());
+    await replaceSettings({
+      payload: {
+        ...base,
+        firmantes: nextFirmantes,
+      },
+    });
+    useContractSettingsStore.setState({
+      firmantes: nextFirmantes.map((f) => ({
+        id: f.id,
+        nombre: f.nombre,
+        cargo: f.cargo ?? '',
+        cedula: f.cedula ?? '',
+        ciudad: f.ciudad ?? '',
+        firmaUrl: f.firmaUrl,
+        esDefault: f.esDefault,
+      })),
+    });
+  };
+
+  const handleSaveFirmante = async (data: FirmanteFormData) => {
+    if (savingFirmante) return;
+    setSavingFirmante(true);
+    try {
+      let next: InboxFirmante[];
+      if (editingFirmante) {
+        next = firmantes.map((f) =>
+          f.id === editingFirmante.id
+            ? {
+                ...f,
+                nombre: data.nombre,
+                cargo: data.cargo,
+                cedula: data.cedula,
+                ciudad: data.ciudad,
+                firmaUrl: data.firmaUrl,
+              }
+            : f,
+        );
+      } else {
+        const id = crypto.randomUUID();
+        const isFirst = firmantes.length === 0;
+        next = [
+          ...firmantes,
+          {
+            id,
+            nombre: data.nombre,
+            cargo: data.cargo,
+            cedula: data.cedula,
+            ciudad: data.ciudad,
+            firmaUrl: data.firmaUrl,
+            esDefault: isFirst,
+          },
+        ];
+        setSelectedFirmanteId(id);
+      }
+      await persistFirmantes(next);
+      setFirmanteDialogOpen(false);
+      setEditingFirmante(null);
+      toast.success(editingFirmante ? 'Firmante actualizado' : 'Firmante agregado');
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo guardar el firmante',
+      );
+    } finally {
+      setSavingFirmante(false);
+    }
+  };
+
+  const handleDeleteFirmante = async (id: string, nombre: string) => {
+    if (deletingFirmanteId) return;
+    if (
+      !window.confirm(
+        `¿Eliminar a ${nombre}? Se quita del catálogo de firmantes (no solo de esta selección).`,
+      )
+    ) {
+      return;
+    }
+    setDeletingFirmanteId(id);
+    try {
+      let next = firmantes.filter((f) => f.id !== id);
+      if (next.length > 0 && !next.some((f) => f.esDefault)) {
+        next = next.map((f, i) => ({ ...f, esDefault: i === 0 }));
+      }
+      await persistFirmantes(next);
+      setSelectedFirmanteId((prev) =>
+        prev === id ? (next[0]?.id ?? '') : prev,
+      );
+      toast.success('Firmante eliminado');
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo eliminar el firmante',
+      );
+    } finally {
+      setDeletingFirmanteId(null);
+    }
+  };
+
+  const handleSetDefaultFirmante = async (id: string) => {
+    if (savingFirmante) return;
+    setSavingFirmante(true);
+    try {
+      const next = firmantes.map((f) => ({
+        ...f,
+        esDefault: f.id === id,
+      }));
+      await persistFirmantes(next);
+      setSelectedFirmanteId(id);
+      toast.success('Firmante por defecto actualizado');
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo marcar por defecto',
+      );
+    } finally {
+      setSavingFirmante(false);
     }
   };
 
@@ -784,6 +1011,17 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
       toast.error('Selecciona la finca.');
       return;
     }
+    if (selectedBankIds.length === 0) {
+      toast.error('Selecciona al menos una cuenta de pago.');
+      return;
+    }
+    const bankPayload = resolveSelectedBankPayload(bankAccounts, selectedBankIds);
+    if (bankPayload.bankAccounts.length === 0) {
+      toast.error(
+        'Las cuentas marcadas no tienen número/banco. Vuelve a seleccionarlas o agrégalas de nuevo.',
+      );
+      return;
+    }
     const nights = (() => {
       const a = new Date(`${draft.checkIn}T12:00:00`).getTime();
       const b = new Date(`${draft.checkOut}T12:00:00`).getTime();
@@ -832,33 +1070,8 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             extraPersonFeeLabel: toStoredCopLabel(
               normalizeExtraPersonFee(draft.extraPersonFee),
             ),
-            bankAccountIds: selectedBankIds,
-            bankAccounts: bankAccounts
-              .filter((a) => selectedBankIds.includes(a.id))
-              .map((a) => ({
-                id: a.id,
-                bankName: a.bankName,
-                accountType: a.accountType,
-                accountNumber: a.accountNumber,
-                ownerName: a.ownerName,
-                ownerCedula: a.ownerCedula,
-              })),
-            // Fallback 1 cuenta por si el cluster multi falla en el servidor.
-            ...(selectedBankIds[0]
-              ? (() => {
-                  const first = bankAccounts.find(
-                    (a) => a.id === selectedBankIds[0],
-                  );
-                  return first
-                    ? {
-                        bankName: first.bankName,
-                        accountNumber: first.accountNumber,
-                        accountHolder: first.ownerName,
-                        idNumber: first.ownerCedula,
-                      }
-                    : {};
-                })()
-              : {}),
+            ...bankPayload,
+            ...firmanteContractFields,
           }),
         },
       );
@@ -1266,7 +1479,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             ).map(([owner, accs]) => {
               const open = openOwners.has(owner);
               const selCount = accs.filter((a) =>
-                selectedBankIds.includes(a.id),
+                selectedBankIds.map(String).includes(String(a.id)),
               ).length;
               return (
                 <div
@@ -1305,7 +1518,9 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                   {open ? (
                     <div className="space-y-1.5 p-2">
                       {accs.map((acc) => {
-                        const on = selectedBankIds.includes(acc.id);
+                        const on = selectedBankIds
+                          .map(String)
+                          .includes(String(acc.id));
                         const deleting = deletingBankId === acc.id;
                         const label = `${acc.bankName}${acc.accountNumber ? ` · ${acc.accountNumber}` : ''}`;
                         return (
@@ -1379,6 +1594,197 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         />
       </Section>
 
+      <Section
+        title="Firma arrendador"
+        hint={
+          selectedFirmante
+            ? selectedFirmante.nombre
+            : firmantes.length === 0
+              ? 'Sin firmantes'
+              : 'Opcional'
+        }
+      >
+        <div className="mb-3 flex justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              setEditingFirmante(null);
+              setFirmanteDialogOpen(true);
+            }}
+            disabled={savingFirmante}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[11px] font-bold text-foreground hover:bg-muted disabled:opacity-60"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Agregar firmante
+          </button>
+        </div>
+        {firmantes.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No hay firmantes aún. Agrega el primero con el botón de arriba
+            (nombre + imagen PNG de la firma). La firma es opcional: puedes
+            generar el contrato sin ella.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setSelectedFirmanteId('')}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition',
+                !selectedFirmante
+                  ? 'border-primary/50 bg-primary/5'
+                  : 'border-border hover:bg-muted/40',
+              )}
+            >
+              <span
+                className={cn(
+                  'grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 transition',
+                  !selectedFirmante
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border',
+                )}
+              >
+                {!selectedFirmante ? <Check className="h-3 w-3" /> : null}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-bold">Sin firma</p>
+                <p className="text-[11px] text-muted-foreground">
+                  El contrato sale sin imagen sobre la línea ARRENDADOR
+                </p>
+              </div>
+            </button>
+            {firmantes.map((f) => {
+              const on = selectedFirmante?.id === f.id;
+              const deleting = deletingFirmanteId === f.id;
+              return (
+                <div
+                  key={f.id}
+                  className={cn(
+                    'flex items-center gap-1 rounded-xl border transition',
+                    on
+                      ? 'border-primary/50 bg-primary/5'
+                      : 'border-border',
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedFirmanteId((prev) =>
+                        prev === f.id ? '' : f.id,
+                      )
+                    }
+                    className="flex min-w-0 flex-1 items-center gap-3 p-2.5 text-left hover:bg-muted/40"
+                  >
+                    <span
+                      className={cn(
+                        'grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 transition',
+                        on
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-border',
+                      )}
+                    >
+                      {on ? <Check className="h-3 w-3" /> : null}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-bold">
+                        {f.nombre}
+                        {f.esDefault ? (
+                          <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground">
+                            · default
+                          </span>
+                        ) : null}
+                      </p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {[f.cargo, f.cedula ? `C.C. ${f.cedula}` : '', f.ciudad]
+                          .filter(Boolean)
+                          .join(' · ') || 'Sin datos de documento'}
+                      </p>
+                    </div>
+                    {f.firmaUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={f.firmaUrl}
+                        alt={`Firma de ${f.nombre}`}
+                        className="h-10 w-24 shrink-0 rounded-md border border-border bg-white object-contain p-0.5"
+                      />
+                    ) : (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-dashed border-amber-500/40 px-2 py-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                        <PenLine className="h-3 w-3" />
+                        Sin imagen
+                      </span>
+                    )}
+                  </button>
+                  {!f.esDefault ? (
+                    <button
+                      type="button"
+                      title="Marcar por defecto"
+                      onClick={() => void handleSetDefaultFirmante(f.id)}
+                      disabled={savingFirmante}
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    >
+                      <Star className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    title="Editar"
+                    onClick={() => {
+                      setEditingFirmante(f);
+                      setFirmanteDialogOpen(true);
+                    }}
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    title="Eliminar"
+                    onClick={() => void handleDeleteFirmante(f.id, f.nombre)}
+                    disabled={deleting}
+                    className="mr-1 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                  >
+                    {deleting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+            {selectedFirmante && !selectedFirmante.firmaUrl ? (
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                Este firmante no tiene imagen: el contrato saldrá sin{' '}
+                <span className="font-semibold">{'{{Firma}}'}</span>.
+              </p>
+            ) : null}
+          </div>
+        )}
+        <FirmanteDialog
+          open={firmanteDialogOpen}
+          onClose={() => {
+            setFirmanteDialogOpen(false);
+            setEditingFirmante(null);
+          }}
+          initial={
+            editingFirmante
+              ? {
+                  id: editingFirmante.id,
+                  nombre: editingFirmante.nombre,
+                  cargo: editingFirmante.cargo ?? '',
+                  cedula: editingFirmante.cedula ?? '',
+                  ciudad: editingFirmante.ciudad ?? '',
+                  firmaUrl: editingFirmante.firmaUrl,
+                  esDefault: editingFirmante.esDefault,
+                }
+              : null
+          }
+          onSave={handleSaveFirmante}
+          saving={savingFirmante}
+          contentClassName="bg-card text-foreground"
+        />
+      </Section>
+
       <Section title="Cliente">
         <div className="grid grid-cols-2 gap-3">
           {field('Nombres', 'clientFirstName', 'NOMBRES')}
@@ -1415,11 +1821,21 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
       <div className="sticky bottom-0 -mx-4 mt-auto flex items-center gap-2 border-t border-border bg-background/90 px-4 py-3 backdrop-blur">
         <button
           type="button"
-          onClick={() =>
-            draft.fincaId
-              ? setShowPreview(true)
-              : toast.error('Selecciona la finca.')
-          }
+          onClick={() => {
+            if (!draft.fincaId) {
+              toast.error('Selecciona la finca.');
+              return;
+            }
+            if (selectedBankPayload.bankAccounts.length === 0) {
+              toast.error(
+                selectedBankIds.length > 0
+                  ? 'Las cuentas marcadas no tienen datos. Vuelve a seleccionarlas.'
+                  : 'Selecciona al menos una cuenta de pago.',
+              );
+              return;
+            }
+            setShowPreview(true);
+          }}
           disabled={!draft.fincaId}
           className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
         >
@@ -1446,17 +1862,9 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             ...draft,
             clientName: fullClientName(draft),
           }}
-          selectedBankIds={selectedBankIds}
-          selectedBankAccounts={bankAccounts
-            .filter((a) => selectedBankIds.includes(a.id))
-            .map((a) => ({
-              id: a.id,
-              bankName: a.bankName,
-              accountType: a.accountType,
-              accountNumber: a.accountNumber,
-              ownerName: a.ownerName,
-              ownerCedula: a.ownerCedula,
-            }))}
+          selectedBankIds={selectedBankPayload.bankAccountIds}
+          selectedBankAccounts={selectedBankPayload.bankAccounts}
+          firmanteFields={firmanteContractFields}
           conversation={conversation}
           propertyTitle={
             fincas?.find((f) => f._id === draft.fincaId)?.title ??

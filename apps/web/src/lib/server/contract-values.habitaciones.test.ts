@@ -52,7 +52,26 @@ describe("habitaciones en contrato", () => {
         zoneOrder: ["GENERAL", "Habitación 1", "Habitación 2"],
       },
     );
-    expect(text).toBe("02 HABITACIONES\nPISCINA\n02 BAÑO");
+    expect(text).toBe("02 HABITACIONES\n02 BAÑO\nPISCINA");
+  });
+
+  test("prioriza featuredIcons y limita a 33 amenidades", () => {
+    const features = Array.from({ length: 40 }, (_, i) => ({
+      name: `Amenidad ${i + 1}`,
+      quantity: 1,
+      iconId: `icon-${i + 1}`,
+    }));
+    const text = formatFincaFeaturesPlain(features, {
+      habitaciones: 4,
+      featuredIconIds: ["icon-40", "icon-39", "icon-1"],
+      maxAmenities: 33,
+    });
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("04 HABITACIONES");
+    expect(lines).toHaveLength(34); // 1 habitaciones + 33 amenidades
+    expect(lines[1]).toBe("AMENIDAD 40");
+    expect(lines[2]).toBe("AMENIDAD 39");
+    expect(lines[3]).toBe("AMENIDAD 1");
   });
 
   test("override manual de habitaciones gana sobre zonas", () => {

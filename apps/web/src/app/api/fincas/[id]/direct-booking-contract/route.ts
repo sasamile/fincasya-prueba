@@ -9,6 +9,7 @@ import {
   type ContractDto,
   type ContractFinca,
 } from "@/lib/server/contract-values";
+import { fetchFirmaImage } from "@/lib/server/fetch-firma-image";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -111,17 +112,69 @@ export async function POST(
       capacity: (property as { capacity?: number }).capacity,
       features: (property as { features?: unknown[] }).features,
       zoneOrder: (property as { zoneOrder?: string[] }).zoneOrder,
+      featuredIcons: (property as { featuredIcons?: string[] }).featuredIcons,
     };
 
     const contractNumber = resolveContractNumber(dto, finca);
-    const { values, featuresRaw, bankAccounts, ownerName, ownerCedula } =
-      buildContractWordValues(dto, finca, settingsPayload, contractNumber);
+    const {
+      values,
+      featuresRaw,
+      bankAccounts,
+      ownerName,
+      ownerCedula,
+      firmaArrendadorUrl,
+    } = buildContractWordValues(dto, finca, settingsPayload, contractNumber);
+
+    const dtoBanks = Array.isArray(dto.bankAccounts) ? dto.bankAccounts : [];
+    const dtoIds = Array.isArray(dto.bankAccountIds) ? dto.bankAccountIds : [];
+    if (
+      (dtoIds.length > 0 || dtoBanks.length > 0) &&
+      bankAccounts.length === 0 &&
+      !String(values.cuentaNumero ?? "").trim()
+    ) {
+      console.error("[direct-booking-contract] cuentas no resueltas", {
+        dtoIds,
+        dtoBanksCount: dtoBanks.length,
+        dtoBanksSample: dtoBanks.slice(0, 2),
+        settingsHasBanks: Boolean(
+          settingsPayload &&
+            typeof settingsPayload === "object" &&
+            Array.isArray(
+              (settingsPayload as { bankAccounts?: unknown }).bankAccounts,
+            ),
+        ),
+      });
+      return NextResponse.json(
+        {
+          error:
+            "No se pudieron resolver las cuentas bancarias seleccionadas. Vuelve a marcarlas en el sheet e intenta de nuevo.",
+        },
+        { status: 422 },
+      );
+    }
+
+    const firmaImage = await fetchFirmaImage(firmaArrendadorUrl);
+    console.info("[direct-booking-contract] firma", {
+      url: firmaArrendadorUrl ? String(firmaArrendadorUrl).slice(0, 100) : null,
+      embedded: Boolean(firmaImage),
+      bytes: firmaImage?.bytes.length ?? 0,
+      ext: firmaImage?.ext ?? null,
+    });
+
+    console.info("[direct-booking-contract] banks", {
+      ids: dto.bankAccountIds,
+      incoming: Array.isArray(dto.bankAccounts) ? dto.bankAccounts.length : 0,
+      resolved: bankAccounts.length,
+      cuentaNumero: values.cuentaNumero,
+      cuentasBancarias: values.cuentasBancarias?.slice(0, 120),
+    });
 
     const docx = fillContractDocx(template, values, {
       featuresRaw,
       bankAccounts,
       ownerName,
       ownerCedula,
+      firmaImage,
     });
 
     const baseName = `Contrato_${sanitize(finca.title || "FincasYa")}_${sanitize(contractNumber)}`;
@@ -136,6 +189,9 @@ export async function POST(
         mimeType:
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         contractNumber,
+        bankAccountsCount: bankAccounts.length,
+        bankPreview: values.cuentasBancarias || values.cuentaNumero || "",
+        firmaEmbedded: Boolean(firmaImage),
       });
     }
 

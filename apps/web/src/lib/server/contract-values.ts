@@ -141,9 +141,12 @@ export function parseContractSettingsPayload(payload: unknown): {
 
 export function aggregatePropertyFeatureCounts(
   features: unknown[],
-): Array<{ name: string; count: number }> {
+): Array<{ name: string; count: number; iconIds: string[] }> {
   if (!features?.length) return [];
-  const counts = new Map<string, number>();
+  const counts = new Map<
+    string,
+    { count: number; iconIds: Set<string> }
+  >();
   for (const f of features) {
     const name = (
       typeof f === "string"
@@ -161,9 +164,20 @@ export function aggregatePropertyFeatureCounts(
       (f as { quantity?: number }).quantity != null
         ? Math.max(1, Number((f as { quantity?: number }).quantity) || 1)
         : 1;
-    counts.set(name, (counts.get(name) ?? 0) + qty);
+    const iconId =
+      f && typeof f === "object"
+        ? String((f as { iconId?: string }).iconId ?? "").trim()
+        : "";
+    const prev = counts.get(name) ?? { count: 0, iconIds: new Set<string>() };
+    prev.count += qty;
+    if (iconId) prev.iconIds.add(iconId);
+    counts.set(name, prev);
   }
-  return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
+  return Array.from(counts.entries()).map(([name, { count, iconIds }]) => ({
+    name,
+    count,
+    iconIds: Array.from(iconIds),
+  }));
 }
 
 export function formatFeatureContractLine(name: string, count: number): string {
@@ -224,12 +238,19 @@ export type FormatFincaFeaturesOpts = {
   habitaciones?: number | string | null;
   /** Orden de zonas de la propiedad (preferido para contar habitaciones). */
   zoneOrder?: string[] | null;
+  /** Máximo de amenidades en el contrato (además de HABITACIONES). Default 33. */
+  maxAmenities?: number;
+  /**
+   * IDs de iconography marcados como “principales” en la finca (featuredIcons).
+   * Van primero; el resto completa hasta maxAmenities.
+   */
+  featuredIconIds?: string[] | null;
 };
 
 /**
  * Texto plano para {{caracteristicasDeFinca}}:
  * 1) "NN HABITACIONES" (zonas Habitación N, o override manual)
- * 2) resto de amenidades agregadas por nombre (PISCINA, BAÑO, …)
+ * 2) hasta 33 amenidades principales (featured primero, luego el resto)
  */
 export function formatFincaFeaturesPlain(
   features: unknown[],
@@ -251,12 +272,44 @@ export function formatFincaFeaturesPlain(
   const roomsLine = formatHabitacionesContractLine(roomCount);
   if (roomsLine) lines.push(roomsLine);
 
-  const items = aggregatePropertyFeatureCounts(features || []);
+  const maxAmenities = Math.max(0, opts?.maxAmenities ?? 33);
+  const featuredIds = (opts?.featuredIconIds ?? [])
+    .map((id) => String(id ?? "").trim())
+    .filter(Boolean);
+  const featuredRank = new Map(featuredIds.map((id, i) => [id, i]));
+
+  const items = aggregatePropertyFeatureCounts(features || []).toSorted(
+    (a, b) => {
+      const rankA = a.iconIds.reduce(
+        (best, id) =>
+          featuredRank.has(id)
+            ? Math.min(best, featuredRank.get(id)!)
+            : best,
+        Number.POSITIVE_INFINITY,
+      );
+      const rankB = b.iconIds.reduce(
+        (best, id) =>
+          featuredRank.has(id)
+            ? Math.min(best, featuredRank.get(id)!)
+            : best,
+        Number.POSITIVE_INFINITY,
+      );
+      if (rankA !== rankB) return rankA - rankB;
+      // Sin featured: las de mayor cantidad primero (más “presentes”).
+      if (b.count !== a.count) return b.count - a.count;
+      return a.name.localeCompare(b.name, "es");
+    },
+  );
+
+  let amenityCount = 0;
   for (const { name, count } of items) {
     // Evita duplicar "HABITACIONES" si alguien la cargó como amenidad suelta.
     if (/^habitaciones?$/i.test(name.trim())) continue;
     const line = formatFeatureContractLine(name, count);
-    if (line) lines.push(line);
+    if (!line) continue;
+    lines.push(line);
+    amenityCount += 1;
+    if (amenityCount >= maxAmenities) break;
   }
   return lines.join("\n");
 }
@@ -433,6 +486,8 @@ export type ContractFinca = {
   features?: unknown[];
   /** Orden de zonas (HABITACIÓN 1, GENERAL, …) desde admin. */
   zoneOrder?: string[];
+  /** Iconos destacados de la finca (amenidades principales). */
+  featuredIcons?: string[];
 };
 
 /** Payload del contrato (salida de buildContractPayload en el front). */
@@ -478,17 +533,48 @@ export type ContractDto = Record<string, unknown> & {
   adminName?: string;
   adminCedula?: string;
   adminCity?: string;
+  /** URL pública de la imagen de firma del arrendador (opcional → `{{Firma}}`). */
+  firmaArrendadorUrl?: string;
+  /** Base64 o data-URL de la firma (fallback si S3 no es fetchable desde el server). */
+  firmaArrendadorBase64?: string;
   signature?: string;
 };
 
 export type ContractWordValuesResult = {
   values: Record<string, string>;
   featuresRaw: string;
-  bankAccounts: Array<{ accountNumber?: string; bankName?: string }>;
+  bankAccounts: Array<{
+    accountNumber?: string;
+    bankName?: string;
+    accountType?: string;
+    ownerName?: string;
+    ownerCedula?: string;
+  }>;
   ownerName: string;
   ownerCedula: string;
   contractNumber: string;
+  /** URL de firma del arrendador para incrustar en `{{Firma}}` (opcional). */
+  firmaArrendadorUrl?: string;
 };
+
+/**
+ * Firma del arrendador: solo si el cliente la eligió explícitamente.
+ * Sin URL/base64 en el DTO → contrato sin imagen (opcional).
+ */
+export function resolveFirmaArrendadorUrl(
+  dto: ContractDto,
+  _contractSettingsPayload?: unknown,
+): string {
+  // Preferir data/base64 embebido por el cliente (más fiable que S3 público).
+  const fromB64 = String(dto.firmaArrendadorBase64 ?? "").trim();
+  if (fromB64) {
+    if (fromB64.startsWith("data:image/")) return fromB64;
+    // Asumir PNG si solo viene el payload base64.
+    return `data:image/png;base64,${fromB64}`;
+  }
+
+  return String(dto.firmaArrendadorUrl ?? "").trim();
+}
 
 /**
  * Construye el objeto de placeholders para la plantilla .docx a partir del
@@ -600,6 +686,8 @@ export function buildContractWordValues(
       habitaciones:
         habitacionesHint != null ? String(habitacionesHint) : undefined,
       zoneOrder: finca.zoneOrder,
+      featuredIconIds: finca.featuredIcons,
+      maxAmenities: 33,
     });
   const nombrePropietario =
     (dto.propertyOwnerName && String(dto.propertyOwnerName).trim()) ||
@@ -751,6 +839,9 @@ export function buildContractWordValues(
     adminNombre: (dto.adminName?.trim() || contractAdmin.adminName || "").trim(),
     adminCedula: (dto.adminCedula?.trim() || contractAdmin.adminCedula || "").trim(),
     adminCiudad: (dto.adminCity?.trim() || contractAdmin.adminCity || "").trim(),
+    // Placeholder de imagen; si no hay firma se limpia en fillContractDocx.
+    Firma: "",
+    firma: "",
   };
 
   const cleaningFeeCop = (Number(dto.cleaningFee) || 0) + petCleaningFee;
@@ -795,6 +886,11 @@ export function buildContractWordValues(
     ownerCedula: a.ownerCedula,
   }));
 
+  const firmaArrendadorUrl = resolveFirmaArrendadorUrl(
+    dto,
+    contractSettingsPayload,
+  );
+
   return {
     values,
     featuresRaw: caracteristicasPlain,
@@ -802,5 +898,6 @@ export function buildContractWordValues(
     ownerName: contractAccountHolder,
     ownerCedula: contractAccountCedula,
     contractNumber: displayContractNumber,
+    ...(firmaArrendadorUrl ? { firmaArrendadorUrl } : {}),
   };
 }

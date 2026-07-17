@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import axios from "axios";
 import { toast } from "sonner";
 import {
+  Check,
   CheckCircle2,
   CreditCard,
   Download,
@@ -627,7 +628,8 @@ export function ContractsReservationSection({
   ] as const;
   const CONTRACT_STEP_HINTS: Record<(typeof CONTRACT_STEPS)[number], string> = {
     Finca: "Busca y selecciona la finca para este contrato.",
-    Propietario: "Nombre y documento del propietario en el contrato.",
+    Propietario:
+      "Propietario de la finca y firmante de Fincas Ya (imagen {{Firma}}).",
     Estadía: "Fechas, horas, huéspedes y valores del arrendamiento.",
     Cargos: "Mascotas, servicio, manilla, otros cobros y evento.",
     Cliente: "Datos de quien firma el contrato.",
@@ -646,10 +648,9 @@ export function ContractsReservationSection({
   };
   const selectedFirmante = useMemo(
     () =>
-      firmantes.find((f) => f.id === selectedFirmanteId) ??
-      firmantes.find((f) => f.esDefault) ??
-      firmantes[0] ??
-      null,
+      selectedFirmanteId
+        ? (firmantes.find((f) => f.id === selectedFirmanteId) ?? null)
+        : null,
     [firmantes, selectedFirmanteId],
   );
 
@@ -1464,16 +1465,10 @@ export function ContractsReservationSection({
     propertyOwnerName: ownerResolved.name,
     propertyOwnerCedula: ownerResolved.cedula,
     propertyOwnerCity: ownerResolved.ciudadCedula,
-    // Firmante de Fincas Ya elegido para este contrato (override del global).
-    ...(selectedFirmante
-      ? {
-          adminName: selectedFirmante.nombre,
-          adminCedula: selectedFirmante.cedula,
-          adminCity: selectedFirmante.ciudad,
-          ...(selectedFirmante.firmaUrl
-            ? { firmaArrendadorUrl: selectedFirmante.firmaUrl }
-            : {}),
-        }
+    // Firma opcional: solo la imagen si el asesor la eligió.
+    // Nombre/cédula del ARRENDADOR siguen los ajustes globales (Hernán).
+    ...(selectedFirmante?.firmaUrl
+      ? { firmaArrendadorUrl: selectedFirmante.firmaUrl }
       : {}),
   });
 
@@ -2249,16 +2244,9 @@ export function ContractsReservationSection({
         // los placeholders del cliente sin rellenar; al completar el link, el
         // backend los rellena y genera el MISMO contrato que en "Confirmación".
         previewHtml: contractPreviewHtml,
-        // Firmante elegido para este contrato (se usa al generar el PDF al completar el link).
-        ...(selectedFirmante
-          ? {
-              adminName: selectedFirmante.nombre,
-              adminCedula: selectedFirmante.cedula,
-              adminCity: selectedFirmante.ciudad,
-              ...(selectedFirmante.firmaUrl
-                ? { firmaArrendadorUrl: selectedFirmante.firmaUrl }
-                : {}),
-            }
+        // Firma opcional: solo imagen si eligió una.
+        ...(selectedFirmante?.firmaUrl
+          ? { firmaArrendadorUrl: selectedFirmante.firmaUrl }
           : {}),
         nightlyPrice: nextFormState.nightlyPrice,
         checkInDate: nextFormState.checkInDate,
@@ -3012,6 +3000,117 @@ export function ContractsReservationSection({
                           placeholder="Ej. Bogotá D.C."
                           className={ownerFieldClass()}
                         />
+                      </div>
+
+                      <div className="space-y-2 md:col-span-2">
+                        <Label className="ml-1 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                          Firma en el contrato (opcional)
+                        </Label>
+                        {firmantes.length === 0 ? (
+                          <p className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-3 text-xs text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400">
+                            No hay firmantes. Cárgalos en Ajustes globales →
+                            Firmantes del contrato. Puedes generar sin firma.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedFirmanteId("")}
+                              className={cn(
+                                "flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition",
+                                !selectedFirmanteId
+                                  ? "border-emerald-400 bg-emerald-50/80 dark:border-emerald-600 dark:bg-emerald-950/30"
+                                  : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800/60",
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "grid h-5 w-5 shrink-0 place-items-center rounded-full border-2",
+                                  !selectedFirmanteId
+                                    ? "border-emerald-600 bg-emerald-600 text-white"
+                                    : "border-zinc-300 dark:border-zinc-600",
+                                )}
+                              >
+                                {!selectedFirmanteId ? (
+                                  <Check className="h-3 w-3" />
+                                ) : null}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">
+                                  Sin firma
+                                </p>
+                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  El contrato sale sin imagen sobre ARRENDADOR
+                                </p>
+                              </div>
+                            </button>
+                            {firmantes.map((f) => {
+                              const on =
+                                (selectedFirmante?.id ?? "") === f.id;
+                              return (
+                                <button
+                                  key={f.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setSelectedFirmanteId((prev) =>
+                                      prev === f.id ? "" : f.id,
+                                    )
+                                  }
+                                  className={cn(
+                                    "flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition",
+                                    on
+                                      ? "border-emerald-400 bg-emerald-50/80 dark:border-emerald-600 dark:bg-emerald-950/30"
+                                      : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800/60",
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "grid h-5 w-5 shrink-0 place-items-center rounded-full border-2",
+                                      on
+                                        ? "border-emerald-600 bg-emerald-600 text-white"
+                                        : "border-zinc-300 dark:border-zinc-600",
+                                    )}
+                                  >
+                                    {on ? (
+                                      <Check className="h-3 w-3" />
+                                    ) : null}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-bold text-zinc-800 dark:text-zinc-100">
+                                      {f.nombre}
+                                      {f.esDefault ? (
+                                        <span className="ml-1.5 text-[10px] font-semibold text-zinc-400">
+                                          · default
+                                        </span>
+                                      ) : null}
+                                    </p>
+                                    <p className="truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                                      {[
+                                        f.cargo,
+                                        f.cedula ? `C.C. ${f.cedula}` : "",
+                                        f.ciudad,
+                                      ]
+                                        .filter(Boolean)
+                                        .join(" · ") || "Sin datos"}
+                                    </p>
+                                  </div>
+                                  {f.firmaUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={f.firmaUrl}
+                                      alt={`Firma de ${f.nombre}`}
+                                      className="h-10 w-24 shrink-0 rounded-md border border-zinc-200 bg-white object-contain p-0.5 dark:border-zinc-700"
+                                    />
+                                  ) : (
+                                    <span className="shrink-0 rounded-md border border-dashed border-amber-300 px-2 py-1 text-[10px] font-semibold text-amber-700 dark:border-amber-700 dark:text-amber-300">
+                                      Sin imagen
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (
