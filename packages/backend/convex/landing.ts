@@ -22,13 +22,31 @@ export const listProperties = query({
       imagesByProperty.get(key)!.push({ url: img.url, order: img.order ?? 0 });
     }
 
-    // Features por finca (para los iconitos de la card).
-    const allFeatures = await ctx.db.query('propertyFeatures').collect();
-    const featuresByProperty = new Map<string, { name: string }[]>();
+    // Features por finca (para los iconitos de la card) + iconografía
+    // (SVG / emoji). Sin esto la card solo recibe el nombre y cae al check.
+    const [allFeatures, allIcons] = await Promise.all([
+      ctx.db.query('propertyFeatures').collect(),
+      ctx.db.query('iconography').collect(),
+    ]);
+    const iconsById = new Map(
+      allIcons.map((icon) => [
+        String(icon._id),
+        { iconUrl: icon.iconUrl ?? null, emoji: icon.emoji ?? null },
+      ]),
+    );
+    const featuresByProperty = new Map<
+      string,
+      { name: string; iconUrl: string | null; emoji: string | null }[]
+    >();
     for (const f of allFeatures) {
       const key = String(f.propertyId);
       if (!featuresByProperty.has(key)) featuresByProperty.set(key, []);
-      featuresByProperty.get(key)!.push({ name: f.name });
+      const icon = f.iconId ? iconsById.get(f.iconId) : undefined;
+      featuresByProperty.get(key)!.push({
+        name: f.name,
+        iconUrl: icon?.iconUrl ?? null,
+        emoji: icon?.emoji ?? null,
+      });
     }
 
     return visible.map((p) => {

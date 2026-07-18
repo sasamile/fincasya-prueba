@@ -1,9 +1,10 @@
 /** Card de finca del home — port de FincasYaWeb finca-card-home.tsx.
- *  (img nativa en vez de next/image; iconos de features con fallback check.) */
+ *  (img nativa en vez de next/image; iconos: SVG → emoji → inferido → check.) */
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Heart, Star, MapPin, Users, Check } from 'lucide-react';
 import { cn, getSeededRating, slugify } from '@/lib/utils';
+import { inferEmojiForFeatureName } from '@/features/fincas/utils/catalog-description';
 import type { PropertyResponse } from '../types';
 import {
   Carousel,
@@ -13,6 +14,45 @@ import {
   CarouselPrevious,
   type CarouselApi,
 } from '@/components/ui/carousel';
+
+type CardFeature = PropertyResponse['features'][number];
+
+function resolveFeatureEmoji(feature: CardFeature): string | null {
+  if (feature.emoji?.trim()) return feature.emoji.trim();
+  const inferred = inferEmojiForFeatureName(feature.name);
+  // inferEmoji cae en ✅ cuando no reconoce el nombre; eso no aporta en la card.
+  return inferred === '✅' ? null : inferred;
+}
+
+function featureVisualKey(f: CardFeature): string {
+  return f.iconUrl || resolveFeatureEmoji(f) || f.name;
+}
+
+function FeatureIcon({ feature }: { feature: CardFeature }) {
+  if (feature.iconUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={feature.iconUrl}
+        alt={feature.name}
+        className="w-full h-full object-contain"
+      />
+    );
+  }
+  const emoji = resolveFeatureEmoji(feature);
+  if (emoji) {
+    return (
+      <span className="text-sm leading-none" aria-hidden>
+        {emoji}
+      </span>
+    );
+  }
+  return (
+    <div className="w-5 h-5 rounded-full bg-accent flex items-center justify-center border border-border">
+      <Check className="w-3 h-3 text-muted-foreground" />
+    </div>
+  );
+}
 
 interface FincaCardHomeProps {
   finca: PropertyResponse;
@@ -143,24 +183,24 @@ export function FincaCardHome({ finca, badge, modoVenta }: FincaCardHomeProps) {
             {(() => {
               const seen = new Set<string>();
               const unique = finca.features.filter((f) => {
-                const key = f.iconUrl || f.name;
+                const key = featureVisualKey(f);
                 if (seen.has(key)) return false;
                 seen.add(key);
                 return true;
               });
-              return unique.slice(0, 4).map((feature, idx) => (
+              // Prioriza amenidades con SVG o emoji para no llenar la fila de checks.
+              const ranked = unique.toSorted((a, b) => {
+                const score = (f: CardFeature) =>
+                  f.iconUrl ? 2 : resolveFeatureEmoji(f) ? 1 : 0;
+                return score(b) - score(a);
+              });
+              return ranked.slice(0, 4).map((feature, idx) => (
                 <div
                   key={idx}
                   className="w-6 h-6 flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity"
                   title={feature.name}
                 >
-                  {feature.iconUrl ? (
-                    <img src={feature.iconUrl} alt={feature.name} className="w-full h-full object-contain" />
-                  ) : (
-                    <div className="w-5 h-5 rounded-full bg-accent flex items-center justify-center border border-border">
-                      <Check className="w-3 h-3 text-muted-foreground" />
-                    </div>
-                  )}
+                  <FeatureIcon feature={feature} />
                 </div>
               ));
             })()}

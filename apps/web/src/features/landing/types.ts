@@ -19,7 +19,12 @@ export type PropertyResponse = {
   isFavorite: boolean;
   catalogFilterTags: string[] | null;
   allowsEventsContent: boolean;
-  features: { name: string; iconUrl?: string; iconId?: string }[];
+  features: {
+    name: string;
+    iconUrl?: string | null;
+    emoji?: string | null;
+    iconId?: string;
+  }[];
   // Opcionales usados por libs portadas (legacy matching / cards)
   eventCapacity?: number | null;
   seasonPrices?: { base?: number };
