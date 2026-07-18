@@ -100,10 +100,60 @@ export default function AudiosBotPage() {
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Edición por tarjeta (solo textos; el toggle guarda directo)
+  // Edición por tarjeta (textos + audio pendiente de subir)
   const [edits, setEdits] = useState<
     Record<string, { titulo: string; situacion: string; texto: string }>
   >({});
+  const [pendingAudio, setPendingAudio] = useState<Record<string, File | null>>(
+    {},
+  );
+  const [pendingPreview, setPendingPreview] = useState<
+    Record<string, string | null>
+  >({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const replaceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const setPendingFile = (key: string, f: File | null) => {
+    setPendingPreview((prev) => {
+      const old = prev[key];
+      if (old) URL.revokeObjectURL(old);
+      return {
+        ...prev,
+        [key]: f ? URL.createObjectURL(f) : null,
+      };
+    });
+    setPendingAudio((prev) => ({ ...prev, [key]: f }));
+  };
+
+  const clearPendingFile = (key: string) => {
+    setPendingPreview((prev) => {
+      const old = prev[key];
+      if (old) URL.revokeObjectURL(old);
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setPendingAudio((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const setEditField = (
+    id: string,
+    a: AudioRow,
+    patch: Partial<{ titulo: string; situacion: string; texto: string }>,
+  ) => {
+    setEdits((prev) => {
+      const cur = prev[id] ?? {
+        titulo: a.titulo,
+        situacion: a.situacion,
+        texto: a.texto ?? "",
+      };
+      return { ...prev, [id]: { ...cur, ...patch } };
+    });
+  };
 
   const uploadFile = async (f: File): Promise<Id<"_storage">> => {
     const url = await generateUploadUrl({});
@@ -164,24 +214,61 @@ export default function AudiosBotPage() {
     }
   };
 
-  const guardarTextos = async (a: AudioRow) => {
-    const e = edits[String(a.id)];
-    if (!e) return;
+  const guardarCaso = async (a: AudioRow) => {
+    const key = String(a.id);
+    const e = edits[key] ?? {
+      titulo: a.titulo,
+      situacion: a.situacion,
+      texto: a.texto ?? "",
+    };
+    const newFile = pendingAudio[key] ?? null;
+    if (newFile && !audioFormat(newFile.type, newFile.name).ok) {
+      return toast.error(
+        "Ese formato de audio no lo acepta WhatsApp. Usa OGG/Opus o MP3.",
+      );
+    }
+    if (!e.titulo.trim()) return toast.error("El título no puede quedar vacío.");
+    if (!e.situacion.trim())
+      return toast.error("La situación no puede quedar vacía.");
+    if (!e.texto.trim() && !a.url && !newFile) {
+      return toast.error("El caso necesita al menos un audio o un texto oficial.");
+    }
+
+    setSavingId(key);
     try {
-      await updateAudio({
+      const patch: {
+        id: Id<"botAudios">;
+        titulo: string;
+        situacion: string;
+        texto: string;
+        storageId?: Id<"_storage">;
+        mimeType?: string;
+        filename?: string;
+      } = {
         id: a.id,
         titulo: e.titulo,
         situacion: e.situacion,
         texto: e.texto,
-      });
+      };
+      if (newFile) {
+        patch.storageId = await uploadFile(newFile);
+        patch.mimeType = newFile.type || undefined;
+        patch.filename = newFile.name || undefined;
+      }
+      await updateAudio(patch);
       setEdits((prev) => {
         const next = { ...prev };
-        delete next[String(a.id)];
+        delete next[key];
         return next;
       });
+      clearPendingFile(key);
+      const input = replaceInputRefs.current[key];
+      if (input) input.value = "";
       toast.success("Caso actualizado.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo guardar.");
+    } finally {
+      setSavingId(null);
     }
   };
 
@@ -311,109 +398,164 @@ export default function AudiosBotPage() {
       ) : (
         <div className="space-y-3">
           {audios.map((a) => {
-            const e = edits[String(a.id)];
+            const key = String(a.id);
+            const e = edits[key];
+            const draft = e ?? {
+              titulo: a.titulo,
+              situacion: a.situacion,
+              texto: a.texto ?? "",
+            };
+            const newFile = pendingAudio[key] ?? null;
             const dirty =
-              e &&
-              (e.titulo !== a.titulo ||
-                e.situacion !== a.situacion ||
-                e.texto !== (a.texto ?? ""));
+              Boolean(newFile) ||
+              draft.titulo !== a.titulo ||
+              draft.situacion !== a.situacion ||
+              draft.texto !== (a.texto ?? "");
+            const previewUrl = pendingPreview[key] || a.url;
+            const fmt = newFile
+              ? audioFormat(newFile.type, newFile.name)
+              : audioFormat(a.mimeType, a.filename);
+            const isSaving = savingId === key;
+
             return (
               <div
-                key={String(a.id)}
-                className={`rounded-2xl border p-4 shadow-sm space-y-2.5 ${
+                key={key}
+                className={`rounded-2xl border p-4 shadow-sm space-y-3 ${
                   a.enabled
                     ? "border-border bg-card"
                     : "border-border bg-muted/40 opacity-80"
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <input
-                    value={e?.titulo ?? a.titulo}
-                    onChange={(ev) =>
-                      setEdits((prev) => ({
-                        ...prev,
-                        [String(a.id)]: {
-                          titulo: ev.target.value,
-                          situacion: e?.situacion ?? a.situacion,
-                          texto: e?.texto ?? a.texto ?? "",
-                        },
-                      }))
-                    }
-                    className="w-full bg-transparent text-sm font-bold outline-none"
-                  />
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <label className="text-[11px] font-medium text-muted-foreground">
+                      Título
+                    </label>
+                    <input
+                      value={draft.titulo}
+                      onChange={(ev) =>
+                        setEditField(key, a, { titulo: ev.target.value })
+                      }
+                      className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2 pt-6">
                     <span className="text-[11px] text-muted-foreground">
                       {a.enabled ? "Activo" : "Inactivo"}
                     </span>
                     <Toggle on={a.enabled} onClick={() => void toggle(a)} />
                   </div>
                 </div>
-                <textarea
-                  value={e?.situacion ?? a.situacion}
-                  onChange={(ev) =>
-                    setEdits((prev) => ({
-                      ...prev,
-                      [String(a.id)]: {
-                        titulo: e?.titulo ?? a.titulo,
-                        situacion: ev.target.value,
-                        texto: e?.texto ?? a.texto ?? "",
-                      },
-                    }))
-                  }
-                  rows={2}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                />
-                <textarea
-                  value={e?.texto ?? a.texto ?? ""}
-                  onChange={(ev) =>
-                    setEdits((prev) => ({
-                      ...prev,
-                      [String(a.id)]: {
-                        titulo: e?.titulo ?? a.titulo,
-                        situacion: e?.situacion ?? a.situacion,
-                        texto: ev.target.value,
-                      },
-                    }))
-                  }
-                  rows={2}
-                  placeholder="Texto oficial (opcional) — se envía tal cual, después de la nota de voz"
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                />
-                <div className="flex flex-wrap items-center gap-3">
-                  {a.url && <audio controls src={a.url} className="h-10" />}
-                  <span className="text-[11px] font-semibold text-muted-foreground">
-                    {a.url && (a.texto ?? "").trim()
-                      ? "🎙️ audio + 💬 texto"
-                      : a.url
-                        ? "🎙️ solo audio"
-                        : "💬 solo texto"}
-                  </span>
-                  {a.url &&
-                    !audioFormat(a.mimeType, a.filename).voiceNote && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-amber-600">
-                        <AlertTriangle className="h-3 w-3" />
-                        No es nota de voz (no es OGG/Opus)
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium text-muted-foreground">
+                    Cuándo enviarlo (situación)
+                  </label>
+                  <textarea
+                    value={draft.situacion}
+                    onChange={(ev) =>
+                      setEditField(key, a, { situacion: ev.target.value })
+                    }
+                    rows={3}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium text-muted-foreground">
+                    Texto oficial (opcional)
+                  </label>
+                  <textarea
+                    value={draft.texto}
+                    onChange={(ev) =>
+                      setEditField(key, a, { texto: ev.target.value })
+                    }
+                    rows={2}
+                    placeholder="Se envía tal cual, después de la nota de voz"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-dashed border-border bg-muted/20 p-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    {previewUrl ? (
+                      <audio controls src={previewUrl} className="h-10 min-w-0 flex-1" />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        Sin audio todavía
                       </span>
                     )}
-                  <span className="text-xs text-muted-foreground">
-                    Enviado {a.sentCount} vez{a.sentCount === 1 ? "" : "es"}
-                  </span>
-                  <div className="ml-auto flex items-center gap-2">
-                    {dirty && (
-                      <button
-                        onClick={() => void guardarTextos(a)}
-                        className="h-9 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90"
-                      >
-                        Guardar cambios
-                      </button>
-                    )}
-                    <button
-                      onClick={() => void borrar(a)}
-                      className="inline-flex h-9 items-center gap-1 rounded-lg border border-border px-3 text-sm text-red-600 hover:bg-red-500/10"
-                    >
-                      <Trash2 className="w-4 h-4" /> Eliminar
-                    </button>
+                    <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
+                      <Upload className="h-3.5 w-3.5" />
+                      {a.url || newFile ? "Cambiar audio" : "Subir audio"}
+                      <input
+                        ref={(el) => {
+                          replaceInputRefs.current[key] = el;
+                        }}
+                        type="file"
+                        accept="audio/*"
+                        className="hidden"
+                        onChange={(ev) => {
+                          const f = ev.target.files?.[0] ?? null;
+                          setPendingFile(key, f);
+                        }}
+                      />
+                    </label>
                   </div>
+                  {newFile && (
+                    <p className="text-xs text-primary">
+                      Nuevo archivo listo: <strong>{newFile.name}</strong> — pulsa
+                      Guardar para aplicarlo.
+                    </p>
+                  )}
+                  {fmt.msg && (
+                    <p
+                      className={`flex items-start gap-1.5 text-xs ${
+                        fmt.ok ? "text-amber-600" : "text-red-600"
+                      }`}
+                    >
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {fmt.msg}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <span className="font-semibold">
+                      {(previewUrl || a.url) && draft.texto.trim()
+                        ? "🎙️ audio + 💬 texto"
+                        : previewUrl || a.url
+                          ? "🎙️ solo audio"
+                          : "💬 solo texto"}
+                    </span>
+                    <span>
+                      · Enviado {a.sentCount} vez{a.sentCount === 1 ? "" : "es"}
+                    </span>
+                    {a.filename && !newFile && (
+                      <span className="truncate">· {a.filename}</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {dirty && (
+                    <button
+                      type="button"
+                      onClick={() => void guardarCaso(a)}
+                      disabled={isSaving}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                    >
+                      {isSaving ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : null}
+                      Guardar cambios
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void borrar(a)}
+                    className="inline-flex h-9 items-center gap-1 rounded-lg border border-border px-3 text-sm text-red-600 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="h-4 w-4" /> Eliminar
+                  </button>
                 </div>
               </div>
             );

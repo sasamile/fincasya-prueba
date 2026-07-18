@@ -30,7 +30,6 @@ import { buildSystemPrompt } from './lib/prompts';
 import {
   buildMinimoNochesMessage,
   buildPropertySelectionHandoff,
-  buildSoldOutWeekendMessage,
   buildWelcomeMessage,
   burstHasOnlyGreeting,
   buildCatalogoIntro,
@@ -39,7 +38,6 @@ import {
   MASCOTAS_POLITICA,
   PROCESO_RESERVA_MSG,
   prependGreetingIfNeeded,
-  stayOverlapsSoldOutWeekend,
   stripRedundantHolaPrefix,
 } from './lib/copys';
 import { isAppAutoReply } from './lib/appAutoReply';
@@ -697,6 +695,136 @@ export const saveCatalogSearch = internalMutation({
         ? { lastRequestedZone: args.location.trim() }
         : {}),
     });
+  },
+});
+
+/**
+ * Resuelve NOMBRES/códigos de finca (los que el equipo escribió en la situación
+ * de un audio, ej. "Acacías 330", "Villa Herrera") a fichas de catálogo. Es un
+ * OVERRIDE del operador: ignora capacidad, zona y disponibilidad — se envían
+ * porque el equipo dijo que son las que quedan. Solo exige que la finca exista,
+ * esté activa y tenga ficha en el catálogo Meta.
+ */
+export const toolResolveFincas = internalQuery({
+  args: { nombres: v.array(v.string()) },
+  handler: async (
+    ctx,
+    { nombres },
+  ): Promise<{
+    catalogMetaId: string | null;
+    items: Array<{
+      propertyId: string;
+      retailerId: string;
+      title: string;
+      bodyText: string;
+      image: string | null;
+      alternateRetailerIds?: string[];
+    }>;
+    noEncontradas: string[];
+  }> => {
+    const catalog =
+      (await ctx.db
+        .query('whatsappCatalogs')
+        .withIndex('by_is_default', (q) => q.eq('isDefault', true))
+        .first()) ?? (await ctx.db.query('whatsappCatalogs').first());
+    const all = await ctx.db
+      .query('properties')
+      .collect()
+      .then((ps) => ps.filter((p) => p.active !== false));
+
+    const norm = (s: string) =>
+      (s ?? '')
+        .normalize('NFD')
+        .replace(/\p{M}/gu, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9 ]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    // Palabras genéricas que NO identifican (para que "Villa Herrera" no
+    // matchee cualquier "Villa"). Igual que el matcher del calendario.
+    const GENERIC = new Set([
+      'VILLA', 'VILLAS', 'CASA', 'CASAS', 'QUINTA', 'HOME', 'HOUSE', 'LUXURY',
+      'LUJO', 'FINCA', 'APTO', 'APARTAMENTO', 'CABANA', 'DELUXE', 'DELUX',
+      'PAX', 'CAMPESTRE', 'BOUTIQUE', 'PREMIUM', 'DE', 'DEL', 'LA', 'EL', 'LOS',
+    ]);
+    const tokens = (s: string) =>
+      norm(s)
+        .split(' ')
+        .filter((w) => w.length >= 3 && !GENERIC.has(w));
+
+    const items: Array<{
+      propertyId: string;
+      retailerId: string;
+      title: string;
+      bodyText: string;
+      image: string | null;
+      alternateRetailerIds?: string[];
+    }> = [];
+    const noEncontradas: string[] = [];
+    const usados = new Set<string>();
+
+    for (const nombreRaw of nombres) {
+      const wanted = tokens(nombreRaw);
+      if (wanted.length === 0) {
+        noEncontradas.push(nombreRaw);
+        continue;
+      }
+      // La finca hace match si TODOS los tokens distintivos aparecen en su
+      // título o código.
+      const candidatos = all.filter((p) => {
+        if (usados.has(String(p._id))) return false;
+        const hay = norm(`${p.title} ${p.code ?? ''}`);
+        return wanted.every((t) => hay.includes(t));
+      });
+      // Ante empate, la más pequeña primero (título más específico).
+      candidatos.sort((a, b) => a.title.length - b.title.length);
+      let picked: (typeof all)[number] | null = null;
+      let mapping: { productRetailerId: string } | null = null;
+      for (const p of candidatos) {
+        const m = catalog
+          ? await ctx.db
+              .query('propertyWhatsAppCatalog')
+              .withIndex('by_property_and_catalog', (q) =>
+                q.eq('propertyId', p._id).eq('catalogId', catalog._id),
+              )
+              .first()
+          : null;
+        if (m) {
+          picked = p;
+          mapping = m;
+          break;
+        }
+      }
+      if (!picked || !mapping) {
+        noEncontradas.push(nombreRaw);
+        continue;
+      }
+      usados.add(String(picked._id));
+      const prices = [
+        picked.priceBase,
+        picked.priceBaja,
+        picked.priceMedia,
+        picked.priceAlta,
+      ].filter((x): x is number => typeof x === 'number' && x > 0);
+      const desde = prices.length > 0 ? Math.min(...prices) : 0;
+      const parts: string[] = [];
+      if (desde > 0) parts.push(`💰 Desde ${formatCop(desde)} por noche`);
+      parts.push(`👥 Hasta ${picked.capacity} personas`);
+      const imgs = await fetchPropertyImages(ctx, picked._id);
+      items.push({
+        propertyId: String(picked._id),
+        retailerId: mapping.productRetailerId,
+        title: picked.title,
+        bodyText: parts.join(' · '),
+        image: getPrimaryPropertyImageUrl(sortPropertyImages(imgs)),
+        alternateRetailerIds: picked.code?.trim() ? [picked.code.trim()] : undefined,
+      });
+    }
+    return {
+      catalogMetaId: catalog?.whatsappCatalogId ?? null,
+      items,
+      noEncontradas,
+    };
   },
 });
 
@@ -1578,7 +1706,7 @@ export const runAgentTurn = internalAction({
               function: {
                 name: 'enviar_respuesta_oficial',
                 description:
-                  'Envía la RESPUESTA OFICIAL pregrabada del equipo para una situación específica: nota de voz, texto oficial o ambos (salen como mensajes aparte, ANTES de tu texto, TAL CUAL los grabó/escribió el equipo). Usala UNA sola vez por conversación por caso y SOLO cuando el mensaje del cliente caiga claramente en la situación descrita — no la fuerces. Casos disponibles:\n' +
+                  'Envía la RESPUESTA OFICIAL pregrabada del equipo para una situación específica: nota de voz, texto oficial o ambos (salen como mensajes aparte, TAL CUAL los grabó/escribió el equipo). La situación de cada caso es una INSTRUCCIÓN del equipo: si el mensaje del cliente encaja, DEBES usar este caso en vez de escribir tu propio texto. PROHIBIDO parafrasear o adelantar el contenido de un caso (ej. decir tú mismo que "no hay disponibilidad"): esa información SOLO la comunica la respuesta oficial. NUNCA la uses en tu PRIMER mensaje de la conversación — ahí va el saludo normal del ritual; cuando el cliente confirme o repita en su siguiente mensaje, envíala. Si la situación te ordena ENVIAR fincas puntuales (ej. "envíale estas fincas: Acacías 330 y Villa Herrera"), pasa esos nombres en el parámetro `fincas` y se enviarán como fichas de catálogo (son las que el equipo dejó disponibles: se envían AUNQUE parezcan grandes u ocupadas). Usala UNA sola vez por conversación por caso. Casos disponibles:\n' +
                   botAudios
                     .map(
                       (a) =>
@@ -1597,6 +1725,12 @@ export const runAgentTurn = internalAction({
                     casoId: {
                       type: 'string',
                       description: 'casoId exacto de la lista de casos disponibles',
+                    },
+                    fincas: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description:
+                        'SOLO si la situación del caso ordena enviar fincas puntuales: los nombres/códigos de esas fincas tal como aparecen en la instrucción (ej. ["Acacías 330", "Villa Herrera"]). Si la situación no menciona fincas, omítelo.',
                     },
                   },
                   required: ['casoId'],
@@ -1744,46 +1878,10 @@ export const runAgentTurn = internalAction({
 
             // FINDE AGOTADO 18-20 jul 2026 (temporal): no enviar fichas que
             // luego haya que desdecir. Quitar tras el 20-jul-2026.
-            if (
-              fechaEntrada &&
-              fechaSalida &&
-              stayOverlapsSoldOutWeekend(fechaEntrada, fechaSalida)
-            ) {
-              const aviso = buildSoldOutWeekendMessage();
-              let avisoWamid: string | undefined;
-              if (context.contactPhone) {
-                try {
-                  const sent = await sendWhatsappText({
-                    to: context.contactPhone,
-                    text: aviso,
-                  });
-                  avisoWamid = sent.wamid;
-                } catch (err) {
-                  console.error('[agent] fallo el aviso de finde agotado', err);
-                }
-              }
-              await ctx.runMutation(internal.agent.saveAssistantMessage, {
-                conversationId,
-                content: aviso,
-                wamid: avisoWamid,
-              });
-              skipFinalReply = true;
-              result = {
-                enviadas: [],
-                error: 'finde 18-20 julio 2026 sin disponibilidad',
-                nota: 'El aviso oficial de fin de semana sin disponibilidad YA se envio TAL CUAL como mensaje aparte. NO escribas mas texto este turno y NO envies catalogo hasta que el cliente de OTRAS fechas (fuera del 18-20 de julio 2026).',
-              };
-              messages.push({
-                role: 'tool',
-                tool_call_id: call.id,
-                content: JSON.stringify(result),
-              });
-              console.log('[agent] catalogo bloqueado: finde agotado 18-20 jul', {
-                fechaEntrada,
-                fechaSalida,
-              });
-              continue;
-            }
+            // NOTA: el fin de semana agotado (ej. 18-20 jul) ya NO se maneja
+            // aquí con fechas quemadas. Ahora es DINÁMICO desde "Audios del
+            // bot": el equipo configura la situación + audio + fincas y el bot
+            // lo aplica (enviar_respuesta_oficial). Sin candado hardcodeado.
 
             let bloqueo: {
               detalle: string;
@@ -2234,7 +2332,19 @@ export const runAgentTurn = internalAction({
             const caso =
               botAudios.find((a) => String(a.id) === casoIdArg) ??
               botAudios.find((a) => a.titulo === casoIdArg);
-            if (!caso) {
+            if (!botHasSpoken) {
+              // CANDADO PRIMER MENSAJE (regla del equipo): en el primer turno
+              // va el saludo normal del ritual; la respuesta oficial sale
+              // cuando el cliente confirme en su siguiente mensaje.
+              result = {
+                enviado: false,
+                nota: 'AÚN NO: este es tu PRIMER mensaje de la conversación. Saluda con el ritual normal y pide/confirma los datos de siempre. PROHIBIDO afirmar que no hay disponibilidad o adelantar el contenido del caso: cuando el cliente responda confirmando la situación, llama enviar_respuesta_oficial de nuevo y ahí sale la respuesta oficial completa.',
+              };
+              console.log(
+                '[agent] respuesta oficial pospuesta: primer mensaje de la conversación',
+                { conversationId },
+              );
+            } else if (!caso) {
               result = {
                 enviado: false,
                 nota: 'casoId inválido: usa un casoId EXACTO de la lista de la tool.',
@@ -2305,21 +2415,93 @@ export const runAgentTurn = internalAction({
                   textoSent,
                   textoWamid,
                 });
+                // 3) FINCAS PUNTUALES: si la situación ordena enviar fincas
+                //    concretas, se resuelven por nombre y salen como fichas
+                //    (override del operador: sin filtro de capacidad/dispon.).
+                const fincasArg = Array.isArray(args.fincas)
+                  ? (args.fincas as unknown[])
+                      .map((x) => String(x ?? '').trim())
+                      .filter(Boolean)
+                  : [];
+                const fincasEnviadas: string[] = [];
+                if (fincasArg.length > 0) {
+                  const resolved = await ctx.runQuery(
+                    internal.agent.toolResolveFincas,
+                    { nombres: fincasArg },
+                  );
+                  for (const item of resolved.items) {
+                    if (context.channel === 'web') {
+                      await ctx.runMutation(internal.agent.recordCatalogSend, {
+                        conversationId,
+                        sent: [
+                          {
+                            propertyId: item.propertyId as Id<'properties'>,
+                            title: item.title,
+                            retailerId: item.retailerId,
+                            image: item.image ?? null,
+                            bodyText: item.bodyText,
+                          },
+                        ],
+                      });
+                      fincasEnviadas.push(item.title);
+                      continue;
+                    }
+                    if (!resolved.catalogMetaId) continue;
+                    await new Promise((r) =>
+                      setTimeout(r, BETWEEN_CATALOG_SENDS_MS),
+                    );
+                    const row = await sendCatalogCard({
+                      to: context.contactPhone,
+                      catalogId: resolved.catalogMetaId,
+                      card: {
+                        productRetailerId: item.retailerId,
+                        bodyText: item.bodyText,
+                        alternateRetailerIds: item.alternateRetailerIds,
+                      },
+                    });
+                    if (row.ok) {
+                      await ctx.runMutation(internal.agent.recordCatalogSend, {
+                        conversationId,
+                        sent: [
+                          {
+                            propertyId: item.propertyId as Id<'properties'>,
+                            title: item.title,
+                            retailerId: item.retailerId,
+                            wamid: row.wamid,
+                          },
+                        ],
+                      });
+                      fincasEnviadas.push(item.title);
+                    }
+                  }
+                  if (resolved.noEncontradas.length > 0) {
+                    console.warn(
+                      '[agent] respuesta oficial: fincas no resueltas',
+                      resolved.noEncontradas,
+                    );
+                  }
+                }
                 console.log('[agent] respuesta oficial enviada', {
                   conversationId,
                   caso: caso.titulo,
                   audioSent,
                   textoSent,
+                  fincas: fincasEnviadas.length,
                 });
+                const canal =
+                  audioSent && textoSent
+                    ? 'nota de voz + texto oficial'
+                    : audioSent
+                      ? 'nota de voz'
+                      : 'texto oficial';
                 result = {
                   enviado: true,
-                  nota: `La respuesta oficial «${caso.titulo}» YA se envió como mensaje(s) aparte (${
-                    audioSent && textoSent
-                      ? 'nota de voz + texto oficial'
-                      : audioSent
-                        ? 'nota de voz'
-                        : 'texto oficial'
-                  }). NO repitas su contenido en texto: acompáñala máximo con UNA línea corta y natural (o continúa el flujo si había algo pendiente).`,
+                  nota:
+                    `La respuesta oficial «${caso.titulo}» YA se envió (${canal})` +
+                    (fincasEnviadas.length > 0
+                      ? ` junto con las fichas de: ${fincasEnviadas.join(', ')}. NO envíes más fincas ni llames enviar_catalogo.`
+                      : '.') +
+                    ' NO repitas su contenido en texto: acompáñala máximo con UNA línea corta y natural.',
                 };
               }
             }
