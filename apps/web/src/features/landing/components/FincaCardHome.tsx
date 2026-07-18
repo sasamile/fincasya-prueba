@@ -189,7 +189,7 @@ export function FincaCardHome({ finca, badge, modoVenta }: FincaCardHomeProps) {
                 return true;
               });
               // Prioriza amenidades con SVG o emoji para no llenar la fila de checks.
-              const ranked = unique.toSorted((a, b) => {
+              const ranked = [...unique].sort((a, b) => {
                 const score = (f: CardFeature) =>
                   f.iconUrl ? 2 : resolveFeatureEmoji(f) ? 1 : 0;
                 return score(b) - score(a);
