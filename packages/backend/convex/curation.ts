@@ -18,6 +18,7 @@ import {
   internalAction,
   internalMutation,
   internalQuery,
+  query,
 } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
@@ -490,5 +491,83 @@ export const nightly = internalAction({
   handler: async (ctx): Promise<void> => {
     await ctx.runAction(internal.curation.curateHistory, {});
     await ctx.runAction(internal.curation.embedPending, {});
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Panel de administración — estadísticas de entrenamiento
+// ---------------------------------------------------------------------------
+
+export type CurationStats = {
+  labels: { venta: number; positiva: number; neutra: number; problematica: number; total: number };
+  exemplars: {
+    total: number; embedded: number; pending: number;
+    bySource: { historico: number; faq: number; situacion: number; playbook: number; otro: number };
+    humanAuthored: number;
+  };
+  recentLabels: Array<{
+    conversationId: string; label: string; reasons: string[];
+    messageCount: number; exemplarsCreated: number; createdAt: number;
+  }>;
+  recentExemplars: Array<{
+    id: string; clientMessage: string; response: string; quality: string;
+    source: string; humanAuthored: boolean; embedded: boolean; createdAt: number;
+  }>;
+};
+
+export const adminStats = query({
+  args: {},
+  handler: async (ctx): Promise<CurationStats> => {
+    const [allLabels, allExemplars] = await Promise.all([
+      ctx.db.query('conversationLabels').collect(),
+      ctx.db.query('exemplars').collect(),
+    ]);
+
+    const labels = { venta: 0, positiva: 0, neutra: 0, problematica: 0, total: allLabels.length };
+    for (const l of allLabels) labels[l.label]++;
+
+    const bySource = { historico: 0, faq: 0, situacion: 0, playbook: 0, otro: 0 };
+    let embedded = 0;
+    let humanAuthored = 0;
+    for (const e of allExemplars) {
+      if (e.embedded) embedded++;
+      if (e.humanAuthored) humanAuthored++;
+      const s = e.source as keyof typeof bySource;
+      if (s in bySource) bySource[s]++;
+      else bySource.otro++;
+    }
+
+    const recentLabels = [...allLabels]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 20)
+      .map((l) => ({
+        conversationId: String(l.conversationId),
+        label: l.label,
+        reasons: l.reasons,
+        messageCount: l.messageCount,
+        exemplarsCreated: l.exemplarsCreated,
+        createdAt: l.createdAt,
+      }));
+
+    const recentExemplars = [...allExemplars]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 30)
+      .map((e) => ({
+        id: String(e._id),
+        clientMessage: e.clientMessage,
+        response: e.response,
+        quality: e.quality,
+        source: e.source,
+        humanAuthored: e.humanAuthored,
+        embedded: e.embedded,
+        createdAt: e.createdAt,
+      }));
+
+    return {
+      labels,
+      exemplars: { total: allExemplars.length, embedded, pending: allExemplars.length - embedded, bySource, humanAuthored },
+      recentLabels,
+      recentExemplars,
+    };
   },
 });

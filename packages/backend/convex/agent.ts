@@ -39,6 +39,8 @@ import {
   PROCESO_RESERVA_MSG,
   prependGreetingIfNeeded,
   stripRedundantHolaPrefix,
+  timeOfDayGreeting,
+  fixTimeGreetingSlot,
 } from './lib/copys';
 import { isAppAutoReply } from './lib/appAutoReply';
 import {
@@ -1651,13 +1653,24 @@ export const runAgentTurn = internalAction({
       console.error('[agent] RAG fallo, respondo sin ejemplos', err);
     }
 
-    const todayIso = new Date().toLocaleDateString('es-CO', {
+    const nowBogota = new Date();
+    const todayIso = nowBogota.toLocaleDateString('es-CO', {
       timeZone: 'America/Bogota',
       year: 'numeric',
       month: 'long',
       day: 'numeric',
       weekday: 'long',
     });
+    // Hora + franja YA calculadas: el modelo NO puede adivinar la hora (solo
+    // recibe la fecha). Sin esto, escogia el saludo al azar y erraba la franja
+    // (ej. "Buenas tardes" a las 10:27 a.m.). Ver buildSystemPrompt.
+    const horaBogota = nowBogota.toLocaleTimeString('es-CO', {
+      timeZone: 'America/Bogota',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+    const saludoFranja = timeOfDayGreeting(nowBogota);
     const messages: ChatMessage[] = [
       {
         role: 'system',
@@ -1665,6 +1678,8 @@ export const runAgentTurn = internalAction({
           exemplars,
           contactName: context.contactName || undefined,
           todayIso,
+          horaBogota,
+          saludoFranja,
           firstTurn: !botHasSpoken,
         }),
       },
@@ -2575,6 +2590,11 @@ export const runAgentTurn = internalAction({
     // equipo: "NO repitas saludos si ya saludaste").
     if (!botHasSpoken) {
       reply = prependGreetingIfNeeded(reply, context.contactName, userBurst);
+      // Garantia de franja: en el PRIMER turno el modelo SIEMPRE abre con
+      // saludo (aunque el cliente no haya dicho "hola" — ej. "30 de diciembre").
+      // prependGreetingIfNeeded solo corrige si el cliente saludo, asi que aqui
+      // forzamos la franja correcta segun la hora real en Colombia.
+      reply = fixTimeGreetingSlot(reply);
     } else {
       // Candado anti "Hola" doble: si ya saludamos y el LLM abre con
       // "¡Hola...!" otra vez, se recorta el prefijo (el resto queda intacto).
@@ -2653,12 +2673,19 @@ export const testTone = internalAction({
       console.error('[agent:testTone] RAG fallo, sigo sin ejemplos', err);
     }
 
-    const todayIso = new Date().toLocaleDateString('es-CO', {
+    const nowBogota = new Date();
+    const todayIso = nowBogota.toLocaleDateString('es-CO', {
       timeZone: 'America/Bogota',
       year: 'numeric',
       month: 'long',
       day: 'numeric',
       weekday: 'long',
+    });
+    const horaBogota = nowBogota.toLocaleTimeString('es-CO', {
+      timeZone: 'America/Bogota',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
     });
     const messages: ChatMessage[] = [
       {
@@ -2667,6 +2694,8 @@ export const testTone = internalAction({
           exemplars,
           contactName: args.contactName,
           todayIso,
+          horaBogota,
+          saludoFranja: timeOfDayGreeting(nowBogota),
           firstTurn: args.firstTurn ?? false,
         }),
       },
@@ -2678,6 +2707,11 @@ export const testTone = internalAction({
       { role: 'user', content: args.clientMessage },
     ];
     const { content } = await chatCompletion({ messages });
-    return { response: content };
+    // Misma garantia de franja que produccion cuando es primer turno.
+    const response =
+      content && (args.firstTurn ?? false)
+        ? fixTimeGreetingSlot(content, nowBogota)
+        : content;
+    return { response };
   },
 });

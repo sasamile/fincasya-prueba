@@ -228,6 +228,11 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         icon: Mic,
       },
       {
+        label: "Entrenamiento IA",
+        href: "/admin/entrenamiento",
+        icon: Brain,
+      },
+      {
         label: "Automatizaciones",
         href: "/admin/automatizaciones",
         icon: Zap,

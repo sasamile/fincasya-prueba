@@ -119,6 +119,10 @@ export function buildSystemPrompt(args: {
   exemplars: ExemplarForPrompt[];
   contactName?: string;
   todayIso: string;
+  /** Hora actual en Colombia ya formateada (ej. "10:27 a. m."). */
+  horaBogota?: string;
+  /** Saludo de franja YA calculado ("Buenos días" | "Buenas tardes" | "Buenas noches"). */
+  saludoFranja?: string;
   firstTurn?: boolean;
 }): string {
   const parts = [IDENTITY, POLICIES, STYLE, TEAM_FLOW];
@@ -126,16 +130,24 @@ export function buildSystemPrompt(args: {
     ? formalSalutationName(args.contactName)
     : null;
   parts.push(
-    `CONTEXTO: hoy es ${args.todayIso} (zona America/Bogota).` +
+    `CONTEXTO: hoy es ${args.todayIso}` +
+      (args.horaBogota ? `, son las ${args.horaBogota}` : '') +
+      ` (zona America/Bogota).` +
       (formalName
         ? ` El cliente se llama ${formalName}. SIEMPRE usalo con "Sr." o "Sra." + nombre completo (abreviado, nunca "señor"/"señora") — NUNCA solo el primer nombre.`
         : ` NO tenemos un nombre utilizable del cliente (o no sabemos si es hombre o mujer). PROHIBIDO usar titulo ("Sr."/"Sra."/"señor"/"señora") — ni solo ni con nombre — y PROHIBIDO adivinar el genero: tutea sin titulo ni nombre, o pide amablemente el nombre completo.`),
   );
   if (args.firstTurn) {
+    // Saludo de franja YA resuelto por el servidor: el modelo NO sabe la hora,
+    // asi que se lo damos exacto para que NO lo adivine (bug real: "Buenas
+    // tardes" a las 10:27 a.m.). Fallback al texto de opciones si no llego.
+    const saludoObligatorio = args.saludoFranja
+      ? `"${args.saludoFranja}"`
+      : '[Buenos días / Buenas tardes / Buenas noches]';
     parts.push(
       `PRIMER TURNO — el bot AÚN NO HA HABLADO en esta conversacion. La PRIMERA LINEA de tu respuesta DEBE ser el saludo oficial (OBLIGATORIO, sin excepcion):
-"¡Hola! Sr./Sra. [Nombre completo]. [Buenos días / Buenas tardes / Buenas noches], soy ${BOT_NAME}, tu ${BOT_ROLE} 🙋"
-segun la hora (manana 05:00-11:59, tarde 12:00-17:59, noche 18:00-04:59). SIEMPRE "¡Hola!" al inicio. Te presentas SOLO aqui, en el primer turno: PROHIBIDO repetir "soy ${BOT_NAME}" en los mensajes siguientes. NADA de otro nombre de persona del bot.
+"¡Hola! Sr./Sra. [Nombre completo]. ${saludoObligatorio}, soy ${BOT_NAME}, tu ${BOT_ROLE} 🙋"
+El saludo de franja es EXACTAMENTE ${saludoObligatorio} (ya calculado por la hora en Colombia — NO uses otro ni lo adivines). SIEMPRE "¡Hola!" al inicio. Te presentas SOLO aqui, en el primer turno: PROHIBIDO repetir "soy ${BOT_NAME}" en los mensajes siguientes. NADA de otro nombre de persona del bot.
 Despues del saludo obligatorio:
 - Si el cliente APENAS SALUDO (sin datos): el checklist completo con sus emojis (📅 👥 🫂 🪅 🐕 📄 🏡) tal como la plantilla, seguido del bloque de horarios. NO agregues lineas extra — CORTO como la plantilla.
 - Si el cliente entro con una PREGUNTA o DATOS directos: saludo (linea de arriba) + atiende lo que pidio + pide solo el dato que falte (fechas o personas). SIN checklist completo, sin bloque de horarios.

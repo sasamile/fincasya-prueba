@@ -568,6 +568,27 @@ export function replyAlreadyOpensWithTimeGreeting(reply: string): boolean {
 }
 
 /**
+ * Corrige la FRANJA del saludo si el LLM la erro (ej. "Buenas tardes" a las
+ * 10 a.m.). El modelo no siempre respeta la franja que le pasamos, asi que
+ * reemplazamos cualquier "Buenos días/Buenas tardes/Buenas noches" en la
+ * cabecera por el correcto segun la hora real en Colombia. Solo toca la
+ * PRIMERA aparicion (el saludo), preservando mayusculas/acentos del original.
+ */
+export function fixTimeGreetingSlot(reply: string, now: Date = new Date()): string {
+  const correcto = timeOfDayGreeting(now); // "Buenos días" | "Buenas tardes" | "Buenas noches"
+  // Busca la primera franja en los primeros ~160 chars (la apertura).
+  const re = /buenos\s*d[ií]as|buenas\s*tardes|buenas\s*noches/i;
+  const head = reply.slice(0, 160);
+  const m = head.match(re);
+  if (!m) return reply;
+  const encontrado = m[0];
+  // Ya es la correcta (comparando sin tildes ni mayusculas): no tocamos nada.
+  const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/\s+/g, ' ');
+  if (norm(encontrado) === norm(correcto)) return reply;
+  return reply.slice(0, m.index!) + correcto + reply.slice(m.index! + encontrado.length);
+}
+
+/**
  * Quita un "Hola Don/Doña X" generado por el LLM para no duplicar.
  * Consume la puntuacion que sigue (coma/punto) para no dejar una coma colgando
  * del tipo ", señor Camilo. Buenos dias...".
@@ -599,10 +620,10 @@ export function prependGreetingIfNeeded(
 ): string {
   if (!burstContainsGreeting(userBurst)) return reply;
   // Si la respuesta YA abre con un saludo valido, la dejamos intacta: solo nos
-  // aseguramos de que arranque con "Hola". (Antes le quitabamos el "Hola" y
-  // dejaba una coma colgando: ", señor Camilo. Buenos dias...").
+  // aseguramos de que arranque con "Hola" y de que la FRANJA sea la correcta
+  // segun la hora real (el LLM a veces la erra: "Buenas tardes" a las 10 a.m.).
   if (replyAlreadyOpensWithTimeGreeting(reply)) {
-    return ensureHolaOpening(reply);
+    return fixTimeGreetingSlot(ensureHolaOpening(reply), now);
   }
   const opener = buildGreetingOpener(contactName, undefined, now);
   const body = stripRedundantHolaPrefix(reply);
