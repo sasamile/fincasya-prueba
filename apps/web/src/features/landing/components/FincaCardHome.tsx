@@ -1,10 +1,9 @@
 /** Card de finca del home — port de FincasYaWeb finca-card-home.tsx.
- *  (img nativa en vez de next/image; iconos: SVG → emoji → inferido → check.) */
+ *  Iconos de amenidad: SVG (`iconUrl`) del catálogo; emoji solo si no hay SVG. */
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Heart, Star, MapPin, Users, Check } from 'lucide-react';
 import { cn, getSeededRating, slugify } from '@/lib/utils';
-import { inferEmojiForFeatureName } from '@/features/fincas/utils/catalog-description';
 import type { PropertyResponse } from '../types';
 import {
   Carousel,
@@ -15,18 +14,11 @@ import {
   type CarouselApi,
 } from '@/components/ui/carousel';
 
-type CardFeature = PropertyResponse['features'][number];
-
-function resolveFeatureEmoji(feature: CardFeature): string | null {
-  if (feature.emoji?.trim()) return feature.emoji.trim();
-  const inferred = inferEmojiForFeatureName(feature.name);
-  // inferEmoji cae en ✅ cuando no reconoce el nombre; eso no aporta en la card.
-  return inferred === '✅' ? null : inferred;
-}
-
-function featureVisualKey(f: CardFeature): string {
-  return f.iconUrl || resolveFeatureEmoji(f) || f.name;
-}
+type CardFeature = {
+  name: string;
+  iconUrl?: string | null;
+  emoji?: string | null;
+};
 
 function FeatureIcon({ feature }: { feature: CardFeature }) {
   if (feature.iconUrl) {
@@ -39,11 +31,10 @@ function FeatureIcon({ feature }: { feature: CardFeature }) {
       />
     );
   }
-  const emoji = resolveFeatureEmoji(feature);
-  if (emoji) {
+  if (feature.emoji?.trim()) {
     return (
       <span className="text-sm leading-none" aria-hidden>
-        {emoji}
+        {feature.emoji.trim()}
       </span>
     );
   }
@@ -52,6 +43,23 @@ function FeatureIcon({ feature }: { feature: CardFeature }) {
       <Check className="w-3 h-3 text-muted-foreground" />
     </div>
   );
+}
+
+/** Preferir featured (cardIcons); si no hay, features con iconUrl real. */
+function iconsForCard(finca: PropertyResponse): CardFeature[] {
+  if (finca.cardIcons && finca.cardIcons.length > 0) {
+    return finca.cardIcons.slice(0, 4);
+  }
+  const seen = new Set<string>();
+  const withUrl: CardFeature[] = [];
+  for (const f of finca.features) {
+    if (!f.iconUrl) continue;
+    if (seen.has(f.iconUrl)) continue;
+    seen.add(f.iconUrl);
+    withUrl.push(f);
+    if (withUrl.length >= 4) break;
+  }
+  return withUrl;
 }
 
 interface FincaCardHomeProps {
@@ -177,24 +185,13 @@ export function FincaCardHome({ finca, badge, modoVenta }: FincaCardHomeProps) {
           <span className="truncate text-xs leading-relaxed">{finca.location}</span>
         </div>
 
-        {/* Feature Icons */}
-        {finca.features.length > 0 && (
-          <div className="flex items-center gap-2 mb-2">
-            {(() => {
-              const seen = new Set<string>();
-              const unique = finca.features.filter((f) => {
-                const key = featureVisualKey(f);
-                if (seen.has(key)) return false;
-                seen.add(key);
-                return true;
-              });
-              // Prioriza amenidades con SVG o emoji para no llenar la fila de checks.
-              const ranked = [...unique].sort((a, b) => {
-                const score = (f: CardFeature) =>
-                  f.iconUrl ? 2 : resolveFeatureEmoji(f) ? 1 : 0;
-                return score(b) - score(a);
-              });
-              return ranked.slice(0, 4).map((feature, idx) => (
+        {/* Feature Icons — featuredIcons del admin (iconUrl del catálogo) */}
+        {(() => {
+          const icons = iconsForCard(finca);
+          if (icons.length === 0) return null;
+          return (
+            <div className="flex items-center gap-2 mb-2">
+              {icons.map((feature, idx) => (
                 <div
                   key={idx}
                   className="w-6 h-6 flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity"
@@ -202,10 +199,10 @@ export function FincaCardHome({ finca, badge, modoVenta }: FincaCardHomeProps) {
                 >
                   <FeatureIcon feature={feature} />
                 </div>
-              ));
-            })()}
-          </div>
-        )}
+              ))}
+            </div>
+          );
+        })()}
 
         <div className="flex items-end justify-between gap-2 min-w-0">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-0.5 text-sm">

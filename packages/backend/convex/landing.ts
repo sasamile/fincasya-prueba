@@ -22,8 +22,8 @@ export const listProperties = query({
       imagesByProperty.get(key)!.push({ url: img.url, order: img.order ?? 0 });
     }
 
-    // Features por finca (para los iconitos de la card) + iconografía
-    // (SVG / emoji). Sin esto la card solo recibe el nombre y cae al check.
+    // Features + iconografía (SVG/emoji). Los iconitos de la card salen de
+    // `featuredIcons` (hasta 4, elegidos en admin vía CardIconPicker).
     const [allFeatures, allIcons] = await Promise.all([
       ctx.db.query('propertyFeatures').collect(),
       ctx.db.query('iconography').collect(),
@@ -31,19 +31,33 @@ export const listProperties = query({
     const iconsById = new Map(
       allIcons.map((icon) => [
         String(icon._id),
-        { iconUrl: icon.iconUrl ?? null, emoji: icon.emoji ?? null },
+        {
+          name: icon.name ?? '',
+          iconUrl: icon.iconUrl ?? null,
+          emoji: icon.emoji ?? null,
+        },
       ]),
     );
+
+    const resolveIcon = (rawId: string | undefined) => {
+      if (!rawId) return undefined;
+      const direct = iconsById.get(rawId);
+      if (direct) return direct;
+      const normalized = ctx.db.normalizeId('iconography', rawId);
+      return normalized ? iconsById.get(String(normalized)) : undefined;
+    };
+
     const featuresByProperty = new Map<
       string,
-      { name: string; iconUrl: string | null; emoji: string | null }[]
+      { name: string; iconId?: string; iconUrl: string | null; emoji: string | null }[]
     >();
     for (const f of allFeatures) {
       const key = String(f.propertyId);
       if (!featuresByProperty.has(key)) featuresByProperty.set(key, []);
-      const icon = f.iconId ? iconsById.get(f.iconId) : undefined;
+      const icon = resolveIcon(f.iconId);
       featuresByProperty.get(key)!.push({
         name: f.name,
+        iconId: f.iconId,
         iconUrl: icon?.iconUrl ?? null,
         emoji: icon?.emoji ?? null,
       });
@@ -53,6 +67,23 @@ export const listProperties = query({
       const imgs = (imagesByProperty.get(String(p._id)) ?? [])
         .sort((a, b) => a.order - b.order)
         .map((i) => i.url);
+      const features = featuresByProperty.get(String(p._id)) ?? [];
+
+      // Iconos de la card: los 4 featured del admin (con iconUrl del catálogo).
+      const cardIcons = (p.featuredIcons ?? [])
+        .slice(0, 4)
+        .map((id) => {
+          const icon = resolveIcon(String(id));
+          if (!icon) return null;
+          const featureName = features.find((f) => f.iconId === String(id))?.name;
+          return {
+            name: featureName || icon.name || 'Amenidad',
+            iconUrl: icon.iconUrl,
+            emoji: icon.emoji,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x != null);
+
       return {
         id: String(p._id),
         title: p.title,
@@ -71,7 +102,8 @@ export const listProperties = query({
         allowsEventsContent: p.allowsEventsContent ?? false,
         marketplaceForSale: p.marketplaceForSale ?? false,
         salePriceCop: p.salePriceCop ?? null,
-        features: featuresByProperty.get(String(p._id)) ?? [],
+        features,
+        cardIcons,
       };
     });
   },

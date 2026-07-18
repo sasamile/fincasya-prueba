@@ -25,6 +25,12 @@ export type PropertyResponse = {
     emoji?: string | null;
     iconId?: string;
   }[];
+  /** Hasta 4 iconos de la card (featuredIcons del admin, con iconUrl del catálogo). */
+  cardIcons?: {
+    name: string;
+    iconUrl?: string | null;
+    emoji?: string | null;
+  }[];
   // Opcionales usados por libs portadas (legacy matching / cards)
   eventCapacity?: number | null;
   seasonPrices?: { base?: number };
