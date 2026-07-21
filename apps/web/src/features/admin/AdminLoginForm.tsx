@@ -59,9 +59,14 @@ export function AdminLoginForm() {
       if (!isOwner) {
         await ensureSessionLogged(sessionUser);
       }
+      // El callbackUrl NO puede mandar a un propietario al panel admin: antes
+      // ganaba siempre y el owner aterrizaba en /admin/... para ver "Acceso
+      // denegado" (Vane, 21-jul). Si apunta al admin, se ignora.
       const callbackParam = searchParams.get("callbackUrl");
-      const callbackUrl = callbackParam || (isOwner ? "/owner" : "/admin");
-      router.push(callbackUrl);
+      const callbackIsAdmin = (callbackParam ?? "").startsWith("/admin");
+      const safeCallback =
+        callbackParam && !(isOwner && callbackIsAdmin) ? callbackParam : null;
+      router.push(safeCallback || (isOwner ? "/owner" : "/admin"));
     } catch {
       setError("No se pudo iniciar sesión. Intenta de nuevo.");
     } finally {

@@ -1,55 +1,45 @@
 "use client";
 
-import { useEffect, useState } from "react";
+/**
+ * Panel del propietario: fincas, documentos legales y reservas.
+ * Orquesta la query y la subida de archivos; la presentación vive en
+ * ./components (ficha de finca, tarjeta de reserva, KPIs, skeleton).
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import {
+  AlertTriangle,
   Building2,
+  CalendarCheck,
   CalendarDays,
-  ExternalLink,
-  FileUp,
-  Loader2,
+  FileWarning,
+  Inbox,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { OwnerStat } from "@/features/owner/components/owner-stats";
+import {
+  OwnerPropertyCard,
+  type OwnerProperty,
+} from "@/features/owner/components/owner-property-card";
+import {
+  OwnerBookingCard,
+  type OwnerBooking,
+} from "@/features/owner/components/owner-booking-card";
+import { OwnerPanelSkeleton } from "@/features/owner/components/owner-panel-skeleton";
+import { countDocs, type OwnerDocKey } from "@/features/owner/lib/owner-format";
 
-const TZ = "America/Bogota";
-
-function formatDate(ms: number) {
-  return new Intl.DateTimeFormat("es-CO", {
-    timeZone: TZ,
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(ms));
-}
-
-const DOC_FIELDS = [
-  {
-    key: "idCopyUrl" as const,
-    label: "Cédula / documento de identidad",
-  },
-  {
-    key: "bankCertificationUrl" as const,
-    label: "Certificación bancaria",
-  },
-  {
-    key: "rntPdfUrl" as const,
-    label: "RNT (PDF)",
-  },
-  {
-    key: "chamberOfCommerceUrl" as const,
-    label: "Cámara de comercio",
-  },
-];
+type BookingTab = "upcoming" | "past";
 
 export function OwnerPanel() {
   const panel = useQuery(api.ownerPortal.getMyPanel, {});
   const ensureLinked = useMutation(api.ownerPortal.ensureLinked);
   const updateDocs = useMutation(api.ownerPortal.updateMyDocuments);
-  const [uploading, setUploading] = useState<string | null>(null);
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [linkedOnce, setLinkedOnce] = useState(false);
+  const [tab, setTab] = useState<BookingTab>("upcoming");
 
   useEffect(() => {
     if (!panel || linkedOnce) return;
@@ -62,260 +52,268 @@ export function OwnerPanel() {
     }
   }, [panel, linkedOnce, ensureLinked]);
 
-  const uploadDoc = async (
-    propertyId: string,
-    field: (typeof DOC_FIELDS)[number]["key"],
-    file: File,
-  ) => {
-    setUploading(`${propertyId}:${field}`);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("propertyId", propertyId);
-      fd.append("field", field);
-      const res = await fetch("/api/owner/documents", {
-        method: "POST",
-        body: fd,
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        url?: string;
-      };
-      if (!res.ok || !body.url) {
-        throw new Error(body.error ?? "No se pudo subir el archivo");
-      }
-      const result = await updateDocs({
-        propertyId,
-        [field]: body.url,
-      });
-      if (!result?.ok) throw new Error("No se pudo guardar el documento");
-      toast.success("Documento cargado");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Error al subir");
-    } finally {
-      setUploading(null);
-    }
-  };
+  const handleUpload = useCallback(
+    (propertyId: string, field: OwnerDocKey, file: File) => {
+      const key = `${propertyId}:${field}`;
+      setUploadingKey(key);
+      void (async () => {
+        try {
+          const fd = new FormData();
+          fd.append("file", file);
+          fd.append("propertyId", propertyId);
+          fd.append("field", field);
+          const res = await fetch("/api/owner/documents", {
+            method: "POST",
+            body: fd,
+          });
+          const body = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            url?: string;
+          };
+          if (!res.ok || !body.url) {
+            throw new Error(body.error ?? "No se pudo subir el archivo");
+          }
+          const result = await updateDocs({ propertyId, [field]: body.url });
+          if (!result?.ok) throw new Error("No se pudo guardar el documento");
+          toast.success("Documento cargado", {
+            description: "Administración lo revisará.",
+          });
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Error al subir");
+        } finally {
+          setUploadingKey(null);
+        }
+      })();
+    },
+    [updateDocs],
+  );
 
-  if (panel === undefined) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-7 w-7 animate-spin text-[#f9572a]" />
-      </div>
+  const stats = useMemo(() => {
+    if (!panel) return null;
+    const now = Date.now();
+    const upcoming = panel.bookings.filter((b) => b.fechaSalida >= now);
+    const past = panel.bookings.filter((b) => b.fechaSalida < now);
+    const docs = panel.properties.reduce(
+      (acc, p) => {
+        const { done, total } = countDocs(p.documents);
+        return { done: acc.done + done, total: acc.total + total };
+      },
+      { done: 0, total: 0 },
     );
-  }
+    const guests = upcoming.reduce((acc, b) => acc + b.guestCount, 0);
+    return { upcoming, past, docs, guests };
+  }, [panel]);
+
+  if (panel === undefined) return <OwnerPanelSkeleton />;
 
   if (panel === null) {
     return (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
-        No tienes permiso para este panel. Inicia sesión con una cuenta de
-        propietario.
+      <div className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-amber-500/10 text-amber-600">
+          <AlertTriangle className="h-6 w-6" />
+        </span>
+        <h2 className="mt-4 font-semibold">Sin acceso a este panel</h2>
+        <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+          Inicia sesión con una cuenta de propietario para ver tus fincas y
+          reservas.
+        </p>
       </div>
     );
   }
 
-  const now = Date.now();
-  const upcoming = panel.bookings.filter((b) => b.fechaSalida >= now);
-  const past = panel.bookings.filter((b) => b.fechaSalida < now);
+  const firstName = panel.user.name?.trim().split(" ")[0] ?? "";
+  const bookings: OwnerBooking[] =
+    tab === "upcoming" ? (stats?.upcoming ?? []) : (stats?.past ?? []);
+  const docsPending = (stats?.docs.total ?? 0) - (stats?.docs.done ?? 0);
 
   return (
     <div className="space-y-8">
-      <section>
-        <h1 className="text-2xl font-black tracking-tight">
-          Hola{panel.user.name ? `, ${panel.user.name.split(" ")[0]}` : ""}
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight">
+          Hola{firstName ? `, ${firstName}` : ""}
         </h1>
-        <p className="mt-1 text-sm text-stone-600">
+        <p className="mt-1 text-sm text-muted-foreground">
           Consulta tus reservas, invitados y documentos legales de tus fincas.
         </p>
-      </section>
+      </header>
 
       {!panel.linked ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
-          <p className="font-semibold">Aún no hay fincas vinculadas</p>
-          <p className="mt-1 text-amber-900/90">
-            Pide a administración que ponga tu mismo correo (
-            <strong>{panel.user.email}</strong>) en la ficha del propietario
-            de la propiedad, o que asocie tu cuenta. Después recarga esta
-            página.
-          </p>
+        <div className="flex gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+          <div className="text-sm">
+            <p className="font-semibold">Aún no hay fincas vinculadas</p>
+            <p className="mt-1 text-muted-foreground">
+              Pide a administración que registre tu correo (
+              <span className="font-medium text-foreground">
+                {panel.user.email}
+              </span>
+              ) en la ficha del propietario de la finca. Luego recarga esta
+              página.
+            </p>
+          </div>
         </div>
       ) : null}
 
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-[#f9572a]" />
-          <h2 className="text-sm font-bold uppercase tracking-wider text-stone-500">
-            Mis fincas ({panel.properties.length})
-          </h2>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          {panel.properties.map((p) => (
-            <article
-              key={p.propertyId}
-              className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm"
-            >
-              <p className="font-bold text-stone-900">{p.title}</p>
-              <p className="text-xs text-stone-500">
-                {[p.code, p.location].filter(Boolean).join(" · ") ||
-                  "Sin ubicación"}
-              </p>
-
-              <div className="mt-4 space-y-2 border-t border-stone-100 pt-3">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
-                  Documentos legales
-                </p>
-                {DOC_FIELDS.map((doc) => {
-                  const url = p.documents[doc.key];
-                  const busy = uploading === `${p.propertyId}:${doc.key}`;
-                  return (
-                    <div
-                      key={doc.key}
-                      className="flex items-center justify-between gap-2 rounded-xl bg-stone-50 px-3 py-2"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-stone-800 truncate">
-                          {doc.label}
-                        </p>
-                        {url ? (
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[11px] font-medium text-[#f9572a] hover:underline"
-                          >
-                            Ver archivo
-                          </a>
-                        ) : (
-                          <p className="text-[11px] text-stone-400">
-                            Pendiente
-                          </p>
-                        )}
-                      </div>
-                      <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-[11px] font-bold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-100">
-                        {busy ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <FileUp className="h-3.5 w-3.5" />
-                        )}
-                        {url ? "Cambiar" : "Subir"}
-                        <input
-                          type="file"
-                          accept="image/*,application/pdf"
-                          className="hidden"
-                          disabled={busy}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              void uploadDoc(p.propertyId, doc.key, file);
-                            }
-                            e.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                    </div>
-                  );
-                })}
-              </div>
-            </article>
-          ))}
-        </div>
+      <section
+        aria-label="Resumen"
+        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+      >
+        <OwnerStat
+          icon={Building2}
+          label="Mis fincas"
+          value={panel.properties.length}
+        />
+        <OwnerStat
+          icon={CalendarCheck}
+          label="Reservas activas"
+          value={stats?.upcoming.length ?? 0}
+          hint="Próximas o en curso"
+        />
+        <OwnerStat
+          icon={docsPending > 0 ? FileWarning : Users}
+          label="Documentos"
+          value={`${stats?.docs.done ?? 0}/${stats?.docs.total ?? 0}`}
+          hint={
+            docsPending > 0
+              ? `${docsPending} pendiente${docsPending === 1 ? "" : "s"}`
+              : "Todo cargado"
+          }
+          tone={docsPending > 0 ? "warning" : "success"}
+        />
+        <OwnerStat
+          icon={Users}
+          label="Invitados"
+          value={stats?.guests ?? 0}
+          hint="En reservas activas"
+        />
       </section>
 
-      <BookingSection title="Próximas / activas" items={upcoming} />
-      <BookingSection title="Anteriores" items={past} />
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold">
+          Mis fincas{" "}
+          <span className="text-muted-foreground">
+            ({panel.properties.length})
+          </span>
+        </h2>
+        {panel.properties.length === 0 ? (
+          <EmptyState
+            icon={Building2}
+            title="Todavía no tienes fincas"
+            description="Cuando administración vincule una finca a tu cuenta, aparecerá aquí con sus documentos."
+          />
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            {panel.properties.map((p) => (
+              <OwnerPropertyCard
+                key={p.propertyId}
+                property={p as OwnerProperty}
+                uploadingKey={uploadingKey}
+                onUpload={handleUpload}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">Reservas</h2>
+          <div
+            role="tablist"
+            aria-label="Filtrar reservas"
+            className="inline-flex gap-1 rounded-xl border border-border bg-muted/40 p-1"
+          >
+            <TabButton
+              active={tab === "upcoming"}
+              onClick={() => setTab("upcoming")}
+              count={stats?.upcoming.length ?? 0}
+            >
+              Próximas
+            </TabButton>
+            <TabButton
+              active={tab === "past"}
+              onClick={() => setTab("past")}
+              count={stats?.past.length ?? 0}
+            >
+              Anteriores
+            </TabButton>
+          </div>
+        </div>
+
+        {bookings.length === 0 ? (
+          <EmptyState
+            icon={tab === "upcoming" ? CalendarDays : Inbox}
+            title={
+              tab === "upcoming"
+                ? "Sin reservas próximas"
+                : "Sin reservas anteriores"
+            }
+            description={
+              tab === "upcoming"
+                ? "Cuando se confirme una reserva en tus fincas, la verás aquí con sus fechas e invitados."
+                : "Aquí quedará el histórico de estadías finalizadas."
+            }
+          />
+        ) : (
+          <div className="space-y-3">
+            {bookings.map((b) => (
+              <OwnerBookingCard key={b.id} booking={b} />
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
 
-function BookingSection({
-  title,
-  items,
+function TabButton({
+  active,
+  count,
+  onClick,
+  children,
 }: {
-  title: string;
-  items: Array<{
-    id: string;
-    reference: string;
-    propertyTitle: string;
-    fechaEntrada: number;
-    fechaSalida: number;
-    numeroPersonas: number | null;
-    guestCount: number;
-    guests: Array<{ nombre: string }>;
-    canViewGuests: boolean;
-    checkinCompleted: boolean;
-    anfitrionUrl: string;
-  }>;
+  active: boolean;
+  count: number;
+  onClick: () => void;
+  children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-3">
-      <div className="flex items-center gap-2">
-        <CalendarDays className="h-4 w-4 text-[#f9572a]" />
-        <h2 className="text-sm font-bold uppercase tracking-wider text-stone-500">
-          {title} ({items.length})
-        </h2>
-      </div>
-      {items.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-stone-200 bg-white/60 px-4 py-6 text-center text-sm text-stone-500">
-          No hay reservas en esta sección.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {items.map((b) => (
-            <article
-              key={b.id}
-              className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="font-bold text-stone-900">{b.propertyTitle}</p>
-                  <p className="text-xs text-stone-500">
-                    Ref. {b.reference}
-                    {b.checkinCompleted ? " · Check-in completo" : ""}
-                  </p>
-                  <p className="mt-1 text-sm text-stone-700">
-                    {formatDate(b.fechaEntrada)} → {formatDate(b.fechaSalida)}
-                    {b.numeroPersonas
-                      ? ` · ${b.numeroPersonas} personas`
-                      : ""}
-                  </p>
-                </div>
-                <a
-                  href={b.anfitrionUrl}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#f9572a] px-3 py-2 text-xs font-bold text-white hover:bg-[#e24a20]"
-                >
-                  Ver detalle
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-              </div>
-
-              <div className="mt-3 rounded-xl bg-stone-50 px-3 py-2.5">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-stone-500">
-                  <Users className="h-3.5 w-3.5" />
-                  Invitados ({b.guestCount})
-                </div>
-                {!b.canViewGuests ? (
-                  <p className="mt-1 text-xs text-stone-500">
-                    La lista se habilita cuando aceptes la oferta y
-                    administración active el acceso.
-                  </p>
-                ) : b.guests.length === 0 ? (
-                  <p className="mt-1 text-xs text-stone-500">
-                    Aún no hay invitados cargados en el check-in.
-                  </p>
-                ) : (
-                  <ul className="mt-1.5 space-y-0.5">
-                    {b.guests.map((g, i) => (
-                      <li key={`${b.id}-${i}`} className="text-xs text-stone-700">
-                        {g.nombre || "Sin nombre"}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground",
       )}
-    </section>
+    >
+      {children}
+      <span className="ml-1.5 opacity-60">{count}</span>
+    </button>
+  );
+}
+
+function EmptyState({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: typeof Building2;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center">
+      <span className="mx-auto grid h-11 w-11 place-items-center rounded-2xl bg-muted text-muted-foreground">
+        <Icon className="h-5 w-5" />
+      </span>
+      <p className="mt-3 font-semibold">{title}</p>
+      <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+        {description}
+      </p>
+    </div>
   );
 }

@@ -22,6 +22,8 @@ import {
   Pencil,
   ExternalLink,
   Trash2,
+  FileCheck2,
+  FileClock,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -78,6 +80,13 @@ type OwnerDirectoryRow = {
     code?: string;
     location?: string;
     ownerInfoId?: string;
+    /** Documentos legales que el propietario sube desde /owner. */
+    documents?: {
+      idCopyUrl?: string;
+      bankCertificationUrl?: string;
+      rntPdfUrl?: string;
+      chamberOfCommerceUrl?: string;
+    };
   }>;
   bankAccounts: OwnerBankAccount[];
 };
@@ -730,6 +739,10 @@ export function OwnersManager() {
                     </div>
                   </div>
 
+                  {/* Documentos legales que el propietario sube desde /owner:
+                      el admin los revisa aquí (Vane, 21-jul). */}
+                  <OwnerDocumentsReview properties={owner.properties} />
+
                   <div>
                     <p className="text-muted-foreground mb-2 text-[10px] font-bold uppercase tracking-widest">
                       Cuentas bancarias ({owner.bankAccounts.length})
@@ -1215,6 +1228,91 @@ export function OwnersManager() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** Claves y etiquetas de los documentos que el propietario sube en /owner. */
+const OWNER_DOC_FIELDS = [
+  { key: "idCopyUrl", label: "Cédula" },
+  { key: "bankCertificationUrl", label: "Cert. bancaria" },
+  { key: "rntPdfUrl", label: "RNT" },
+  { key: "chamberOfCommerceUrl", label: "Cámara de comercio" },
+] as const;
+
+type OwnerDocsProperty = {
+  propertyId: string;
+  title: string;
+  code?: string;
+  documents?: {
+    idCopyUrl?: string;
+    bankCertificationUrl?: string;
+    rntPdfUrl?: string;
+    chamberOfCommerceUrl?: string;
+  };
+};
+
+/**
+ * Documentos legales cargados por el propietario desde su panel (/owner).
+ * El admin los abre desde aquí para revisarlos; los pendientes se marcan para
+ * saber qué falta pedirle (Vane, 21-jul).
+ */
+function OwnerDocumentsReview({
+  properties,
+}: {
+  properties: readonly OwnerDocsProperty[];
+}) {
+  const total = properties.length * OWNER_DOC_FIELDS.length;
+  const cargados = properties.reduce(
+    (acc, p) =>
+      acc +
+      OWNER_DOC_FIELDS.filter((f) => Boolean(p.documents?.[f.key])).length,
+    0,
+  );
+  if (total === 0) return null;
+
+  return (
+    <div>
+      <p className="text-muted-foreground mb-2 text-[10px] font-bold uppercase tracking-widest">
+        Documentos legales ({cargados}/{total})
+      </p>
+      <div className="flex flex-col gap-2">
+        {properties.map((p) => (
+          <div key={p.propertyId} className="rounded-xl bg-muted/40 px-3 py-2">
+            {properties.length > 1 ? (
+              <p className="mb-1.5 truncate text-[11px] font-bold text-foreground">
+                {p.title}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-1.5">
+              {OWNER_DOC_FIELDS.map((f) => {
+                const url = p.documents?.[f.key];
+                return url ? (
+                  <a
+                    key={f.key}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-700 transition hover:bg-emerald-500/20 dark:text-emerald-400"
+                  >
+                    <FileCheck2 className="h-3.5 w-3.5" />
+                    {f.label}
+                    <ExternalLink className="h-3 w-3 opacity-60" />
+                  </a>
+                ) : (
+                  <span
+                    key={f.key}
+                    className="text-muted-foreground inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1 text-[11px] font-semibold"
+                  >
+                    <FileClock className="h-3.5 w-3.5" />
+                    {f.label}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

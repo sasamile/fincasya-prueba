@@ -89,12 +89,10 @@ export default function OwnerLayout({
     !convexUser
   ) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#faf7f4]">
+      <div className="admin flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-[#f9572a]" />
-          <p className="text-xs font-bold uppercase tracking-widest text-stone-500">
-            Entrando al panel…
-          </p>
+          <Loader2 className="h-7 w-7 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Entrando al panel…</p>
         </div>
       </div>
     );
@@ -111,19 +109,23 @@ export default function OwnerLayout({
   }
 
   return (
-    <div className="min-h-screen bg-[#faf7f4] text-stone-900">
-      <header className="sticky top-0 z-20 border-b border-stone-200/80 bg-white/90 backdrop-blur">
+    // `admin` aporta los tokens semánticos (fondo, bordes, primary de marca y
+    // modo oscuro), los mismos del panel administrativo.
+    <div className="admin min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex min-w-0 items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/dark-logo.svg"
               alt="FincasYa"
-              className="h-8 w-auto object-contain"
+              className="h-8 w-auto shrink-0 object-contain"
             />
-            <div className="min-w-0">
-              <p className="text-sm font-bold truncate">Panel propietario</p>
-              <p className="text-[11px] text-stone-500 truncate">
+            <div className="min-w-0 border-l border-border pl-3">
+              <p className="truncate text-sm font-semibold leading-tight">
+                Panel propietario
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
                 {convexUser.email}
               </p>
             </div>
@@ -131,14 +133,14 @@ export default function OwnerLayout({
           <button
             type="button"
             onClick={() => void signOut()}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-border bg-background px-3 text-xs font-semibold transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <LogOut className="h-3.5 w-3.5" />
             Salir
           </button>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-4 py-6 md:py-8">{children}</main>
+      <main className="mx-auto max-w-5xl px-4 py-6 md:py-10">{children}</main>
     </div>
   );
 }

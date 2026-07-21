@@ -108,12 +108,22 @@ export const listDirectory = query({
 
     const propertyById = new Map(properties.map((p) => [String(p._id), p]));
 
+    /** Documentos legales que el propietario sube desde /owner (para revisión). */
+    type OwnerDocs = {
+      idCopyUrl?: string;
+      bankCertificationUrl?: string;
+      rntPdfUrl?: string;
+      chamberOfCommerceUrl?: string;
+    };
+
     type PropertyRef = {
       propertyId: string;
       title: string;
       code?: string;
       location?: string;
       ownerInfoId?: string;
+      /** Vane 21-jul: el admin debe VER los documentos cargados por el owner. */
+      documents?: OwnerDocs;
     };
 
     type Group = {
@@ -206,6 +216,12 @@ export const listDirectory = query({
           code: prop?.code,
           location: prop?.location,
           ownerInfoId: String(info._id),
+          documents: {
+            idCopyUrl: info.idCopyUrl,
+            bankCertificationUrl: info.bankCertificationUrl,
+            rntPdfUrl: info.rntPdfUrl,
+            chamberOfCommerceUrl: info.chamberOfCommerceUrl,
+          },
         },
         bankRowsFromInfo(info),
         info.updatedAt ?? info.createdAt,
