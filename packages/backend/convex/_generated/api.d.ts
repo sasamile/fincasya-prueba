@@ -93,6 +93,7 @@ import type * as lib_receiptAi from "../lib/receiptAi.js";
 import type * as lib_roles from "../lib/roles.js";
 import type * as lib_saleLinkReference from "../lib/saleLinkReference.js";
 import type * as lib_searchText from "../lib/searchText.js";
+import type * as lib_seasonPricing from "../lib/seasonPricing.js";
 import type * as lib_signedContractAi from "../lib/signedContractAi.js";
 import type * as lib_siigo from "../lib/siigo.js";
 import type * as lib_situationSeed from "../lib/situationSeed.js";
@@ -223,6 +224,7 @@ declare const fullApi: ApiFromModules<{
   "lib/roles": typeof lib_roles;
   "lib/saleLinkReference": typeof lib_saleLinkReference;
   "lib/searchText": typeof lib_searchText;
+  "lib/seasonPricing": typeof lib_seasonPricing;
   "lib/signedContractAi": typeof lib_signedContractAi;
   "lib/siigo": typeof lib_siigo;
   "lib/situationSeed": typeof lib_situationSeed;

@@ -44,6 +44,10 @@ import {
 } from './lib/copys';
 import { isAppAutoReply } from './lib/appAutoReply';
 import {
+  createGlobalPricingCache,
+  resolveSeasonNightly,
+} from './lib/seasonPricing';
+import {
   detectPriceLoopEscalation,
   detectQuestionOverload,
   isPriceDeflection,
@@ -711,6 +715,12 @@ export const toolCatalogPick = internalQuery({
       desde: number;
       item: CatalogItem;
     }> = [];
+    // PRECIO POR TEMPORADA (Vane 21-jul): con fechas, la ficha muestra el
+    // precio de la temporada de ESAS fechas (reglas de /admin/pricing-rules,
+    // mismas de contratos/cotizador) — antes salía siempre el mismo "Desde $X"
+    // para todas las fechas. La caché evita releer las reglas globales por
+    // cada finca del lote.
+    const globalPricingCache = createGlobalPricingCache();
     for (const p of matches) {
       // Los picks de la semana no se cortan en el tope de candidatos: van al
       // final de `matches` (tier 4) y el break se los comería.
@@ -746,12 +756,35 @@ export const toolCatalogPick = internalQuery({
         razones.sinFichaMeta++;
         continue; // finca sin ficha en el catalogo Meta
       }
-      const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
-        (x): x is number => typeof x === 'number' && x > 0,
-      );
-      const desde = prices.length > 0 ? Math.min(...prices) : 0;
+      // Precio de la ficha: con fechas → precio de la TEMPORADA de esas
+      // fechas (con nombre de la temporada); sin fechas → "Desde $mín".
+      let desde = 0;
+      let precioLinea = '';
+      const season = checkAvailability
+        ? await resolveSeasonNightly(
+            ctx.db,
+            p,
+            fechaEntradaMs as number,
+            fechaSalidaMs as number,
+            globalPricingCache,
+          )
+        : null;
+      if (season) {
+        desde = season.nightly;
+        precioLinea =
+          `💰 ${formatCop(season.nightly)} por noche` +
+          (season.ruleName && season.ruleName !== 'Estándar'
+            ? ` (${season.ruleName})`
+            : '');
+      } else {
+        const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
+          (x): x is number => typeof x === 'number' && x > 0,
+        );
+        desde = prices.length > 0 ? Math.min(...prices) : 0;
+        if (desde > 0) precioLinea = `💰 Desde ${formatCop(desde)} por noche`;
+      }
       const parts: string[] = [];
-      if (desde > 0) parts.push(`💰 Desde ${formatCop(desde)} por noche`);
+      if (precioLinea) parts.push(precioLinea);
       parts.push(`👥 Hasta ${p.capacity} personas`);
       if (mascotas && p.allowsPets) parts.push('🐶 Pet friendly');
       // Imagen principal (solo la usa el widget web; en WhatsApp la pone Meta).
