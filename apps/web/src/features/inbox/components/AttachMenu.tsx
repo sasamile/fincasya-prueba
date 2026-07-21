@@ -1,23 +1,21 @@
 /**
- * Menú desplegable del botón "+" del compositor (adjuntar), réplica del de
- * WhatsApp: Documento, Fotos y videos, Cámara, Audio, Contacto, Encuesta,
- * Evento, Nuevo sticker · Catálogo · Respuestas rápidas.
+ * Menú desplegable del botón "+" del compositor (adjuntar): Documento, Fotos y
+ * videos, Cámara, Audio · Catálogo · Respuestas rápidas.
  *
  * Documento, Fotos y videos, Cámara y Audio abren el selector de archivo y lo
- * envían por WhatsApp; Catálogo y Respuestas rápidas abren sus modales. El
- * resto (Contacto, Encuesta, Evento, Sticker) son placeholders por ahora.
+ * envían por WhatsApp; Catálogo y Respuestas rápidas abren sus modales.
+ *
+ * OCULTOS (Vane, 21-jul-2026): Contacto, Encuesta, Evento y Nuevo sticker — la
+ * API de WhatsApp (YCloud/Meta) no permite enviarlos, así que eran botones que
+ * no hacían nada. Se dejan comentados por si algún día se habilitan.
  */
 import { useEffect, useRef } from 'react';
 import {
-  BarChart3,
-  Calendar,
   Camera,
-  Contact,
   FileText,
   Headphones,
   Images,
   Store,
-  Sticker,
   Zap,
 } from 'lucide-react';
 
@@ -34,10 +32,11 @@ const ITEMS: Item[][] = [
     { id: 'fotos', label: 'Fotos y videos', icon: Images, color: '#007bfc' },
     { id: 'camara', label: 'Cámara', icon: Camera, color: '#ff2e74' },
     { id: 'audio', label: 'Audio', icon: Headphones, color: '#ff6d00' },
-    { id: 'contacto', label: 'Contacto', icon: Contact, color: '#009de2' },
-    { id: 'encuesta', label: 'Encuesta', icon: BarChart3, color: '#ffb400' },
-    { id: 'evento', label: 'Evento', icon: Calendar, color: '#ff2e74' },
-    { id: 'sticker', label: 'Nuevo sticker', icon: Sticker, color: '#00a884' },
+    // Ocultos — la API no los soporta:
+    // { id: 'contacto', label: 'Contacto', icon: Contact, color: '#009de2' },
+    // { id: 'encuesta', label: 'Encuesta', icon: BarChart3, color: '#ffb400' },
+    // { id: 'evento', label: 'Evento', icon: Calendar, color: '#ff2e74' },
+    // { id: 'sticker', label: 'Nuevo sticker', icon: Sticker, color: '#00a884' },
   ],
   [
     { id: 'catalogo', label: 'Catálogo', icon: Store, color: '#8696a0' },

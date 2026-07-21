@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import axios from "axios";
@@ -27,6 +27,7 @@ import {
   CalendarDays,
   UserCheck,
   PenLine,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -518,6 +519,18 @@ export function ContractsReservationSection({
   const contractBlobUrlRef = useRef<string | null>(null);
   const wordEditorRef = useRef<ContractWordEditorHandle | null>(null);
   const [wordEditorReady, setWordEditorReady] = useState(false);
+  /**
+   * Editor Word en MODAL (Vane 21-jul): la previsualización SIEMPRE es el Word
+   * real, igual que el modal del inbox — nunca se genera un contrato que el
+   * asesor no haya visto. `wordEditorMounted` deja el editor montado aunque se
+   * cierre el modal, para no perder las ediciones ni la referencia de export.
+   */
+  const [wordModalOpen, setWordModalOpen] = useState(false);
+  const [wordEditorMounted, setWordEditorMounted] = useState(false);
+  const openWordEditor = useCallback(() => {
+    setWordEditorMounted(true);
+    setWordModalOpen(true);
+  }, []);
 
   const { data: propertiesData, isLoading } = useProperties({
     all: true,
@@ -1943,7 +1956,21 @@ export function ContractsReservationSection({
       let contractLocalBlob: Blob | null = null;
       setContractArtifactKind(null);
 
-      // Si el paso Editar tiene el Word listo, exporta lo que el usuario editó.
+      // SÍ O SÍ el Word (Vane 21-jul): nunca se genera un contrato que el
+      // asesor no haya visto. Si el editor no está listo, se abre el modal y
+      // se corta la generación en vez de rearmar el PDF desde la plantilla.
+      if (hasPropertyPdfTemplate && !wordEditorRef.current?.isReady()) {
+        toast.dismiss(loadingToastId);
+        setStep(5);
+        openWordEditor();
+        toast.info(
+          "Revisa el contrato en el editor Word y vuelve a pulsar «Generar contrato».",
+          { duration: 8000 },
+        );
+        return;
+      }
+
+      // Exporta exactamente lo que el usuario editó en el Word.
       if (hasPropertyPdfTemplate && wordEditorRef.current?.isReady()) {
         try {
           toast.loading("Exportando contrato editado…", {
@@ -3940,11 +3967,75 @@ export function ContractsReservationSection({
                           Vista previa editable (como Word)
                         </p>
                         <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-                          Puedes corregir texto, tipografía y formato aquí. Al
-                          generar el contrato se usará esta versión editada. Si
-                          cambias datos en pasos anteriores, pulsa «Regenerar».
+                          El contrato se revisa y corrige en el editor Word —
+                          esa versión es la que se genera. Si cambias datos en
+                          pasos anteriores, pulsa «Regenerar» dentro del editor.
                         </p>
+                        <Button
+                          type="button"
+                          onClick={openWordEditor}
+                          className="mt-3 h-10 w-full rounded-xl text-xs font-bold"
+                        >
+                          <PenLine className="mr-2 h-4 w-4" />
+                          {wordEditorReady
+                            ? "Abrir editor Word"
+                            : "Abrir editor Word (obligatorio)"}
+                        </Button>
+                        {wordEditorReady ? (
+                          <p className="mt-2 flex items-center justify-center gap-1 text-[11px] font-semibold text-emerald-600">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            Contrato revisado — listo para generar
+                          </p>
+                        ) : null}
                       </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* MODAL del editor Word — la previsualización SIEMPRE pasa por
+                aquí (Vane 21-jul), igual que el modal del inbox. Se mantiene
+                MONTADO al cerrar para no perder las ediciones. */}
+            {wordEditorMounted && form.propertyId ? (
+              <div
+                className={cn(
+                  "fixed inset-0 z-[70] flex flex-col bg-black/60 backdrop-blur-sm",
+                  !wordModalOpen && "hidden",
+                )}
+              >
+                <div className="m-auto flex h-[94vh] w-[min(1180px,96vw)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
+                  <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+                    <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
+                      <PenLine className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="truncate text-sm font-bold">
+                        Contrato — editor Word
+                      </h2>
+                      <p className="truncate text-xs text-muted-foreground">
+                        Corrige el texto y el formato. Esta versión es la que se
+                        genera y se envía.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setWordModalOpen(false)}
+                      className="h-9 rounded-xl text-xs font-bold"
+                    >
+                      Listo
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => setWordModalOpen(false)}
+                      title="Cerrar"
+                      className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </header>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
                       <ContractWordEditor
                         ref={wordEditorRef}
                         propertyId={form.propertyId}
@@ -3959,7 +4050,7 @@ export function ContractsReservationSection({
                           },
                           strTrim(form.contractNumber) || "BORRADOR",
                         )}
-                        active={step === 5 && Boolean(form.propertyId)}
+                        active={wordEditorMounted && Boolean(form.propertyId)}
                     documentKey={[
                       form.propertyId,
                       form.contractNumber,
@@ -3997,13 +4088,12 @@ export function ContractsReservationSection({
                       ownerResolved.cedula,
                     ].join("|")}
                         onReadyChange={setWordEditorReady}
-                        heightClassName="h-[min(68vh,780px)]"
+                        heightClassName="h-[min(74vh,860px)]"
                       />
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             {/* ── Navegación (siempre al fondo) ──────────────────────── */}
             <div className="mt-auto flex shrink-0 items-center justify-between gap-3 border-t border-zinc-200 bg-zinc-50/70 px-5 py-3.5 md:px-6">
@@ -4246,22 +4336,24 @@ export function ContractsReservationSection({
                         )}
                       </Button>
 
-                      {!wordEditorReady && form.propertyId ? (
+                      {form.propertyId ? (
                         <Button
                           type="button"
                           variant="outline"
                           className="h-10 w-full rounded-xl border-primary/30 bg-primary/5 text-xs font-bold text-primary hover:bg-primary/10"
-                          onClick={() => setStep(5)}
+                          onClick={openWordEditor}
                         >
                           <PenLine className="mr-2 h-4 w-4" />
-                          Ir a editar (Word)
+                          {wordEditorReady
+                            ? "Ver / editar contrato (Word)"
+                            : "Revisar contrato (Word)"}
                         </Button>
                       ) : null}
 
                       <p className="text-center text-[9px] font-bold uppercase leading-snug tracking-wider text-zinc-400">
                         {wordEditorReady
-                          ? "Usará el contrato editado del paso Editar."
-                          : "Ve al paso Editar para revisar el Word antes de generar."}{" "}
+                          ? "Usará el contrato editado en el editor Word."
+                          : "Se abrirá el editor Word para revisar antes de generar."}{" "}
                         Usa «Confirmar pago» cuando el cliente haya abonado.
                       </p>
                     </>

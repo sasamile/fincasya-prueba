@@ -1,170 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useContractSettingsStore,
   BankAccount,
-  ContractClause,
 } from "../../store/contract-settings.store";
-import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Switch } from "@/components/ui/switch";
 import {
   CopMoneyInput,
   toStoredCopLabel,
 } from "@/features/admin/components/contracts/cop-money-input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { FormSection } from "../shared/form-section";
-import {
-  Landmark,
-  ListChecks,
-  Plus,
-  Trash2,
-  Pencil,
-  GripVertical,
-  RotateCcw,
-  Settings2,
-  ChevronDown,
-} from "lucide-react";
+import { Landmark, Plus, Trash2, Pencil, Settings2 } from "lucide-react";
 import { sileo } from "sileo";
 import { cn } from "@/lib/utils";
-import { ContractDocumentPreview } from "@/features/admin/components/contracts/contract-document-preview";
-import {
-  previewContractHtmlFragment,
-  type FincaData,
-} from "../../utils/contract-utils";
+import { type FincaData } from "../../utils/contract-utils";
 import { BankAccountDialog } from "./bank-account-dialog";
 import { ContractFirmantesSection } from "./contract-firmantes-section";
-
-interface ClauseEditorDialogProps {
-  open: boolean;
-  clause: ContractClause | null;
-  /** Datos del formulario de reserva para sustituir {{...}} en la vista previa del editor. */
-  clausePreviewFincaData: Partial<FincaData> | null;
-  onClose: () => void;
-  onSave: (id: string, content: string) => void;
-}
-
-function ClauseEditorDialog({
-  open,
-  clause,
-  clausePreviewFincaData,
-  onClose,
-  onSave,
-}: ClauseEditorDialogProps) {
-  const [content, setContent] = useState(clause?.content || "");
-  const adminSettings = useContractSettingsStore((s) => s.adminSettings);
-
-  const resolvedPreview = useMemo(
-    () =>
-      previewContractHtmlFragment(
-        content,
-        adminSettings,
-        clausePreviewFincaData ?? {},
-      ),
-    [content, adminSettings, clausePreviewFincaData],
-  );
-
-  /** Vista “cliente”: sin sintaxis `{{ }}`; lo no sustituido se ve como … (solo visual). */
-  const clientPreviewHtml = useMemo(
-    () => resolvedPreview.replace(/\{\{\s*[\w]+\s*\}\}/g, "…"),
-    [resolvedPreview],
-  );
-
-  useEffect(() => {
-    if (clause) setContent(clause.content);
-  }, [clause]);
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[92vh] max-w-3xl flex-col gap-0 overflow-hidden rounded-2xl p-6 sm:max-h-[92vh]">
-        <DialogHeader className="shrink-0 pr-8 pb-3">
-          <DialogTitle className="text-base font-bold">
-            Editar cláusula — {clause?.romanNumeral}: {clause?.label}
-          </DialogTitle>
-          <p className="pt-1 text-xs font-normal leading-relaxed text-muted-foreground">
-            Lo principal es el <strong>texto ya sustituido</strong> como lo verá el contrato
-            con los datos del formulario y la finca. Los marcadores{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">{`{{ }}`}</code>{" "}
-            solo existen en la plantilla (abajo, si necesitas editar el texto fuente).
-          </p>
-        </DialogHeader>
-
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-          <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-            <div className="border-b border-border bg-muted/30 px-3 py-2">
-              <p className="text-[11px] font-semibold text-foreground">
-                Texto con datos actuales
-              </p>
-              <p className="text-[10px] text-muted-foreground">
-                Vista solo visual; lo pendiente aparece como … (no se guarda así).
-              </p>
-            </div>
-            <div className="max-h-[min(52vh,480px)] min-h-[200px] overflow-y-auto overscroll-contain sm:max-h-[min(56vh,520px)]">
-              <ContractDocumentPreview
-                html={clientPreviewHtml}
-                compact
-                className="py-3"
-              />
-            </div>
-          </div>
-
-          <Collapsible defaultOpen={false} className="group/cclause shrink-0">
-            <CollapsibleTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 w-full justify-between gap-2 rounded-xl border-dashed px-3 text-xs font-semibold"
-              >
-                Editar plantilla y marcadores
-                <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]/cclause:rotate-180" />
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0">
-              <div className="mt-2 max-h-[min(36vh,360px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-muted/15 p-2">
-                <RichTextEditor
-                  value={content}
-                  onChange={setContent}
-                  className="min-h-[200px] rounded-lg border-0"
-                />
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
-
-        <DialogFooter className="mt-4 shrink-0 border-t border-border pt-4">
-          <Button variant="outline" onClick={onClose} className="rounded-xl">
-            Cancelar
-          </Button>
-          <Button
-            onClick={() => {
-              if (clause) onSave(clause.id, content);
-              onClose();
-            }}
-            className="rounded-xl"
-          >
-            Guardar cláusula
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 const labelClass =
   "ml-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600 dark:text-zinc-400";
@@ -218,26 +74,16 @@ export function ContractGlobalSetupSections({
     adminSettings,
     bankAccounts,
     contractBankAccountIds,
-    clauses,
     updateAdminSettings,
     addBankAccount,
     updateBankAccount,
     removeBankAccount,
     toggleContractBankAccountId,
     setContractBankAccountIds,
-    toggleClause,
-    updateClause,
-    resetClauses,
   } = useContractSettingsStore();
 
   const [bankDialogOpen, setBankDialogOpen] = useState(false);
   const [editingBank, setEditingBank] = useState<BankAccount | null>(null);
-  const [clauseEditorOpen, setClauseEditorOpen] = useState(false);
-  const [editingClause, setEditingClause] = useState<ContractClause | null>(
-    null,
-  );
-
-  const enabledCount = clauses.filter((c) => c.enabled).length;
 
   useEffect(() => {
     if (bankAccounts.length === 0) return;
@@ -269,19 +115,6 @@ export function ContractGlobalSetupSections({
           }}
         />
       ) : null}
-      <ClauseEditorDialog
-        open={clauseEditorOpen}
-        clause={editingClause}
-        clausePreviewFincaData={clausePreviewFincaData}
-        onClose={() => {
-          setClauseEditorOpen(false);
-          setEditingClause(null);
-        }}
-        onSave={(id, content) => {
-          updateClause(id, { content });
-          sileo.success({ title: "Cláusula actualizada", fill: "#f0fdf4" });
-        }}
-      />
 
       <div className="flex flex-col gap-3 sm:gap-4">
       {!hideAdminAndBankSections ? (
@@ -602,83 +435,10 @@ export function ContractGlobalSetupSections({
         </>
       ) : null}
 
-      <FormSection
-        title="Cláusulas del contrato"
-        description="Activa, desactiva o edita el texto de cada cláusula"
-        icon={ListChecks}
-        gradientFrom="from-emerald-500/10"
-        iconBg="bg-emerald-600 text-white"
-        iconShadow="shadow-emerald-500/20"
-        textColor="text-emerald-600 dark:text-emerald-200"
-        defaultOpen={false}
-        className={sectionShell}
-        customHeaderActions={
-          <button
-            type="button"
-            onClick={() => {
-              resetClauses();
-              sileo.success({
-                title: "Cláusulas restauradas",
-                fill: "#f0fdf4",
-              });
-            }}
-            className="mr-2 flex items-center gap-1 text-[10px] font-bold text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"
-          >
-            <RotateCcw className="w-3 h-3" />
-            Restaurar
-          </button>
-        }
-      >
-        <div className="space-y-2 p-1">
-          <div className="flex items-center justify-between mb-2">
-            <Badge variant="secondary" className="text-[10px] font-black">
-              {enabledCount}/{clauses.length} activas
-            </Badge>
-          </div>
-          {[...clauses]
-            .sort((a, b) => a.order - b.order)
-            .map((clause) => (
-              <div
-                key={clause.id}
-                className={cn(
-                  "flex items-center gap-3 rounded-2xl border p-3 transition-all",
-                  clause.enabled
-                    ? "border-zinc-200 bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800/90"
-                    : "border-dashed border-zinc-300 bg-zinc-50/80 opacity-80 dark:border-zinc-600 dark:bg-zinc-900/50",
-                )}
-              >
-                <GripVertical className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
-                <Switch
-                  checked={clause.enabled}
-                  onCheckedChange={() => toggleClause(clause.id)}
-                  className="shrink-0"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-                    <span className="text-emerald-700 dark:text-emerald-400">
-                      {clause.romanNumeral}.{" "}
-                    </span>
-                    {clause.label}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingClause(clause);
-                    setClauseEditorOpen(true);
-                  }}
-                  className="shrink-0 rounded-lg p-2 text-zinc-500 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                  title="Editar contenido"
-                >
-                  <Pencil className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          <p className="pt-2 text-center text-[10px] text-zinc-500 dark:text-zinc-400">
-            Los cambios se reflejan al instante en la vista previa del contrato debajo.
-          </p>
-        </div>
-      </FormSection>
+      {/* La sección "Cláusulas del contrato" se quitó (Vane 21-jul): el texto
+          del contrato se revisa y corrige directo en el editor Word (paso
+          Editar / modal del inbox), que es la fuente final del PDF. Las
+          cláusulas del store siguen alimentando la plantilla base. */}
       </div>
     </>
   );
