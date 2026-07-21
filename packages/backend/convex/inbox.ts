@@ -30,7 +30,11 @@ import {
   sendVideoToYcloud,
 } from './lib/ycloud/senders';
 import { sendCatalogCard, BETWEEN_CATALOG_SENDS_MS, MAX_CATALOG_CARDS, formatCop } from './lib/catalogSend';
-import { createGlobalPricingCache, resolveSeasonNightly } from './lib/seasonPricing';
+import {
+  createGlobalPricingCache,
+  priceForGlobalRule,
+  resolveSeasonNightly,
+} from './lib/seasonPricing';
 import { buildCatalogoIntro } from './lib/copys';
 import { chatCompletion } from './lib/openai';
 import {
@@ -1454,10 +1458,15 @@ export const buildCatalogCardsForSelection = internalQuery({
      */
     fechaEntradaMs: v.optional(v.number()),
     fechaSalidaMs: v.optional(v.number()),
+    /**
+     * Temporada elegida A MANO en el modal (selector, Vane 21-jul): manda
+     * sobre las fechas — el precio de cada ficha sale de esa regla global.
+     */
+    temporadaGlobalId: v.optional(v.id('globalPricing')),
   },
   handler: async (
     ctx,
-    { conversationId, propertyIds, fechaEntradaMs, fechaSalidaMs },
+    { conversationId, propertyIds, fechaEntradaMs, fechaSalidaMs, temporadaGlobalId },
   ): Promise<
     | { ok: false; motivo: string }
     | {
@@ -1509,19 +1518,23 @@ export const buildCatalogCardsForSelection = internalQuery({
         )
         .first();
       if (!mapping) continue; // finca sin ficha Meta → se omite
-      // Precio: con fechas → temporada de ESAS fechas (igual que el bot);
-      // sin fechas → "Desde $mín" histórico.
-      const season = hayFechas
-        ? await resolveSeasonNightly(
-            ctx.db,
-            p,
-            feMs as number,
-            fsMs as number,
-            globalPricingCache,
-          )
-        : null;
+      // Precio: temporada elegida a mano > temporada de las fechas > "Desde".
+      let season: { nightly: number } | null = null;
+      if (temporadaGlobalId) {
+        season = {
+          nightly: await priceForGlobalRule(ctx.db, p, temporadaGlobalId),
+        };
+      } else if (hayFechas) {
+        season = await resolveSeasonNightly(
+          ctx.db,
+          p,
+          feMs as number,
+          fsMs as number,
+          globalPricingCache,
+        );
+      }
       const parts: string[] = [];
-      if (season) {
+      if (season && season.nightly > 0) {
         parts.push(`💰 ${formatCop(season.nightly)} por noche`);
       } else {
         const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
@@ -1627,16 +1640,19 @@ export const sendCatalogSelection = action({
   args: {
     conversationId: v.id('conversations'),
     propertyIds: v.array(v.id('properties')),
+    /** Temporada elegida en el selector del modal (opcional). */
+    temporadaGlobalId: v.optional(v.id('globalPricing')),
   },
   handler: async (
     ctx,
-    { conversationId, propertyIds },
+    { conversationId, propertyIds, temporadaGlobalId },
   ): Promise<{ ok: boolean; sent: number; failed: number; queued?: number; motivo?: string }> => {
     if (propertyIds.length === 0) return { ok: false, sent: 0, failed: 0, motivo: 'Sin selección' };
 
     const built = await ctx.runQuery(internal.inbox.buildCatalogCardsForSelection, {
       conversationId,
       propertyIds,
+      temporadaGlobalId,
     });
     if (!built.ok) return { ok: false, sent: 0, failed: 0, motivo: built.motivo };
 
@@ -2176,10 +2192,12 @@ export const buildWebFichasForSelection = internalQuery({
   args: {
     conversationId: v.id('conversations'),
     propertyIds: v.array(v.id('properties')),
+    /** Temporada elegida a mano (manda sobre las fechas del chat). */
+    temporadaGlobalId: v.optional(v.id('globalPricing')),
   },
   handler: async (
     ctx,
-    { conversationId, propertyIds },
+    { conversationId, propertyIds, temporadaGlobalId },
   ): Promise<
     | { ok: false; motivo: string }
     | {
@@ -2224,23 +2242,29 @@ export const buildWebFichasForSelection = internalQuery({
       const imageUrl = await fetchPrimaryPropertyImageUrl(ctx, p._id);
       if (!imageUrl) continue;
 
-      const season = hayFechas
-        ? await resolveSeasonNightly(
-            ctx.db,
-            p,
-            feMs as number,
-            fsMs as number,
-            globalPricingCache,
-          )
-        : null;
+      let season: { nightly: number } | null = null;
+      if (temporadaGlobalId) {
+        season = {
+          nightly: await priceForGlobalRule(ctx.db, p, temporadaGlobalId),
+        };
+      } else if (hayFechas) {
+        season = await resolveSeasonNightly(
+          ctx.db,
+          p,
+          feMs as number,
+          fsMs as number,
+          globalPricingCache,
+        );
+      }
       const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
         (x): x is number => typeof x === 'number' && x > 0,
       );
-      const priceFrom = season
-        ? season.nightly
-        : prices.length > 0
-          ? Math.min(...prices)
-          : 0;
+      const priceFrom =
+        season && season.nightly > 0
+          ? season.nightly
+          : prices.length > 0
+            ? Math.min(...prices)
+            : 0;
       const url = `https://fincasya.com/fincas/${slug}`;
 
       cards.push({
@@ -2378,15 +2402,18 @@ export const sendWebFichaSelection = action({
   args: {
     conversationId: v.id('conversations'),
     propertyIds: v.array(v.id('properties')),
+    /** Temporada elegida en el selector del modal (opcional). */
+    temporadaGlobalId: v.optional(v.id('globalPricing')),
   },
   handler: async (
     ctx,
-    { conversationId, propertyIds },
+    { conversationId, propertyIds, temporadaGlobalId },
   ): Promise<{ ok: boolean; sent: number; failed: number; queued?: number; motivo?: string }> => {
     if (propertyIds.length === 0) return { ok: false, sent: 0, failed: 0, motivo: 'Sin selección' };
 
     const built = await ctx.runQuery(internal.inbox.buildWebFichasForSelection, {
       conversationId,
+      temporadaGlobalId,
       propertyIds,
     });
     if (!built.ok) return { ok: false, sent: 0, failed: 0, motivo: built.motivo };

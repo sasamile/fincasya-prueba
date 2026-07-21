@@ -151,6 +151,52 @@ export function CatalogModal({
   const sentSet = useMemo(() => new Set(sentIds ?? []), [sentIds]);
   const sendCatalog = useAction(api.inbox.sendCatalogSelection);
   const sendWebFichas = useAction(api.inbox.sendWebFichaSelection);
+  /**
+   * TEMPORADA DEL PRECIO (Vane 21-jul): el envío manual sale con el precio de
+   * la temporada elegida. Por defecto se marca la temporada EN LA QUE ESTAMOS
+   * HOY (según las reglas de /admin/pricing-rules); el operador puede cambiar
+   * a otra o a "Sin temporada" (precio "Desde $mín").
+   */
+  const seasonRules = useQuery(api.globalPricing.list);
+  const activeSeasons = useMemo(
+    () =>
+      (seasonRules ?? []).filter(
+        (r: { activa?: boolean }) => r.activa !== false,
+      ) as Array<{
+        _id: string;
+        nombre: string;
+        fechas?: string[];
+        fechaDesde?: string;
+        fechaHasta?: string;
+      }>,
+    [seasonRules],
+  );
+  /** Id de la temporada que cubre HOY (Bogotá), si alguna. */
+  const todaySeasonId = useMemo(() => {
+    const mmdd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .format(new Date())
+      .replace('/', '-');
+    for (const r of activeSeasons) {
+      if (r.fechas?.includes(mmdd)) return r._id;
+      if (r.fechaDesde && r.fechaHasta) {
+        const inRange =
+          r.fechaDesde <= r.fechaHasta
+            ? mmdd >= r.fechaDesde && mmdd <= r.fechaHasta
+            : mmdd >= r.fechaDesde || mmdd <= r.fechaHasta;
+        if (inRange) return r._id;
+      }
+    }
+    return null;
+  }, [activeSeasons]);
+  /** undefined = aún sin inicializar; null = "Sin temporada". */
+  const [temporadaId, setTemporadaId] = useState<string | null | undefined>(
+    undefined,
+  );
+  const temporadaEfectiva = temporadaId === undefined ? todaySeasonId : temporadaId;
   const [mode, setMode] = useState<ShareMode>('meta');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
@@ -228,10 +274,13 @@ export function CatalogModal({
     setResult(null);
     const propertyIds = [...selected] as Id<'properties'>[];
     try {
+      const temporadaGlobalId = temporadaEfectiva
+        ? (temporadaEfectiva as Id<'globalPricing'>)
+        : undefined;
       const res =
         mode === 'meta'
-          ? await sendCatalog({ conversationId, propertyIds })
-          : await sendWebFichas({ conversationId, propertyIds });
+          ? await sendCatalog({ conversationId, propertyIds, temporadaGlobalId })
+          : await sendWebFichas({ conversationId, propertyIds, temporadaGlobalId });
       if (res.ok) {
         const label = mode === 'meta' ? 'ficha(s) Meta' : 'ficha(s) web';
         setResult(
@@ -355,6 +404,44 @@ export function CatalogModal({
               {d}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Temporada del precio: por defecto la de HOY; el precio de las fichas
+          que se envían sale de la temporada elegida. */}
+      {activeSeasons.length > 0 && (
+        <div className="px-4 pb-2.5">
+          <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Temporada del precio
+          </p>
+          <div className="flex gap-2 overflow-x-auto scrollbar-none [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {activeSeasons.map((r) => (
+              <button
+                key={r._id}
+                type="button"
+                onClick={() => setTemporadaId(r._id)}
+                data-active={temporadaEfectiva === r._id}
+                className="wa-chip shrink-0 whitespace-nowrap px-3 py-1 text-[13px] font-medium"
+                title={
+                  r._id === todaySeasonId
+                    ? 'Temporada en la que estamos hoy'
+                    : undefined
+                }
+              >
+                {r.nombre}
+                {r._id === todaySeasonId ? ' · hoy' : ''}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setTemporadaId(null)}
+              data-active={temporadaEfectiva === null}
+              className="wa-chip shrink-0 whitespace-nowrap px-3 py-1 text-[13px] font-medium"
+              title="Enviar con el precio 'Desde $mínimo' (sin temporada)"
+            >
+              Sin temporada
+            </button>
+          </div>
         </div>
       )}
 

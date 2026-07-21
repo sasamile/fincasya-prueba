@@ -110,6 +110,39 @@ export type SeasonNightly = {
 };
 
 /**
+ * Precio por noche de una finca para una TEMPORADA elegida a mano (selector
+ * del envío manual, Vane 21-jul): busca la regla de la finca ligada a esa
+ * regla global; sub-regla por capacidad > valorUnico > priceBase.
+ */
+export async function priceForGlobalRule(
+  db: DatabaseReader,
+  property: Doc<'properties'>,
+  globalRuleId: Id<'globalPricing'>,
+): Promise<number> {
+  const rows = await db
+    .query('propertyPricing')
+    .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+    .collect();
+  const rule = rows.find(
+    (r) =>
+      String(r.globalRuleId ?? '') === String(globalRuleId) &&
+      (r.activa ?? true),
+  );
+  if (rule) {
+    const sub = (rule.subReglasCapacidad ?? []).find(
+      (s) =>
+        property.capacity >= s.capacidadMin &&
+        property.capacity <= s.capacidadMax,
+    );
+    if (sub && sub.valorUnico > 0) return sub.valorUnico;
+    if (typeof rule.valorUnico === 'number' && rule.valorUnico > 0) {
+      return rule.valorUnico;
+    }
+  }
+  return property.priceBase;
+}
+
+/**
  * Precio por noche para la estadía [feMs, fsMs) — regla dominante = primera
  * noche con temporada. Devuelve null si no hay ni regla ni priceBase.
  */
