@@ -39,12 +39,15 @@ function CatalogListRow({
   property: p,
   mode,
   selected,
+  alreadySent,
   onToggle,
   onBlocked,
 }: {
   property: CatalogRow;
   mode: ShareMode;
   selected: boolean;
+  /** Ya se envió en ESTE chat (bot o manual) — se avisa para no repetir. */
+  alreadySent?: boolean;
   onToggle: () => void;
   onBlocked: (property: CatalogRow) => void;
 }) {
@@ -106,6 +109,9 @@ function CatalogListRow({
           {p.sendable && !p.inWhatsAppCatalog && (
             <span className="text-amber-600"> · el bot no la envía</span>
           )}
+          {alreadySent && (
+            <span className="font-semibold text-sky-600"> · ✓ ya enviada en este chat</span>
+          )}
         </p>
         <p className="text-[13px]">
           <span className="font-medium text-foreground">{formatCop(p.priceFrom)}</span>
@@ -140,6 +146,9 @@ export function CatalogModal({
   const liveProperties = useQuery(api.inbox.listCatalogProperties);
   const properties = liveProperties ?? (catalogCache.value as typeof liveProperties);
   if (liveProperties !== undefined) catalogCache.value = liveProperties;
+  /** Fincas ya enviadas en este chat (bot o manual) → se marcan en la lista. */
+  const sentIds = useQuery(api.inbox.getSentCatalogIds, { conversationId });
+  const sentSet = useMemo(() => new Set(sentIds ?? []), [sentIds]);
   const sendCatalog = useAction(api.inbox.sendCatalogSelection);
   const sendWebFichas = useAction(api.inbox.sendWebFichaSelection);
   const [mode, setMode] = useState<ShareMode>('meta');
@@ -364,6 +373,7 @@ export function CatalogModal({
                 property={p}
                 mode={mode}
                 selected={selected.has(id)}
+                alreadySent={sentSet.has(id)}
                 onToggle={() => toggle(id, sendable)}
                 onBlocked={explainBlocked}
               />

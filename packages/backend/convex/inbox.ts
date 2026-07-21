@@ -1623,6 +1623,18 @@ export const sendCatalogSelection = action({
   },
 });
 
+/**
+ * Fincas YA ENVIADAS en esta conversación (bot o manual) — el modal de
+ * catálogo las marca para que el Experto no repita sin querer (Vane 21-jul).
+ */
+export const getSentCatalogIds = query({
+  args: { conversationId: v.id('conversations') },
+  handler: async (ctx, { conversationId }): Promise<string[]> => {
+    const conv = await ctx.db.get(conversationId);
+    return (conv?.lastSentCatalogPropertyIds ?? []).map(String);
+  },
+});
+
 /** Contexto minimo (telefono + nombre) para el envio automatico de catalogo. */
 export const _autoCatalogContact = internalQuery({
   args: { conversationId: v.id('conversations') },
