@@ -104,15 +104,19 @@ export function buildWebFichaCaption(args: {
   priceFrom: number;
   rating: number | null;
   url: string;
+  /** true cuando priceFrom es el precio de la TEMPORADA de las fechas pedidas
+   *  (se muestra sin el "Desde"). */
+  precioDeTemporada?: boolean;
 }): string {
   const lines: string[] = [`🏡 ${args.title}`];
   const meta: string[] = [];
   if (args.rating != null && args.rating > 0) meta.push(`⭐ ${args.rating.toFixed(1)}`);
   if (args.location) meta.push(`📍 ${args.location}`);
   if (meta.length) lines.push(meta.join(' · '));
+  const priceLabel = `$${Math.round(args.priceFrom).toLocaleString('es-CO')} noche`;
   const price =
     args.priceFrom > 0
-      ? `💰 Desde $${Math.round(args.priceFrom).toLocaleString('es-CO')} noche`
+      ? `💰 ${args.precioDeTemporada ? priceLabel : `Desde ${priceLabel}`}`
       : null;
   lines.push([price, `👥 ${args.capacity}`].filter(Boolean).join(' · '));
   lines.push(args.url);

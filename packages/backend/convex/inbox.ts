@@ -30,6 +30,7 @@ import {
   sendVideoToYcloud,
 } from './lib/ycloud/senders';
 import { sendCatalogCard, BETWEEN_CATALOG_SENDS_MS, MAX_CATALOG_CARDS, formatCop } from './lib/catalogSend';
+import { createGlobalPricingCache, resolveSeasonNightly } from './lib/seasonPricing';
 import { buildCatalogoIntro } from './lib/copys';
 import { chatCompletion } from './lib/openai';
 import {
@@ -1445,10 +1446,18 @@ export const buildCatalogCardsForSelection = internalQuery({
   args: {
     conversationId: v.id('conversations'),
     propertyIds: v.array(v.id('properties')),
+    /**
+     * ms epoch — si vienen (catálogo automático), el precio de cada ficha es
+     * el de la TEMPORADA de esas fechas. Si no vienen (envío manual), se usan
+     * las últimas fechas conocidas del chat (lastCatalogSearch); sin nada de
+     * eso, cae al "Desde $mín" histórico.
+     */
+    fechaEntradaMs: v.optional(v.number()),
+    fechaSalidaMs: v.optional(v.number()),
   },
   handler: async (
     ctx,
-    { conversationId, propertyIds },
+    { conversationId, propertyIds, fechaEntradaMs, fechaSalidaMs },
   ): Promise<
     | { ok: false; motivo: string }
     | {
@@ -1466,6 +1475,13 @@ export const buildCatalogCardsForSelection = internalQuery({
   > => {
     const conversation = await ctx.db.get(conversationId);
     if (!conversation) return { ok: false, motivo: 'Conversación no existe' };
+    // Fechas para el precio de temporada: las del envío o, en manual, las
+    // últimas que el cliente pidió en este chat (guardadas por el bot).
+    const feMs = fechaEntradaMs ?? conversation.lastCatalogSearch?.fechaEntrada;
+    const fsMs = fechaSalidaMs ?? conversation.lastCatalogSearch?.fechaSalida;
+    const hayFechas =
+      typeof feMs === 'number' && typeof fsMs === 'number' && fsMs > feMs;
+    const globalPricingCache = createGlobalPricingCache();
     const contact = await ctx.db.get(conversation.contactId);
     if (!contact?.phone) return { ok: false, motivo: 'El contacto no tiene teléfono' };
 
@@ -1493,12 +1509,27 @@ export const buildCatalogCardsForSelection = internalQuery({
         )
         .first();
       if (!mapping) continue; // finca sin ficha Meta → se omite
-      const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
-        (x): x is number => typeof x === 'number' && x > 0,
-      );
-      const desde = prices.length > 0 ? Math.min(...prices) : 0;
+      // Precio: con fechas → temporada de ESAS fechas (igual que el bot);
+      // sin fechas → "Desde $mín" histórico.
+      const season = hayFechas
+        ? await resolveSeasonNightly(
+            ctx.db,
+            p,
+            feMs as number,
+            fsMs as number,
+            globalPricingCache,
+          )
+        : null;
       const parts: string[] = [];
-      if (desde > 0) parts.push(`💰 Desde ${formatCop(desde)} por noche`);
+      if (season) {
+        parts.push(`💰 ${formatCop(season.nightly)} por noche`);
+      } else {
+        const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
+          (x): x is number => typeof x === 'number' && x > 0,
+        );
+        const desde = prices.length > 0 ? Math.min(...prices) : 0;
+        if (desde > 0) parts.push(`💰 Desde ${formatCop(desde)} por noche`);
+      }
       parts.push(`👥 Hasta ${p.capacity} personas`);
       cards.push({
         propertyId: p._id,
@@ -1712,7 +1743,13 @@ export const sendAutoCatalog = action({
 
     const built = await ctx.runQuery(
       internal.inbox.buildCatalogCardsForSelection,
-      { conversationId: args.conversationId, propertyIds },
+      {
+        conversationId: args.conversationId,
+        propertyIds,
+        // Precio de temporada según las fechas del filtro del operador.
+        fechaEntradaMs: feOk,
+        fechaSalidaMs: fsOk,
+      },
     );
     if (!built.ok) return { ok: false, motivo: built.motivo };
     if (built.cards.length === 0) {
@@ -2162,6 +2199,14 @@ export const buildWebFichasForSelection = internalQuery({
     const contact = await ctx.db.get(conversation.contactId);
     if (!contact?.phone) return { ok: false, motivo: 'El contacto no tiene teléfono' };
 
+    // Precio por TEMPORADA con las últimas fechas conocidas del chat (igual
+    // que las fichas Meta); sin fechas, "Desde $mín".
+    const feMs = conversation.lastCatalogSearch?.fechaEntrada;
+    const fsMs = conversation.lastCatalogSearch?.fechaSalida;
+    const hayFechas =
+      typeof feMs === 'number' && typeof fsMs === 'number' && fsMs > feMs;
+    const globalPricingCache = createGlobalPricingCache();
+
     const cards: Array<{
       propertyId: Id<'properties'>;
       title: string;
@@ -2179,10 +2224,23 @@ export const buildWebFichasForSelection = internalQuery({
       const imageUrl = await fetchPrimaryPropertyImageUrl(ctx, p._id);
       if (!imageUrl) continue;
 
+      const season = hayFechas
+        ? await resolveSeasonNightly(
+            ctx.db,
+            p,
+            feMs as number,
+            fsMs as number,
+            globalPricingCache,
+          )
+        : null;
       const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
         (x): x is number => typeof x === 'number' && x > 0,
       );
-      const priceFrom = prices.length > 0 ? Math.min(...prices) : 0;
+      const priceFrom = season
+        ? season.nightly
+        : prices.length > 0
+          ? Math.min(...prices)
+          : 0;
       const url = `https://fincasya.com/fincas/${slug}`;
 
       cards.push({
@@ -2197,6 +2255,7 @@ export const buildWebFichasForSelection = internalQuery({
           priceFrom,
           rating: p.rating ?? null,
           url,
+          precioDeTemporada: Boolean(season),
         }),
       });
     }
