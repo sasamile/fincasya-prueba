@@ -1271,7 +1271,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                   {(
                     [
                       ['Depósito mascotas', 'petDeposit'],
-                      ['Ingreso (3ª+)', 'petServiceFee'],
+                      ['Ingreso (2ª+)', 'petServiceFee'],
                       ['Aseo mascotas', 'petCleaningFee'],
                     ] as const
                   ).map(([label, key]) => (
@@ -1367,7 +1367,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           {petFees.serviceFee > 0 ? (
             <div className="flex items-center justify-between gap-3 border-b border-dashed border-border/60 py-2.5">
               <span className="text-muted-foreground">
-                Ingreso mascotas (3ª+)
+                Ingreso mascotas (2ª+)
               </span>
               <span className="shrink-0 font-semibold tabular-nums">
                 + {moneyCop(petFees.serviceFee)}
@@ -1376,7 +1376,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           ) : null}
           {petFees.cleaningFee > 0 ? (
             <div className="flex items-center justify-between gap-3 border-b border-dashed border-border/60 py-2.5">
-              <span className="text-muted-foreground">Aseo mascotas (3+)</span>
+              <span className="text-muted-foreground">Aseo mascotas (2+)</span>
               <span className="shrink-0 font-semibold tabular-nums">
                 + {moneyCop(petFees.cleaningFee)}
               </span>

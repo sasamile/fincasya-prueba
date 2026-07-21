@@ -699,15 +699,17 @@ export function CreateSaleLinkModal({
       const serviceFee = Number(pets?.serviceFee ?? 0);
       const petCleaning = Number(pets?.cleaningFee ?? 0);
 
+      // Regla unificada 21-jul: depósito $100.000 POR CADA mascota; ingreso
+      // $30.000 desde la 2ª + aseo $70.000 con 2+.
       form.setValue(
         "petDeposit",
-        refundable > 0 ? refundable : Math.min(petCount, 2) * 100_000,
+        refundable > 0 ? refundable : petCount * 100_000,
       );
       form.setValue(
         "petSurcharge",
         serviceFee + petCleaning > 0
           ? serviceFee + petCleaning
-          : Math.max(0, petCount - 2) * 30_000,
+          : Math.max(0, petCount - 1) * 30_000 + (petCount >= 2 ? 70_000 : 0),
       );
     } else {
       form.setValue("petDeposit", 0);

@@ -121,7 +121,8 @@ export const DEFAULT_ADMIN_SETTINGS: GlobalAdminSettings = {
   adminCity: "Chía (Cund)",
   cleaningFee: "$100.000",
   extraPersonFee: "$120.000",
-  petDeposit: "$200.000",
+  // Depósito POR CADA mascota (regla unificada 21-jul-2026).
+  petDeposit: "$100.000",
   securityDeposit: "$200.000",
 };
 

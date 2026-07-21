@@ -165,14 +165,12 @@ function buildConfirmationHtml(p: ConfirmationPayload, logoDataUrl: string | nul
 
   const issueDate = p.issueDate || new Date().toISOString().split('T')[0];
 
-  const petCleaningRow = petCleaningFee > 0
-    ? `<tr>
-        <td class="peach"></td>
-        <td class="value-cell"></td>
-        <td colspan="2" class="peach right-align">Aseo por mascotas (3+)</td>
-        <td class="value-cell">${esc(formatCurrency(petCleaningFee))}</td>
-       </tr>`
-    : '';
+  // Regla Vane 21-jul: el aseo por mascotas va INCLUIDO en "Valor Limpieza
+  // General" (p.cleaningFee ya viene sumado) — solo se anota, sin fila aparte.
+  const cleaningLabel =
+    petCleaningFee > 0
+      ? 'Valor Limpieza General (incluye aseo mascotas)'
+      : 'Valor Limpieza General';
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -306,10 +304,9 @@ function buildConfirmationHtml(p: ConfirmationPayload, logoDataUrl: string | nul
         <tr>
           <td class="peach">Fecha Abono</td>
           <td class="value-cell">${esc(formatDateLong(p.depositDate))}</td>
-          <td colspan="2" class="peach right-align">Valor Limpieza General</td>
+          <td colspan="2" class="peach right-align">${cleaningLabel}</td>
           <td class="value-cell">${esc(formatCurrency(cleaningFee))}</td>
         </tr>
-        ${petCleaningRow}
         <tr>
           <td class="peach">Valor Saldo</td>
           <td class="value-cell">${esc(formatCurrency(balanceAmount))}</td>

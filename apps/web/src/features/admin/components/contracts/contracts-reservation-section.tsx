@@ -882,7 +882,8 @@ export function ContractsReservationSection({
       (stayPriceData as StayPriceLike | undefined)?.pets?.refundable || 0,
     );
     if (apiValue > 0) return apiValue;
-    return Math.min(Number(form.petCount || 0), 2) * 100000;
+    // $100.000 POR CADA mascota (regla unificada 21-jul).
+    return Number(form.petCount || 0) * 100000;
   }, [form.petCount, stayPriceData]);
 
   const petSurchargeTotal = useMemo(() => {
@@ -890,7 +891,8 @@ export function ContractsReservationSection({
       (stayPriceData as StayPriceLike | undefined)?.pets?.serviceFee || 0,
     );
     if (apiValue > 0) return apiValue;
-    return Math.max(0, Number(form.petCount || 0) - 2) * 30000;
+    // $30.000 por mascota DESDE LA 2ª (regla unificada 21-jul).
+    return Math.max(0, Number(form.petCount || 0) - 1) * 30000;
   }, [form.petCount, stayPriceData]);
 
   const petCleaningTotal = useMemo(() => {
@@ -898,7 +900,8 @@ export function ContractsReservationSection({
       (stayPriceData as StayPriceLike | undefined)?.pets?.cleaningFee || 0,
     );
     if (apiValue > 0) return apiValue;
-    return Number(form.petCount || 0) >= 3 ? 70000 : 0;
+    // $70.000 único con 2+ mascotas (regla unificada 21-jul).
+    return Number(form.petCount || 0) >= 2 ? 70000 : 0;
   }, [form.petCount, stayPriceData]);
 
   const serviceStaffTotal = useMemo(() => {
@@ -1625,7 +1628,7 @@ export function ContractsReservationSection({
       const property = properties.find((p) => p.id === b.propertyId);
       const petCount = Number(b.numeroMascotas ?? 0) || 0;
       const depositoMascotas = Number(b.depositoMascotas ?? 0) || 0;
-      const petCleaningFee = petCount >= 3 ? 70_000 : 0;
+      const petCleaningFee = petCount >= 2 ? 70_000 : 0;
       const cleaningFee = 100_000 + petCleaningFee;
       let damageDeposit = Number(b.depositoGarantia ?? 0) || 0;
       if (!damageDeposit && property?.depositoDanosReembolsable) {
@@ -1636,7 +1639,7 @@ export function ContractsReservationSection({
       const costoMascotas = Number(b.costoMascotas ?? 0) || 0;
       let petRefundable = depositoMascotas;
       if (!petRefundable && petCount > 0) {
-        petRefundable = Math.min(petCount, 2) * 100_000;
+        petRefundable = petCount * 100_000;
       }
       const refundableDeposit = damageDeposit + petRefundable;
       const payload = {
@@ -4064,7 +4067,7 @@ export function ContractsReservationSection({
                     {petDepositTotal > 0 && (
                       <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                         <span className="font-bold text-emerald-600">
-                          Deposito mascotas
+                          Deposito mascotas ($100.000 c/u)
                         </span>
                         <span className="font-bold text-emerald-600">
                           + {money(petDepositTotal)}
@@ -4075,7 +4078,7 @@ export function ContractsReservationSection({
                     {petSurchargeTotal > 0 && (
                       <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                         <span className="font-medium italic text-zinc-500">
-                          Tarifa ingreso mascotas (3ª+)
+                          Tarifa ingreso mascotas (2ª en adelante)
                         </span>
                         <span className="font-bold text-zinc-950">
                           + {money(petSurchargeTotal)}
@@ -4086,7 +4089,7 @@ export function ContractsReservationSection({
                     {petCleaningTotal > 0 && (
                       <div className="flex items-center justify-between gap-2 border-b border-dashed border-zinc-100 py-1">
                         <span className="font-medium text-zinc-500">
-                          Aseo por mascotas (3+)
+                          Aseo por mascotas (2+)
                         </span>
                         <span className="font-bold text-zinc-950">
                           + {money(petCleaningTotal)}

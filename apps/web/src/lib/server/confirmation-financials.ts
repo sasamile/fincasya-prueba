@@ -1,26 +1,35 @@
-// Portado 1:1 de fincasya-new (fincas/confirmation-financials.ts).
-import {
-  computePetFees,
-  PET_CLEANING_FROM_THREE,
-  PET_DEPOSIT_PER_PET,
-} from "./pet-fees";
+// Regla de mascotas unificada 21-jul-2026 (ver pet-fees.ts).
+import { computePetFees, PET_DEPOSIT_PER_PET } from "./pet-fees";
 
 /** Aseo final según cláusula TERCERA del contrato (no el depositoAseo de la ficha). */
 export const CONFIRMATION_STANDARD_CLEANING_COP = 100_000;
 
-/** Depósito reembolsable por mascota (100.000 c/u, máx. 2; ver pet-fees). */
+/** Depósito reembolsable por mascota ($100.000 CADA UNA; ver pet-fees). */
 export { PET_DEPOSIT_PER_PET as CONFIRMATION_PET_REFUNDABLE_COP };
-export const CONFIRMATION_MAX_REFUNDABLE_PETS = 2;
 
-/** Limpieza general de la confirmación: $100.000 + aseo extra si hay 3+ mascotas. */
-export function resolveConfirmationCleaningFee(petCount?: number): {
+/**
+ * Limpieza general de la confirmación: aseo final + aseo por mascotas (2+)
+ * EN UNA SOLA LÍNEA (regla Vane 21-jul: el aseo de mascotas va incluido en el
+ * aseo final de la CR, no aparte). Acepta overrides del contrato editado.
+ */
+export function resolveConfirmationCleaningFee(
+  petCount?: number,
+  overrides?: { baseCleaningFee?: number; petCleaningFee?: number },
+): {
   cleaningFee: number;
   petCleaningFee: number;
 } {
   const n = Math.max(0, Math.floor(petCount ?? 0));
-  const petCleaningFee = n >= 3 ? PET_CLEANING_FROM_THREE : 0;
+  const base =
+    overrides?.baseCleaningFee != null && overrides.baseCleaningFee > 0
+      ? overrides.baseCleaningFee
+      : CONFIRMATION_STANDARD_CLEANING_COP;
+  const petCleaningFee =
+    overrides?.petCleaningFee != null && overrides.petCleaningFee >= 0
+      ? overrides.petCleaningFee
+      : computePetFees(n).cleaningFee;
   return {
-    cleaningFee: CONFIRMATION_STANDARD_CLEANING_COP + petCleaningFee,
+    cleaningFee: base + petCleaningFee,
     petCleaningFee,
   };
 }
@@ -30,15 +39,16 @@ export type ConfirmationFinancialInput = {
   precioTotal: number;
   /** Subtotal alojamiento: finca (+ personal servicio), sin mascotas ni depósitos. */
   subtotal?: number;
-  /** Tarifa ingreso mascotas 3ª+ (costoMascotas). */
+  /** Tarifa ingreso mascotas 2ª+ (costoMascotas). */
   petSurcharge?: number;
+  /** Aseo final del contrato (SIN aseo de mascotas). 0 → default $100.000. */
   cleaningFee: number;
   /** Depósito por daños (reembolsable), sin mascotas. */
   damageDeposit: number;
   petCount?: number;
-  /** Depósito mascotas ya calculado en borrador (solo 1.ª y 2.ª). */
+  /** Depósito mascotas del contrato ($100.000 c/u; override editable). */
   depositoMascotas?: number;
-  /** Aseo extra por 3+ mascotas (suma a limpieza). */
+  /** Aseo por mascotas del contrato (override editable; suma a limpieza). */
   petCleaningFee?: number;
 };
 
@@ -79,9 +89,14 @@ export function computeConfirmationFinancials(
     petRefundable = computePetFees(petCount).deposit;
   }
 
-  /** Fianza + depósito mascotas en una sola línea (ej. 300k + 2×100k = 500k). */
+  /** Fianza + depósito mascotas en una sola línea (ej. 300k + 3×100k = 600k). */
   const refundableDeposit = Math.max(0, input.damageDeposit) + petRefundable;
-  const { cleaningFee, petCleaningFee } = resolveConfirmationCleaningFee(petCount);
+  // El CR toma los valores del CONTRATO (editables) y solo calcula el default
+  // cuando no llegaron — así CR y contrato nunca se contradicen (Vane 21-jul).
+  const { cleaningFee, petCleaningFee } = resolveConfirmationCleaningFee(petCount, {
+    baseCleaningFee: input.cleaningFee,
+    petCleaningFee: input.petCleaningFee,
+  });
 
   return { rentAmount, cleaningFee, refundableDeposit, totalAmount, petCleaningFee };
 }

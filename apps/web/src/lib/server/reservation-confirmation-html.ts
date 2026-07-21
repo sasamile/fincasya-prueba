@@ -307,19 +307,11 @@ export function buildReservationConfirmationHtml(
         <tr>
           <td class="peach">Fecha Abono</td>
           <td class="value-cell">${escapeHtml(formatDateLong(data.depositDate))}</td>
-          <td colspan="2" class="peach right-align">Valor Limpieza General</td>
+          <td colspan="2" class="peach right-align">Valor Limpieza General${
+            (data.petCleaningFee ?? 0) > 0 ? " (incluye aseo mascotas)" : ""
+          }</td>
           <td class="value-cell">${escapeHtml(formatCurrency(data.cleaningFee))}</td>
         </tr>
-        ${
-          (data.petCleaningFee ?? 0) > 0
-            ? `<tr>
-          <td class="peach"></td>
-          <td class="value-cell"></td>
-          <td colspan="2" class="peach right-align">Aseo por mascotas (3+)</td>
-          <td class="value-cell">${escapeHtml(formatCurrency(data.petCleaningFee ?? 0))}</td>
-        </tr>`
-            : ""
-        }
         ${
           (data.economicAdjustments ?? [])
             .map(

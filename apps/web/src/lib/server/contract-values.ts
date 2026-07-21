@@ -10,7 +10,8 @@ export const DEFAULT_CONTRACT_ADMIN = {
   adminCity: "Chía (Cund)",
   cleaningFee: "$100.000",
   extraPersonFee: "$120.000",
-  petDeposit: "$200.000",
+  // Depósito POR CADA mascota (regla unificada 21-jul-2026).
+  petDeposit: "$100.000",
   securityDeposit: "$200.000",
 } as const;
 
@@ -657,10 +658,12 @@ export function buildContractWordValues(
       : unitPriceNum * totalDays;
 
   const petCount = Number(dto.petCount) || 0;
-  // Política por defecto; si el asesor envió overrides (editables en inbox), se usan.
-  const computedPetDeposit = Math.min(petCount, 2) * 100000;
-  const computedPetService = Math.max(0, petCount - 2) * 30000;
-  const computedPetCleaning = petCount >= 3 ? 70000 : 0;
+  // Política por defecto (regla unificada 21-jul: depósito $100k POR CADA
+  // mascota; ingreso $30k desde la 2ª; aseo $70k con 2+); si el asesor envió
+  // overrides (editables en inbox), se usan.
+  const computedPetDeposit = petCount * 100000;
+  const computedPetService = Math.max(0, petCount - 1) * 30000;
+  const computedPetCleaning = petCount >= 2 ? 70000 : 0;
   const petSurchargeRefundable =
     dto.petDeposit != null && Number.isFinite(Number(dto.petDeposit))
       ? Math.max(0, Number(dto.petDeposit))

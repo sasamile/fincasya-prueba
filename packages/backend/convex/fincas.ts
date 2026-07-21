@@ -160,11 +160,12 @@ export const calculateStayPrice = query({
       current.setDate(current.getDate() + 1);
     }
 
-    // Regla de mascotas (2026-07): la PRIMERA paga solo el depósito normal
-    // ($100.000 reembolsable); desde la SEGUNDA se cobra ingreso de $30.000
-    // por cada una + un cargo único de aseo de $70.000.
+    // Regla de mascotas UNIFICADA (Vane, 21-jul-2026): CADA mascota paga
+    // depósito reembolsable de $100.000 (3 → $300.000); desde la SEGUNDA se
+    // cobra ingreso de $30.000 por cada una + un cargo único de aseo de
+    // $70.000. Igual a apps/web/src/lib/pet-fees.ts.
     const numeroMascotas = args.numeroMascotas ?? 0;
-    const petRefundable = Math.min(numeroMascotas, 1) * 100000;
+    const petRefundable = numeroMascotas * 100000;
     const petServiceFee = Math.max(0, numeroMascotas - 1) * 30000;
     const petCleaningFee = numeroMascotas >= 2 ? 70000 : 0;
     const petTotal = petRefundable + petServiceFee + petCleaningFee;
