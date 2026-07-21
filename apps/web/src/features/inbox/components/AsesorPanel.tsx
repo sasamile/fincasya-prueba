@@ -57,6 +57,7 @@ import { ReservasTool } from '@/features/inbox/components/tools/ReservasTool';
 import { VentaTool } from '@/features/inbox/components/tools/VentaTool';
 import { CheckinTool } from '@/features/inbox/components/tools/CheckinTool';
 import { ConfirmarReservaTool } from '@/features/inbox/components/tools/ConfirmarReservaTool';
+import { SemanaTool } from '@/features/inbox/components/tools/SemanaTool';
 import {
   loadInboxContratoDraft,
   saveInboxContratoDraft,
@@ -190,6 +191,11 @@ const TOOL_META: Record<
     icon: BadgeCheck,
     title: 'Confirmar reserva',
     subtitle: 'Busca el contrato por código y envía la confirmación al chat.',
+  },
+  semana: {
+    icon: Star,
+    title: 'Fincas de la semana',
+    subtitle: 'Fincas que el bot impulsa: esta semana y temporada de fin de año.',
   },
 };
 
@@ -1971,6 +1977,7 @@ export function AsesorPanel({
             onOpenChat={onOpenChat}
           />
         )}
+        {tool === 'semana' && <SemanaTool />}
       </div>
     </aside>
   );

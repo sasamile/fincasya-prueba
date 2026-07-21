@@ -12,6 +12,7 @@ import {
   MessageCircle,
   PanelLeft,
   Settings,
+  Star,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -28,7 +29,8 @@ export type AsesorTool =
   | 'calendario'
   | 'venta'
   | 'checkin'
-  | 'confirmar';
+  | 'confirmar'
+  | 'semana';
 
 export const ASESOR_TOOLS: {
   id: AsesorTool;
@@ -41,6 +43,7 @@ export const ASESOR_TOOLS: {
   { id: 'venta', icon: Link2, label: 'Links de venta', needsChat: false },
   { id: 'checkin', icon: DoorOpen, label: 'Check-in', needsChat: false },
   { id: 'confirmar', icon: BadgeCheck, label: 'Confirmar reserva', needsChat: false },
+  { id: 'semana', icon: Star, label: 'Fincas de la semana', needsChat: false },
 ];
 
 function RailIcon({

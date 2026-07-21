@@ -126,6 +126,7 @@ import type * as siteAnalytics from "../siteAnalytics.js";
 import type * as userPermissions from "../userPermissions.js";
 import type * as users from "../users.js";
 import type * as webChat from "../webChat.js";
+import type * as weeklyPicks from "../weeklyPicks.js";
 import type * as whatsappTemplateOverrides from "../whatsappTemplateOverrides.js";
 import type * as whatsappTemplates from "../whatsappTemplates.js";
 import type * as whatsappTemporalMessage from "../whatsappTemporalMessage.js";
@@ -255,6 +256,7 @@ declare const fullApi: ApiFromModules<{
   userPermissions: typeof userPermissions;
   users: typeof users;
   webChat: typeof webChat;
+  weeklyPicks: typeof weeklyPicks;
   whatsappTemplateOverrides: typeof whatsappTemplateOverrides;
   whatsappTemplates: typeof whatsappTemplates;
   whatsappTemporalMessage: typeof whatsappTemporalMessage;

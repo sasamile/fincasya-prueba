@@ -1,0 +1,308 @@
+'use client';
+
+/**
+ * Herramienta "Fincas de la semana" del rail (Vane, 21-jul): el equipo
+ * selecciona las fincas a IMPULSAR. El bot las prioriza en el catálogo
+ * (en la zona pedida van primero; de otras zonas cierran el lote como
+ * recomendación). Cupo y disponibilidad se respetan siempre. La lista es
+ * manual: aquí se agregan, se apagan (ej. ya se reservó) o se quitan, y
+ * cada finca muestra su ocupación próxima leída de las reservas reales.
+ */
+import { useState } from 'react';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '@fincasya/backend/convex/_generated/api';
+import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
+import { toast } from 'sonner';
+import {
+  AlertTriangle,
+  CalendarRange,
+  CheckCircle2,
+  Loader2,
+  MapPin,
+  PartyPopper,
+  Plus,
+  Search,
+  Star,
+  Trash2,
+  Users,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Switch } from '@/components/ui/switch';
+
+type Lista = 'semana' | 'findeano';
+
+function fmtRango(desde: number, hasta: number): string {
+  const f = (ms: number) =>
+    new Date(ms).toLocaleDateString('es-CO', {
+      day: 'numeric',
+      month: 'short',
+      timeZone: 'America/Bogota',
+    });
+  return `${f(desde)} → ${f(hasta)}`;
+}
+
+export function SemanaTool() {
+  const [lista, setLista] = useState<Lista>('semana');
+  const picks = useQuery(api.weeklyPicks.list, { lista });
+  const [q, setQ] = useState('');
+  const resultados = useQuery(api.weeklyPicks.searchProperties, { q, lista });
+  const add = useMutation(api.weeklyPicks.add);
+  const setEnabled = useMutation(api.weeklyPicks.setEnabled);
+  const remove = useMutation(api.weeklyPicks.remove);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function run(key: string, fn: () => Promise<unknown>, okMsg: string) {
+    setBusy(key);
+    try {
+      await fn();
+      toast.success(okMsg);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo completar');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const activas = (picks ?? []).filter((p) => p.enabled).length;
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Pestañas: semana / fin de año */}
+      <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-muted/40 p-1">
+        <button
+          type="button"
+          onClick={() => setLista('semana')}
+          className={cn(
+            'flex items-center justify-center gap-1.5 rounded-lg py-2 text-[12px] font-bold transition-colors',
+            lista === 'semana'
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Star className="h-3.5 w-3.5" /> Esta semana
+        </button>
+        <button
+          type="button"
+          onClick={() => setLista('findeano')}
+          className={cn(
+            'flex items-center justify-center gap-1.5 rounded-lg py-2 text-[12px] font-bold transition-colors',
+            lista === 'findeano'
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <PartyPopper className="h-3.5 w-3.5" /> Fin de año
+        </button>
+      </div>
+
+      {/* Seleccionadas */}
+      <section className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+        <div className="mb-3 flex items-baseline justify-between gap-2">
+          <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+            {lista === 'semana'
+              ? 'Impulsadas por el bot'
+              : 'Impulsadas en fin de año'}
+          </h3>
+          <span className="text-[11px] text-muted-foreground/70">
+            {picks === undefined ? '…' : `${activas} activas de ${picks.length}`}
+          </span>
+        </div>
+
+        {picks === undefined ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Cargando…
+          </div>
+        ) : picks.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-8 text-center">
+            <Star className="h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">
+              Aún no hay fincas seleccionadas.
+              <br />
+              Busca abajo y agrégalas para que el bot las priorice.
+            </p>
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {picks.map((p) => (
+              <li
+                key={p.id}
+                className={cn(
+                  'rounded-xl border border-border p-3 transition-opacity',
+                  !p.enabled && 'opacity-55',
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  {p.image ? (
+                    <img
+                      src={p.image}
+                      alt={p.title}
+                      loading="lazy"
+                      draggable={false}
+                      className="h-14 w-14 shrink-0 rounded-lg object-cover ring-1 ring-border/50"
+                    />
+                  ) : (
+                    <div className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground/50">
+                      <Star className="h-5 w-5" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-bold leading-tight">
+                      {p.title}
+                    </p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <MapPin className="h-3 w-3" /> {p.location}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <Users className="h-3 w-3" /> {p.capacity} pax
+                      </span>
+                    </p>
+                    {/* Ocupación próxima (reservas + bloqueos reales) */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      {!p.enviable && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600">
+                          <AlertTriangle className="h-3 w-3" /> Apagada del catálogo
+                        </span>
+                      )}
+                      {p.ocupacion.length === 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-600">
+                          <CheckCircle2 className="h-3 w-3" />
+                          {lista === 'semana'
+                            ? 'Libre próximos 14 días'
+                            : 'Libre en fin de año'}
+                        </span>
+                      ) : (
+                        p.ocupacion.map((o, i) => (
+                          <span
+                            key={i}
+                            className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-600"
+                          >
+                            <CalendarRange className="h-3 w-3" />
+                            {fmtRango(o.desde, o.hasta)}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    <Switch
+                      checked={p.enabled}
+                      disabled={busy === p.id}
+                      onCheckedChange={(v) =>
+                        void run(
+                          p.id,
+                          () =>
+                            setEnabled({
+                              id: p.id as Id<'weeklyPicks'>,
+                              enabled: v,
+                            }),
+                          v ? 'El bot la vuelve a priorizar' : 'Pausada — el bot no la prioriza',
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      title="Quitar de la lista"
+                      disabled={busy === p.id}
+                      onClick={() =>
+                        void run(
+                          p.id,
+                          () => remove({ id: p.id as Id<'weeklyPicks'> }),
+                          'Quitada de la lista',
+                        )
+                      }
+                      className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground/70">
+          {lista === 'semana'
+            ? 'El bot solo las ofrece si el grupo cabe y están libres en las fechas del cliente. Si se reserva, apágala o quítala — el filtro de disponibilidad la bloquea solo para esas fechas de todas formas.'
+            : 'Estas se priorizan SOLO cuando el cliente pide fechas de fin de año (15 dic → 15 ene). El resto del año no afectan nada. Cupo y disponibilidad se respetan siempre.'}
+        </p>
+      </section>
+
+      {/* Agregar */}
+      <section className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+        <h3 className="mb-3 text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+          Agregar finca
+        </h3>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar por nombre, código o municipio…"
+            className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+        </div>
+        <ul className="mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
+          {(resultados ?? []).map((r) => (
+            <li
+              key={r.propertyId}
+              className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted/60"
+            >
+              {r.image ? (
+                <img
+                  src={r.image}
+                  alt={r.title}
+                  loading="lazy"
+                  draggable={false}
+                  className="h-11 w-11 shrink-0 rounded-lg object-cover ring-1 ring-border/50"
+                />
+              ) : (
+                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground/50">
+                  <Star className="h-4 w-4" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[12.5px] font-semibold">{r.title}</p>
+                <p className="truncate text-[11px] text-muted-foreground">
+                  {r.location} · {r.capacity} pax
+                  {!r.enviable && ' · ⚠️ apagada del catálogo'}
+                </p>
+              </div>
+              {r.yaSeleccionada ? (
+                <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  En la lista
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  title="Agregar a fincas de la semana"
+                  disabled={busy === r.propertyId}
+                  onClick={() =>
+                    void run(
+                      r.propertyId,
+                      () =>
+                        add({
+                          propertyId: r.propertyId as Id<'properties'>,
+                          lista,
+                        }),
+                      lista === 'semana'
+                        ? 'Agregada — el bot ya la prioriza'
+                        : 'Agregada para fin de año',
+                    )
+                  }
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                >
+                  {busy === r.propertyId ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}

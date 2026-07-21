@@ -475,9 +475,10 @@ function seededShuffle<T>(arr: T[], seed: number): T[] {
  * fincasya-new/convex/whatsappCatalogs.ts):
  *   - min: capacity >= cupo; techo estricto (capacityCeilForCupo) y, si hay
  *     pocas, pasada relajada — nunca fincas absurdamente grandes.
- *   - Orden por tiers: municipio exacto primero (si dio zona) → FAVORITAS
- *     (isFavorite) → proximidad al cupo (5 → 5,6,7,8...) → precio asc.
- *   - Sin zona: se intercalan municipios distintos (variedad de favoritas).
+ *   - Tiers: municipio exacto primero (si dio zona) → FAVORITAS (isFavorite)
+ *     → el resto. La ROTACIÓN (seed) baraja dentro de cada tier y decide
+ *     CUÁLES entran al lote; el lote que sale se presenta ordenado por
+ *     proximidad al cupo (14 → 14,15,16…) y precio asc (Vane, 21-jul).
  *   - Excluye las ya enviadas (paginacion "otras opciones") y las no
  *     visibles en el catalogo WhatsApp.
  */
@@ -513,6 +514,37 @@ export const toolCatalogPick = internalQuery({
     if (!catalog) return { ok: false, motivo: 'no hay catalogo WhatsApp configurado' };
 
     const all = await ctx.db.query('properties').collect();
+
+    // FINCAS DE LA SEMANA / FIN DE AÑO (Vane 21-jul): el equipo las selecciona
+    // en el inbox para IMPULSARLAS. Saltan el filtro de zona y de costa
+    // (elección explícita del equipo) pero cupo mínimo, mascotas y
+    // disponibilidad se respetan SIEMPRE. En la zona pedida van primero; de
+    // otras zonas van al final del lote como recomendación extra.
+    // ¿Qué lista aplica? Si las fechas pedidas tocan la temporada de fin de
+    // año (15-dic → 15-ene, de cualquier año), la lista 'findeano'; si no, la
+    // 'semana'. Sin fechas → 'semana'.
+    const tocaFinDeAno = (() => {
+      if (typeof fechaEntradaMs !== 'number' || typeof fechaSalidaMs !== 'number') {
+        return false;
+      }
+      const y = new Date(fechaEntradaMs).getUTCFullYear();
+      // Ventanas candidatas alrededor del año de la entrada (cubre estadías
+      // de diciembre y de enero).
+      for (const base of [y - 1, y]) {
+        const desde = Date.UTC(base, 11, 15); // 15-dic
+        const hasta = Date.UTC(base + 1, 0, 16); // 15-ene inclusive
+        if (fechaEntradaMs < hasta && fechaSalidaMs > desde) return true;
+      }
+      return false;
+    })();
+    const listaActiva = tocaFinDeAno ? 'findeano' : 'semana';
+    const picksEnabled = new Set(
+      (await ctx.db.query('weeklyPicks').collect())
+        .filter((w) => w.enabled && (w.lista ?? 'semana') === listaActiva)
+        .map((w) => String(w.propertyId)),
+    );
+    const esPick = (p: (typeof all)[number]) => picksEnabled.has(String(p._id));
+
     const zonaTrim = zona?.trim() || undefined;
     const zoneKw = zonaTrim ? resolveZoneKeywords(zonaTrim).keywords : [];
     // Municipios EXACTOS pedidos (para el tier 1 del orden). Soporta varios:
@@ -526,22 +558,55 @@ export const toolCatalogPick = internalQuery({
     // el cliente ES costa.
     const clienteQuiereCosta = zoneRequestsCoast(zonaTrim);
 
-    const base = all
-      .filter((p) => !exclude.has(String(p._id)))
+    // EMBUDO CON CONTEO DE RAZONES (pedido de Vane, 21-jul): cuando llegan
+    // pocas fichas, el log dice exactamente dónde se cayó cada finca.
+    const razones = {
+      yaEnviadas: 0, // ya salieron en este chat (paginación "más opciones")
+      apagadas: 0, // active/visible/visibleInWhatsAppCatalog en false
+      costa: 0, // costa sin que el cliente la pidiera
+      fueraDeZona: 0, // no coincide con la zona pedida
+      sinMascotas: 0, // pidieron mascotas y la finca no acepta
+      capacidad: 0, // fuera del rango de cupo del grupo
+      ocupadas: 0, // reserva/bloqueo se cruza con las fechas
+      retenidasCalendario: 0, // evento de calendario sin resolver
+      sinFichaMeta: 0, // sin producto registrado en el catálogo Meta
+    };
+    const base: typeof all = [];
+    for (const p of all) {
+      if (exclude.has(String(p._id))) {
+        razones.yaEnviadas++;
+        continue;
+      }
       // El bot SOLO envía fincas habilitadas (active), visibles en catálogo
       // (visible) y con el Catálogo Meta/WhatsApp encendido. Si cualquiera de
       // los tres está apagado, la finca NO se envía.
-      .filter(
-        (p) =>
-          p.active !== false &&
-          p.visible !== false &&
-          p.visibleInWhatsAppCatalog !== false,
-      )
-      .filter(
-        (p) => clienteQuiereCosta || !isCoastalProperty(p.location, p.departamentos),
-      )
-      .filter((p) => propertyMatchesZone(p.location, p.departamentos, zoneKw))
-      .filter((p) => (mascotas ? p.allowsPets === true : true));
+      if (
+        p.active === false ||
+        p.visible === false ||
+        p.visibleInWhatsAppCatalog === false
+      ) {
+        razones.apagadas++;
+        continue;
+      }
+      // Las fincas de la semana saltan costa y zona (el equipo las eligió).
+      if (
+        !esPick(p) &&
+        !clienteQuiereCosta &&
+        isCoastalProperty(p.location, p.departamentos)
+      ) {
+        razones.costa++;
+        continue;
+      }
+      if (!esPick(p) && !propertyMatchesZone(p.location, p.departamentos, zoneKw)) {
+        razones.fueraDeZona++;
+        continue;
+      }
+      if (mascotas && p.allowsPets !== true) {
+        razones.sinMascotas++;
+        continue;
+      }
+      base.push(p);
+    }
 
     // Pasadas de capacidad: estricta → relajada → solo minimo.
     let matches = base;
@@ -557,6 +622,14 @@ export const toolCatalogPick = internalQuery({
       );
       const minOnly = base.filter(min);
       matches = strict.length >= 6 ? strict : relaxed.length >= 4 ? relaxed : minOnly;
+      // Fincas de la semana: respetan el MÍNIMO (que el grupo quepa) pero no
+      // el techo — el equipo la eligió a propósito aunque sea más grande.
+      const enMatches = new Set(matches.map((p) => String(p._id)));
+      const pickExtra = minOnly.filter(
+        (p) => esPick(p) && !enMatches.has(String(p._id)),
+      );
+      if (pickExtra.length > 0) matches = [...matches, ...pickExtra];
+      razones.capacidad = base.length - matches.length;
     }
 
     // ORDEN POR TIERS con ROTACIÓN. Antes el orden era fijo (favoritas por
@@ -564,24 +637,46 @@ export const toolCatalogPick = internalQuery({
     // baraja DENTRO de cada tier con la semilla del turno, así distintos
     // clientes ven fincas distintas y con el tiempo rotan las 97 enviables.
     // Los tiers preservan las reglas buenas:
+    //   0. fincas de la SEMANA en la zona pedida (o sin zona) — impulso manual
     //   1. municipio EXACTO pedido (comparación sin tildes)
     //   2. favoritas (política del equipo) — pero rotando CUÁL favorita lidera
     //   3. el resto
+    //   4. fincas de la SEMANA de otras zonas — cierran el lote
     const rotSeed = typeof seed === 'number' && seed !== 0 ? seed : 1;
     const inExactZone = (location: string): boolean => {
       if (zonaParts.length === 0) return false;
       const loc = normZoneText(location);
       return zonaParts.some((p) => loc.includes(p));
     };
-    const tierExact = matches.filter((p) => inExactZone(p.location));
-    const rest = matches.filter((p) => !inExactZone(p.location));
+    // Tiers (0 primero): fincas de la SEMANA en la zona pedida (o sin zona) →
+    // municipio exacto → favoritas → resto → fincas de la SEMANA de OTRAS
+    // zonas (cierran el lote como recomendación extra — decisión Vane 21-jul).
+    const zonaGiven = zonaParts.length > 0;
+    const tierPickFirst = matches.filter(
+      (p) => esPick(p) && (!zonaGiven || inExactZone(p.location)),
+    );
+    const tierPickLast = matches.filter(
+      (p) => esPick(p) && zonaGiven && !inExactZone(p.location),
+    );
+    const noPick = matches.filter((p) => !esPick(p));
+    const tierExact = noPick.filter((p) => inExactZone(p.location));
+    const rest = noPick.filter((p) => !inExactZone(p.location));
     const tierFav = rest.filter((p) => p.isFavorite === true);
     const tierRest = rest.filter((p) => p.isFavorite !== true);
     matches = [
+      ...seededShuffle(tierPickFirst, rotSeed),
       ...seededShuffle(tierExact, rotSeed),
       ...seededShuffle(tierFav, rotSeed),
       ...seededShuffle(tierRest, rotSeed),
+      ...seededShuffle(tierPickLast, rotSeed),
     ];
+    // Tier de cada finca (para ordenar la presentación sin romper los tiers).
+    const tierIndex = new Map<string, number>();
+    for (const p of tierPickFirst) tierIndex.set(String(p._id), 0);
+    for (const p of tierExact) tierIndex.set(String(p._id), 1);
+    for (const p of tierFav) tierIndex.set(String(p._id), 2);
+    for (const p of tierRest) tierIndex.set(String(p._id), 3);
+    for (const p of tierPickLast) tierIndex.set(String(p._id), 4);
 
     // ¿Filtramos por disponibilidad? Solo si vienen fechas válidas.
     const checkAvailability =
@@ -608,9 +703,17 @@ export const toolCatalogPick = internalQuery({
       );
     }
 
-    const items: Extract<CatalogPickResult, { ok: true }>['items'] = [];
+    type CatalogItem = Extract<CatalogPickResult, { ok: true }>['items'][number];
+    const candidatos: Array<{
+      tier: number;
+      capacity: number;
+      desde: number;
+      item: CatalogItem;
+    }> = [];
     for (const p of matches) {
-      if (items.length >= MAX_CATALOG_CANDIDATES) break;
+      // Los picks de la semana no se cortan en el tope de candidatos: van al
+      // final de `matches` (tier 4) y el break se los comería.
+      if (candidatos.length >= MAX_CATALOG_CANDIDATES && !esPick(p)) continue;
       // DISPONIBILIDAD: no enviar fincas con reserva/bloqueo que se cruce con las
       // fechas pedidas (propertyAvailability incluye reservas + bloqueos manuales).
       if (checkAvailability) {
@@ -623,8 +726,14 @@ export const toolCatalogPick = internalQuery({
             b.fechaEntrada < (fechaSalidaMs as number) &&
             b.fechaSalida > (fechaEntradaMs as number),
         );
-        if (ocupada) continue; // ocupada esas fechas → no se ofrece
-        if (retenidasPorPendientes?.has(String(p._id))) continue; // posible ocupada sin confirmar
+        if (ocupada) {
+          razones.ocupadas++;
+          continue; // ocupada esas fechas → no se ofrece
+        }
+        if (retenidasPorPendientes?.has(String(p._id))) {
+          razones.retenidasCalendario++;
+          continue; // posible ocupada sin confirmar
+        }
       }
       const mapping = await ctx.db
         .query('propertyWhatsAppCatalog')
@@ -632,7 +741,10 @@ export const toolCatalogPick = internalQuery({
           q.eq('propertyId', p._id).eq('catalogId', catalog._id),
         )
         .first();
-      if (!mapping) continue; // finca sin ficha en el catalogo Meta
+      if (!mapping) {
+        razones.sinFichaMeta++;
+        continue; // finca sin ficha en el catalogo Meta
+      }
       const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
         (x): x is number => typeof x === 'number' && x > 0,
       );
@@ -644,15 +756,66 @@ export const toolCatalogPick = internalQuery({
       // Imagen principal (solo la usa el widget web; en WhatsApp la pone Meta).
       const imgs = await fetchPropertyImages(ctx, p._id);
       const image = getPrimaryPropertyImageUrl(sortPropertyImages(imgs));
-      items.push({
-        propertyId: String(p._id),
-        retailerId: mapping.productRetailerId,
-        title: p.title,
-        bodyText: parts.join(' · '),
-        image,
-        alternateRetailerIds: p.code?.trim() ? [p.code.trim()] : undefined,
+      candidatos.push({
+        tier: tierIndex.get(String(p._id)) ?? 3,
+        capacity: p.capacity,
+        desde,
+        item: {
+          propertyId: String(p._id),
+          retailerId: mapping.productRetailerId,
+          title: p.title,
+          bodyText: parts.join(' · '),
+          image,
+          alternateRetailerIds: p.code?.trim() ? [p.code.trim()] : undefined,
+        },
       });
     }
+
+    // LOTE FINAL: hasta 3 puestos GARANTIZADOS al cierre para fincas de la
+    // semana de OTRAS zonas (tier 4) — sin la reserva, el lote se llenaría con
+    // las de la zona pedida y las de la semana jamás saldrían. La rotación ya
+    // decidió CUÁLES 3 (si hay más, entran otras en el próximo envío).
+    const MAX_PICKS_FUERA_DE_ZONA = 3;
+    const pickFuera = candidatos
+      .filter((c) => c.tier === 4)
+      .slice(0, MAX_PICKS_FUERA_DE_ZONA);
+    const enPickFuera = new Set(pickFuera.map((c) => c.item.propertyId));
+    const principal = candidatos.filter((c) => !enPickFuera.has(c.item.propertyId));
+    const cupoPrincipal = Math.max(MAX_CATALOG_CARDS - pickFuera.length, 0);
+    const lote = [...principal.slice(0, cupoPrincipal), ...pickFuera];
+    const repuesto = principal.slice(cupoPrincipal);
+
+    // PRESENTACIÓN ORDENADA SIN MATAR LA ROTACIÓN (pedido de Vane, 21-jul):
+    // la rotación (shuffle por seed) ya decidió CUÁLES ~12 fincas entran al
+    // lote; aquí ese lote se presenta de la MÁS AJUSTADA al grupo hacia
+    // arriba (14 personas → 14,15,16…20) y, a igual cupo, la más económica.
+    // Solo se ordena el LOTE que sale (primeras MAX_CATALOG_CARDS): si se
+    // ordenaran los 30 candidatos, el envío tomaría siempre las 12 más
+    // pequeñas y volveríamos al bug de "siempre las mismas fincas". El resto
+    // queda detrás en orden de rotación como repuesto si Meta rechaza alguna.
+    // El tier manda primero, así que tier 0 (semana en zona) abre y tier 4
+    // (semana fuera de zona) cierra el lote siempre.
+    if (personas && personas > 0) {
+      lote.sort(
+        (a, b) =>
+          a.tier - b.tier ||
+          a.capacity - b.capacity ||
+          (a.desde || Number.MAX_SAFE_INTEGER) - (b.desde || Number.MAX_SAFE_INTEGER),
+      );
+    }
+    const items = [...lote, ...repuesto].map((c) => c.item);
+
+    console.log('[catalogo] embudo', {
+      totalFincas: all.length,
+      ...razones,
+      listaImpulso: listaActiva,
+      impulsadasActivas: picksEnabled.size,
+      candidatas: matches.length,
+      fichasEnviables: items.length,
+      personas: personas ?? null,
+      zona: zonaTrim ?? null,
+      conFechas: checkAvailability,
+    });
     return { ok: true, catalogMetaId: catalog.whatsappCatalogId, items };
   },
 });

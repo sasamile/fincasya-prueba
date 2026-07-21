@@ -1721,6 +1721,29 @@ export default defineSchema(
     }).index('by_scope', ['scope']),
 
     /**
+     * FINCAS DE LA SEMANA (herramienta del inbox, Vane 21-jul): fincas que el
+     * equipo quiere IMPULSAR — el bot las prioriza en el catálogo (dentro de la
+     * zona pedida van primero; de otras zonas van al final como recomendación).
+     * Cupo y disponibilidad SIEMPRE se respetan. Lista manual sin vencimiento:
+     * el equipo agrega/apaga/quita a mano (ej. cuando la finca ya se reservó).
+     */
+    weeklyPicks: defineTable({
+      propertyId: v.id('properties'),
+      /**
+       * A qué lista pertenece (Vane 21-jul): 'semana' = impulso normal;
+       * 'findeano' = solo aplica cuando el cliente pide fechas de fin de año
+       * (15-dic → 15-ene). Ausente = 'semana' (filas viejas).
+       */
+      lista: v.optional(v.union(v.literal('semana'), v.literal('findeano'))),
+      /** Apagada = queda en la lista pero el bot no la prioriza. */
+      enabled: v.boolean(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+      /** Nombre/email del operador que la agregó o editó por última vez. */
+      updatedBy: v.optional(v.string()),
+    }).index('by_property', ['propertyId']),
+
+    /**
      * AUDIOS DEL BOT (/admin/audios-bot): notas de voz pregrabadas que el bot
      * envía cuando la conversación cae en la situación descrita (ej. el
      * cliente pregunta "¿es seguro? ¿son confiables?"). El equipo crea casos,
