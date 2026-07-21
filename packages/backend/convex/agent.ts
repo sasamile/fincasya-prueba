@@ -138,7 +138,14 @@ type FincaResult = {
 
 type DisponibilidadResult =
   | { encontrada: false }
-  | { encontrada: true; finca: string; disponible: boolean; nota?: string };
+  | {
+      encontrada: true;
+      finca: string;
+      disponible: boolean;
+      nota?: string;
+      /** Mínimo de noches propio de la finca que NO se cumple (si aplica). */
+      minimoNoches?: number;
+    };
 
 type CatalogPickResult =
   | { ok: false; motivo: string }
@@ -397,6 +404,30 @@ export const toolDisponibilidad = internalQuery({
         (p.code ?? '').toLowerCase() === fincaLower,
     );
     if (!property) return { encontrada: false as const };
+
+    // MÍNIMO DE NOCHES PROPIO (Vane 21-jul, caso HILLS): si la estadía es más
+    // corta que el mínimo de la finca (en puente festivo manda
+    // minNochesFestivo), se responde como NO disponible con la regla clara —
+    // el modelo debe informarla y pedir ajustar fechas, no prometer expertos.
+    const nochesStay = Math.round((fechaSalida - fechaEntrada) / 86_400_000);
+    const entradaYmd = new Date(fechaEntrada).toISOString().slice(0, 10);
+    const salidaYmd = new Date(fechaSalida).toISOString().slice(0, 10);
+    const esPuente = detectPuenteFestivo(entradaYmd, salidaYmd).puente;
+    const minReq = esPuente
+      ? Math.max(property.minNochesFestivo ?? 0, property.minNoches ?? 0)
+      : (property.minNoches ?? 0);
+    if (minReq > 0 && nochesStay > 0 && nochesStay < minReq) {
+      return {
+        encontrada: true as const,
+        finca: property.title,
+        disponible: false,
+        minimoNoches: minReq,
+        nota: `REGLA DE LA FINCA: ${property.title} se renta mínimo ${minReq} noches${
+          esPuente ? ' en puente festivo (estas fechas caen en puente)' : ''
+        } y el cliente pidió ${nochesStay}. Informa la regla con calidez y pide ajustar la fecha de salida (ej. una noche más). NO digas que un experto confirma disponibilidad para estas fechas tal cual — primero deben cumplir el mínimo.`,
+      };
+    }
+
     const blocks = await ctx.db
       .query('propertyAvailability')
       .withIndex('by_property', (q) => q.eq('propertyId', property._id))
@@ -2826,6 +2857,30 @@ export const runAgentTurn = internalAction({
       // "¡Hola...!" otra vez, se recorta el prefijo (el resto queda intacto).
       const stripped = stripRedundantHolaPrefix(reply);
       if (stripped) reply = stripped;
+    }
+
+    // GUARDIA ANTI-PROMESA (Vane 21-jul, caso HILLS): la REGLA CRITICA del
+    // prompt exige llamar escalar_a_humano cuando se promete seguimiento
+    // humano, pero el modelo a veces promete sin llamar la tool ("un Experto
+    // te confirma la disponibilidad" y nadie se entera). Si la respuesta
+    // promete un humano y NO escaló, se escala automáticamente aquí — la
+    // promesa al cliente nunca queda en el aire.
+    const prometeHumano =
+      /(experto|asesor|equipo)[^.!?\n]{0,60}\b(te|le|lo|la|les)\s+(contacta|confirma|atiende|comparte|env[ií]a|escribe|llama|ayuda|revisa|cotiza)|te\s+(contactamos|confirmamos|escribimos|llamamos|cotizamos)|en\s+(un\s+momento|breve)\s+te\b/i;
+    if (!escalated && prometeHumano.test(reply)) {
+      try {
+        await ctx.runMutation(internal.agent.toolEscalar, {
+          conversationId,
+          motivo:
+            'auto: el bot prometió seguimiento humano sin escalar — escalado de seguridad',
+        });
+        escalated = true;
+        console.log('[agent] escalado AUTOMÁTICO por promesa de humano sin tool', {
+          conversationId,
+        });
+      } catch (err) {
+        console.error('[agent] fallo el escalado automático', err);
+      }
     }
 
     // ESCALADO FUERA DE HORARIO: la respuesta del LLM promete "un Experto te
