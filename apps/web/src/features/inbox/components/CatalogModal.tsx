@@ -3,7 +3,7 @@
  * por WhatsApp: fichas Meta (catálogo) o fichas web (foto + enlace fincasya.com).
  * El envío automático (como el bot) vive en AutoCatalogModal.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useAction, useQuery } from 'convex/react';
 import type { FunctionReturnType } from 'convex/server';
 import { api } from '@fincasya/backend/convex/_generated/api';
@@ -114,7 +114,9 @@ function CatalogListRow({
           )}
         </p>
         <p className="text-[13px]">
-          <span className="font-medium text-foreground">{formatCop(p.priceFrom)}</span>
+          <span className="font-medium text-foreground">
+            {p.priceIsDesde ? `Desde ${formatCop(p.priceFrom)}` : formatCop(p.priceFrom)}
+          </span>
           {p.priceOriginal && p.priceOriginal > p.priceFrom ? (
             <span className="ml-2 text-[12px] text-muted-foreground line-through">
               {formatCop(p.priceOriginal)}
@@ -143,14 +145,6 @@ export function CatalogModal({
     zona?: string;
   };
 }) {
-  const liveProperties = useQuery(api.inbox.listCatalogProperties);
-  const properties = liveProperties ?? (catalogCache.value as typeof liveProperties);
-  if (liveProperties !== undefined) catalogCache.value = liveProperties;
-  /** Fincas ya enviadas en este chat (bot o manual) → se marcan en la lista. */
-  const sentIds = useQuery(api.inbox.getSentCatalogIds, { conversationId });
-  const sentSet = useMemo(() => new Set(sentIds ?? []), [sentIds]);
-  const sendCatalog = useAction(api.inbox.sendCatalogSelection);
-  const sendWebFichas = useAction(api.inbox.sendWebFichaSelection);
   /**
    * TEMPORADA DEL PRECIO (Vane 21-jul): el envío manual sale con el precio de
    * la temporada elegida. Por defecto se marca la temporada EN LA QUE ESTAMOS
@@ -197,6 +191,35 @@ export function CatalogModal({
     undefined,
   );
   const temporadaEfectiva = temporadaId === undefined ? todaySeasonId : temporadaId;
+  /** Ref anti-stale: el Enviar siempre lee la temporada visible en pantalla. */
+  const temporadaRef = useRef(temporadaEfectiva);
+  temporadaRef.current = temporadaEfectiva;
+  const temporadaNombre =
+    temporadaEfectiva == null
+      ? null
+      : (activeSeasons.find((r) => r._id === temporadaEfectiva)?.nombre ?? null);
+
+  // Lista con precio de la temporada elegida (si hay). Sin temporada → "Desde $mín".
+  const catalogArgs =
+    temporadaEfectiva != null
+      ? { temporadaGlobalId: temporadaEfectiva as Id<'globalPricing'> }
+      : {};
+  const liveProperties = useQuery(api.inbox.listCatalogProperties, catalogArgs);
+  // Cache solo para la vista sin temporada (evita flash al abrir); con temporada
+  // siempre esperamos el precio correcto.
+  const properties =
+    liveProperties ??
+    (temporadaEfectiva == null
+      ? (catalogCache.value as typeof liveProperties)
+      : undefined);
+  if (liveProperties !== undefined && temporadaEfectiva == null) {
+    catalogCache.value = liveProperties;
+  }
+  /** Fincas ya enviadas en este chat (bot o manual) → se marcan en la lista. */
+  const sentIds = useQuery(api.inbox.getSentCatalogIds, { conversationId });
+  const sentSet = useMemo(() => new Set(sentIds ?? []), [sentIds]);
+  const sendCatalog = useAction(api.inbox.sendCatalogSelection);
+  const sendWebFichas = useAction(api.inbox.sendWebFichaSelection);
   const [mode, setMode] = useState<ShareMode>('meta');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
@@ -270,12 +293,21 @@ export function CatalogModal({
 
   async function handleSend() {
     if (selected.size === 0 || sending) return;
+    // No enviar hasta saber la temporada: si las reglas aún cargan, el precio
+    // saldría como "Desde $mín" aunque el operador ya vea los chips.
+    if (seasonRules === undefined) {
+      toast.message('Cargando temporadas…', {
+        description: 'Espera un segundo y vuelve a enviar.',
+      });
+      return;
+    }
     setSending(true);
     setResult(null);
     const propertyIds = [...selected] as Id<'properties'>[];
+    const chosenTemporada = temporadaRef.current;
     try {
-      const temporadaGlobalId = temporadaEfectiva
-        ? (temporadaEfectiva as Id<'globalPricing'>)
+      const temporadaGlobalId = chosenTemporada
+        ? (chosenTemporada as Id<'globalPricing'>)
         : undefined;
       const res =
         mode === 'meta'
@@ -283,10 +315,11 @@ export function CatalogModal({
           : await sendWebFichas({ conversationId, propertyIds, temporadaGlobalId });
       if (res.ok) {
         const label = mode === 'meta' ? 'ficha(s) Meta' : 'ficha(s) web';
+        const seasonBit = temporadaNombre ? ` · ${temporadaNombre}` : '';
         setResult(
           res.queued
-            ? `✓ Enviando ${res.queued} ${label} en segundo plano…`
-            : `✓ ${res.sent} ${label} enviada(s)${res.failed ? ` · ${res.failed} fallaron` : ''}`,
+            ? `✓ Enviando ${res.queued} ${label}${seasonBit}…`
+            : `✓ ${res.sent} ${label} enviada(s)${seasonBit}${res.failed ? ` · ${res.failed} fallaron` : ''}`,
         );
         setSelected(new Set());
         setTimeout(onClose, res.queued ? 400 : 900);
@@ -470,16 +503,25 @@ export function CatalogModal({
       </div>
 
       <footer className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
-        <span className="text-[13px] text-muted-foreground">
-          {result ?? `${selected.size} finca(s) seleccionada(s)`}
+        <span className="min-w-0 text-[13px] text-muted-foreground">
+          {result ?? (
+            <>
+              {selected.size} finca(s) seleccionada(s)
+              {temporadaNombre ? (
+                <span className="text-foreground"> · {temporadaNombre}</span>
+              ) : seasonRules !== undefined ? (
+                <span> · sin temporada</span>
+              ) : null}
+            </>
+          )}
         </span>
         <button
           type="button"
           onClick={() => void handleSend()}
-          disabled={selected.size === 0 || sending}
+          disabled={selected.size === 0 || sending || seasonRules === undefined}
           className={cn(
             'inline-flex items-center gap-2 rounded-full px-5 py-2 text-[14px] font-medium transition-colors',
-            selected.size === 0 || sending
+            selected.size === 0 || sending || seasonRules === undefined
               ? 'cursor-not-allowed bg-muted text-muted-foreground'
               : 'bg-primary text-primary-foreground hover:brightness-110',
           )}

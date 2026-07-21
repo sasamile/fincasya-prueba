@@ -152,6 +152,22 @@ function ProductCard({
   timeLabel: string;
   status: string | null;
 }) {
+  const fallbackBody = [
+    product.priceFrom > 0
+      ? product.priceIsDesde === false
+        ? `💰 ${formatCop(product.priceFrom)} por noche`
+        : `💰 Desde ${formatCop(product.priceFrom)} por noche`
+      : null,
+    product.capacity > 0 ? `👥 Hasta ${product.capacity} personas` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const bodyLine = product.bodyText?.trim() || fallbackBody;
+  const headerPrice =
+    product.priceIsDesde === false && product.priceFrom > 0
+      ? product.priceFrom
+      : (product.priceOriginal ?? product.priceFrom);
+
   return (
     <div className="w-[18rem] max-w-full">
       {/* Panel de producto: imagen + título + precio */}
@@ -165,15 +181,16 @@ function ProductCard({
         )}
         <div className="px-2.5 pb-2.5 pt-2">
           <p className="text-[15px] font-semibold leading-snug">{product.title}</p>
-          <p className="mt-1 text-[14px]">{formatCop(product.priceOriginal ?? product.priceFrom)}</p>
+          {headerPrice > 0 ? (
+            <p className="mt-1 text-[14px]">{formatCop(headerPrice)}</p>
+          ) : null}
         </div>
       </div>
 
-      {/* Cuerpo (descripción de la ficha) */}
-      <p className="mt-1.5 px-1 text-[14px] leading-snug">
-        💰 Desde <span className="font-medium">{formatCop(product.priceFrom)}</span> por noche · 👥
-        Hasta {product.capacity} personas
-      </p>
+      {/* Cuerpo: el texto REAL enviado a WhatsApp (precio de temporada incluido). */}
+      {bodyLine ? (
+        <p className="mt-1.5 px-1 text-[14px] leading-snug">{bodyLine}</p>
+      ) : null}
 
       {/* Footer: negocio + hora + ticks */}
       <div className="mt-0.5 flex items-center justify-between px-1">

@@ -111,6 +111,10 @@ type ProductCard = {
   capacity: number;
   url: string | null;
   productRetailerId: string;
+  /** Cuerpo real enviado a WhatsApp (si se guardó al enviar). */
+  bodyText?: string | null;
+  /** false = precio de temporada (sin prefijo "Desde"). */
+  priceIsDesde?: boolean;
 };
 
 async function buildProductCard(
@@ -401,6 +405,27 @@ export const getMessages = query({
             capacity: 0,
             url: null,
             productRetailerId: rid,
+          };
+        }
+        // Precio/cuerpo REAL del envío (temporada): si no, el inbox reconstruía
+        // siempre el "Desde $mín" del priceBase y mentía al Experto.
+        const meta = (m.metadata ?? null) as {
+          bodyText?: string;
+          priceFrom?: number;
+          priceIsDesde?: boolean;
+          webFicha?: { bodyText?: string; image?: string | null };
+        } | null;
+        const storedBody = meta?.bodyText ?? meta?.webFicha?.bodyText;
+        if (storedBody) {
+          product = {
+            ...product,
+            bodyText: storedBody,
+            priceFrom:
+              typeof meta?.priceFrom === 'number' && meta.priceFrom > 0
+                ? meta.priceFrom
+                : product.priceFrom,
+            priceIsDesde: meta?.priceIsDesde ?? false,
+            image: meta?.webFicha?.image ?? product.image,
           };
         }
       }
@@ -1368,12 +1393,23 @@ export type CatalogPropertyRow = {
   webSendable: boolean;
   /** false = la finca no tiene ficha registrada en el catálogo Meta → no se puede enviar. */
   sendable: boolean;
+  /**
+   * true = el precio es el "Desde $mín" (sin temporada elegida).
+   * false = precio de la temporada pasada en `temporadaGlobalId`.
+   */
+  priceIsDesde: boolean;
 };
 
 /** Lista las fincas del catálogo Meta por defecto para el modal "Enviar catálogo". */
 export const listCatalogProperties = query({
-  args: {},
-  handler: async (ctx): Promise<CatalogPropertyRow[]> => {
+  args: {
+    /**
+     * Si viene, `priceFrom` es el precio de ESA temporada (no el mínimo).
+     * Así el modal refleja lo que se va a enviar al cambiar el chip.
+     */
+    temporadaGlobalId: v.optional(v.id('globalPricing')),
+  },
+  handler: async (ctx, { temporadaGlobalId }): Promise<CatalogPropertyRow[]> => {
     const catalog =
       (await ctx.db
         .query('whatsappCatalogs')
@@ -1412,7 +1448,16 @@ export const listCatalogProperties = query({
       const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
         (x): x is number => typeof x === 'number' && x > 0,
       );
-      const priceFrom = prices.length > 0 ? Math.min(...prices) : 0;
+      const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+      let priceFrom = minPrice;
+      let priceIsDesde = true;
+      if (temporadaGlobalId) {
+        const nightly = await priceForGlobalRule(ctx.db, p, temporadaGlobalId);
+        if (nightly > 0) {
+          priceFrom = nightly;
+          priceIsDesde = false;
+        }
+      }
 
       rows.push({
         propertyId: p._id,
@@ -1421,6 +1466,7 @@ export const listCatalogProperties = query({
         departamento: p.departamentos?.[0] ?? null,
         capacity: p.capacity,
         priceFrom,
+        priceIsDesde,
         priceOriginal: p.priceOriginal ?? null,
         image: imageUrl,
         code: p.code ?? null,
@@ -1479,6 +1525,9 @@ export const buildCatalogCardsForSelection = internalQuery({
           retailerId: string;
           bodyText: string;
           alternateRetailerIds?: string[];
+          /** Precio por noche enviado (temporada o "Desde"). */
+          priceFrom: number;
+          priceIsDesde: boolean;
         }>;
       }
   > => {
@@ -1507,6 +1556,8 @@ export const buildCatalogCardsForSelection = internalQuery({
       retailerId: string;
       bodyText: string;
       alternateRetailerIds?: string[];
+      priceFrom: number;
+      priceIsDesde: boolean;
     }> = [];
     for (const propertyId of propertyIds) {
       const p = await ctx.db.get(propertyId);
@@ -1519,11 +1570,12 @@ export const buildCatalogCardsForSelection = internalQuery({
         .first();
       if (!mapping) continue; // finca sin ficha Meta → se omite
       // Precio: temporada elegida a mano > temporada de las fechas > "Desde".
+      // Con temporada a mano NUNCA usamos el prefijo "Desde" (aunque el precio
+      // caiga al base por falta de regla en esa finca).
       let season: { nightly: number } | null = null;
       if (temporadaGlobalId) {
-        season = {
-          nightly: await priceForGlobalRule(ctx.db, p, temporadaGlobalId),
-        };
+        const nightly = await priceForGlobalRule(ctx.db, p, temporadaGlobalId);
+        season = { nightly: nightly > 0 ? nightly : 0 };
       } else if (hayFechas) {
         season = await resolveSeasonNightly(
           ctx.db,
@@ -1533,15 +1585,24 @@ export const buildCatalogCardsForSelection = internalQuery({
           globalPricingCache,
         );
       }
+      const minPrices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
+        (x): x is number => typeof x === 'number' && x > 0,
+      );
+      const minPrice = minPrices.length > 0 ? Math.min(...minPrices) : 0;
+      let priceFrom = minPrice;
+      let priceIsDesde = true;
       const parts: string[] = [];
-      if (season && season.nightly > 0) {
+      if (temporadaGlobalId) {
+        priceFrom =
+          season && season.nightly > 0 ? season.nightly : minPrice;
+        priceIsDesde = false;
+        if (priceFrom > 0) parts.push(`💰 ${formatCop(priceFrom)} por noche`);
+      } else if (season && season.nightly > 0) {
+        priceFrom = season.nightly;
+        priceIsDesde = false;
         parts.push(`💰 ${formatCop(season.nightly)} por noche`);
-      } else {
-        const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
-          (x): x is number => typeof x === 'number' && x > 0,
-        );
-        const desde = prices.length > 0 ? Math.min(...prices) : 0;
-        if (desde > 0) parts.push(`💰 Desde ${formatCop(desde)} por noche`);
+      } else if (minPrice > 0) {
+        parts.push(`💰 Desde ${formatCop(minPrice)} por noche`);
       }
       parts.push(`👥 Hasta ${p.capacity} personas`);
       cards.push({
@@ -1550,6 +1611,8 @@ export const buildCatalogCardsForSelection = internalQuery({
         retailerId: mapping.productRetailerId,
         bodyText: parts.join(' · '),
         alternateRetailerIds: p.code?.trim() ? [p.code.trim()] : undefined,
+        priceFrom,
+        priceIsDesde,
       });
     }
     if (cards.length === 0)
@@ -1564,6 +1627,8 @@ const catalogQueueCard = v.object({
   retailerId: v.string(),
   bodyText: v.string(),
   alternateRetailerIds: v.optional(v.array(v.string())),
+  priceFrom: v.optional(v.number()),
+  priceIsDesde: v.optional(v.boolean()),
 });
 
 const webFichaQueueCard = v.object({
@@ -1610,6 +1675,9 @@ export const deliverCatalogStep = internalAction({
             title: card.title,
             retailerId: card.retailerId,
             wamid: row.wamid,
+            bodyText: card.bodyText,
+            priceFrom: card.priceFrom,
+            priceIsDesde: card.priceIsDesde,
           },
         ],
       });
@@ -2279,7 +2347,8 @@ export const buildWebFichasForSelection = internalQuery({
           priceFrom,
           rating: p.rating ?? null,
           url,
-          precioDeTemporada: Boolean(season),
+          // Temporada a mano o resuelta por fechas → sin prefijo "Desde".
+          precioDeTemporada: Boolean(temporadaGlobalId) || Boolean(season && season.nightly > 0),
         }),
       });
     }

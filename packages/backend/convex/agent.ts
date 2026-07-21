@@ -66,8 +66,8 @@ import { sendWhatsappText } from './lib/ycloud';
 import {
   BETWEEN_CATALOG_SENDS_MS,
   formatCop,
-  MAX_CATALOG_CANDIDATES,
   MAX_CATALOG_CARDS,
+  parsePriceFromCatalogBody,
   sendCatalogCard,
 } from './lib/catalogSend';
 import {
@@ -464,23 +464,72 @@ export const toolDisponibilidad = internalQuery({
 });
 
 /**
- * Techo de capacidad a recomendar (politica del equipo, portada del bot
- * anterior): evita ofrecer fincas gigantes a grupos pequenos.
- * cupo ≤6 → +4 · ≤15 → +6 · ≤25 → +8 · >25 → +10.
+ * Techo de capacidad a recomendar (política del equipo).
+ * Ajustado 21-jul (Vane): grupos chicos recibían demasiadas fincas grandes
+ * (favoritas 17–25+ pax). Techos más cerrados + banda "preferida" abajo.
+ * cupo ≤6 → +3 · ≤12 → +4 · ≤16 → +5 · ≤25 → +6 · >25 → +8.
  */
 function capacityCeilForCupo(cupo: number): number {
-  if (cupo <= 6) return cupo + 4;
-  if (cupo <= 15) return cupo + 6;
-  if (cupo <= 25) return cupo + 8;
-  return cupo + 10;
+  if (cupo <= 6) return cupo + 3;
+  if (cupo <= 12) return cupo + 4;
+  if (cupo <= 16) return cupo + 5;
+  if (cupo <= 25) return cupo + 6;
+  return cupo + 8;
 }
 
 /** Techo RELAJADO (pasada intermedia cuando el rango estricto da pocas). */
 function capacityCeilRelaxedForCupo(cupo: number): number {
-  if (cupo <= 6) return cupo + 6;
-  if (cupo <= 15) return cupo + 10;
-  if (cupo <= 25) return Math.ceil(cupo * 1.7);
-  return Math.ceil(cupo * 1.5);
+  if (cupo <= 6) return cupo + 5;
+  if (cupo <= 12) return cupo + 7;
+  if (cupo <= 16) return cupo + 8;
+  if (cupo <= 25) return Math.ceil(cupo * 1.45);
+  return Math.ceil(cupo * 1.35);
+}
+
+/**
+ * Banda PREFERIDA dentro del techo: la mayoría del lote debe caer aquí
+ * (opciones "ajustadas" al grupo). Ej. 12 personas → prefer ≤15.
+ */
+function capacityPreferMaxForCupo(cupo: number): number {
+  if (cupo <= 6) return cupo + 2;
+  if (cupo <= 12) return cupo + 3;
+  if (cupo <= 16) return cupo + 4;
+  if (cupo <= 25) return cupo + 5;
+  return cupo + 8;
+}
+
+/** Lujo / premium / grupos grandes: mal default para plan de amigos. */
+function isGrandOrLuxuryCategory(category: string | undefined): boolean {
+  return (
+    category === 'LUJO' ||
+    category === 'PREMIUM' ||
+    category === 'VIP' ||
+    category === 'GRUPOS_GRANDES'
+  );
+}
+
+/** Tipos compactos/económicos que el equipo quiere empujar a grupos chicos. */
+function isCompactFriendlyType(type: string | undefined): boolean {
+  return (
+    type === 'VILLA_PRIVADA' ||
+    type === 'CASA_PRIVADA' ||
+    type === 'CASA_EN_CONJUNTO_CERRADO' ||
+    type === 'GLAMPING' ||
+    type === 'VILLA'
+  );
+}
+
+/**
+ * Fincas que el equipo NO quiere como default para plan de amigos
+ * (aunque entren por cupo / favoritas): lujo o vibe de evento.
+ */
+function isSoftDemotedForFriends(title: string): boolean {
+  const t = title.toLowerCase();
+  return (
+    /golondrina/.test(t) ||
+    /black\s*lux/.test(t) ||
+    /villa\s*barbosa/.test(t)
+  );
 }
 
 /**
@@ -506,16 +555,16 @@ function seededShuffle<T>(arr: T[], seed: number): T[] {
 }
 
 /**
- * Selecciona fincas para el catalogo con las REGLAS DEL EQUIPO (portadas de
- * fincasya-new/convex/whatsappCatalogs.ts):
- *   - min: capacity >= cupo; techo estricto (capacityCeilForCupo) y, si hay
- *     pocas, pasada relajada — nunca fincas absurdamente grandes.
- *   - Tiers: municipio exacto primero (si dio zona) → FAVORITAS (isFavorite)
- *     → el resto. La ROTACIÓN (seed) baraja dentro de cada tier y decide
- *     CUÁLES entran al lote; el lote que sale se presenta ordenado por
- *     proximidad al cupo (14 → 14,15,16…) y precio asc (Vane, 21-jul).
- *   - Excluye las ya enviadas (paginacion "otras opciones") y las no
- *     visibles en el catalogo WhatsApp.
+ * Selecciona fincas para el catalogo con las REGLAS DEL EQUIPO:
+ *   - min: capacity >= cupo; techo estricto y, si hay pocas (<4), relajado.
+ *   - ORDEN DE ENVÍO (tiers, manda sobre cupo/precio):
+ *       🥇 fincas de la SEMANA en la zona pedida (o todas las de la semana
+ *          si el cliente no pidió zona)
+ *       🥈 demás fincas del municipio pedido
+ *       🥉 favoritas / resto → cierra con semana de otras zonas (máx 3)
+ *   - Dentro de cada tier: cupo AJUSTADO al grupo, no lujo/premium, tipos
+ *     compactos (villa privada) y precio más bajo.
+ *   - Excluye ya enviadas y las no visibles en el catalogo WhatsApp.
  */
 export const toolCatalogPick = internalQuery({
   args: {
@@ -677,7 +726,7 @@ export const toolCatalogPick = internalQuery({
       base.push(p);
     }
 
-    // Pasadas de capacidad: estricta → relajada → solo minimo.
+    // Pasadas de capacidad: estricta → relajada (techo SIEMPRE).
     let matches = base;
     if (personas && personas > 0) {
       // Minimo por capacidad de HOSPEDAJE (el cupo de evento solo aplicaria
@@ -690,13 +739,9 @@ export const toolCatalogPick = internalQuery({
         (p) => min(p) && p.capacity <= capacityCeilRelaxedForCupo(personas),
       );
       // TECHO SIEMPRE (Vane, 21-jul tarde): jamás se ofrecen casas
-      // absurdamente grandes para el grupo. Antes había un último recurso sin
-      // techo (minOnly) y las fincas de la semana también lo saltaban — un
-      // grupo de 4 recibía mansiones de 40 pax. Ahora el techo relajado es el
-      // límite DURO para todas (incluidas las de la semana): si ni así hay
-      // opciones, mejor pocas o ninguna — el agente amplía zona o escala a un
-      // experto, que ya es el flujo existente para cero resultados.
-      matches = strict.length >= 6 ? strict : relaxed;
+      // absurdamente grandes para el grupo. Umbral bajado a 4 (antes 6): si
+      // hay 4+ ajustadas al techo estricto, NO abrimos a fincas más grandes.
+      matches = strict.length >= 4 ? strict : relaxed;
       razones.capacidad = base.length - matches.length;
     }
 
@@ -776,6 +821,12 @@ export const toolCatalogPick = internalQuery({
       tier: number;
       capacity: number;
       desde: number;
+      /** Lujo/premium/VIP/grupos grandes — demorar para plan de amigos. */
+      grandOrLuxury: boolean;
+      /** Villa privada / casa compacta — empujar a grupos chicos. */
+      compactFriendly: boolean;
+      /** Black Lux / Golondrinas / Villa Barbosa — mal default amigos. */
+      softDemoted: boolean;
       item: CatalogItem;
     }> = [];
     // PRECIO POR TEMPORADA (Vane 21-jul): con fechas, la ficha muestra el
@@ -785,9 +836,9 @@ export const toolCatalogPick = internalQuery({
     // cada finca del lote.
     const globalPricingCache = createGlobalPricingCache();
     for (const p of matches) {
-      // Los picks de la semana no se cortan en el tope de candidatos: van al
-      // final de `matches` (tier 4) y el break se los comería.
-      if (candidatos.length >= MAX_CATALOG_CANDIDATES && !esPick(p)) continue;
+      // Sin corte temprano a 30: antes las favoritas grandes llenaban el
+      // tope y las villas privadas / ESTANDAR ajustadas nunca llegaban al
+      // score del lote. El tope de 12 fichas se aplica al elegir el lote.
       // DISPONIBILIDAD: no enviar fincas con reserva/bloqueo que se cruce con las
       // fechas pedidas (propertyAvailability incluye reservas + bloqueos manuales).
       if (checkAvailability) {
@@ -854,6 +905,9 @@ export const toolCatalogPick = internalQuery({
         tier: tierIndex.get(String(p._id)) ?? 3,
         capacity: p.capacity,
         desde,
+        grandOrLuxury: isGrandOrLuxuryCategory(p.category),
+        compactFriendly: isCompactFriendlyType(p.type),
+        softDemoted: isSoftDemotedForFriends(p.title),
         item: {
           propertyId: String(p._id),
           retailerId: mapping.productRetailerId,
@@ -866,9 +920,7 @@ export const toolCatalogPick = internalQuery({
     }
 
     // LOTE FINAL: hasta 3 puestos GARANTIZADOS al cierre para fincas de la
-    // semana de OTRAS zonas (tier 4) — sin la reserva, el lote se llenaría con
-    // las de la zona pedida y las de la semana jamás saldrían. La rotación ya
-    // decidió CUÁLES 3 (si hay más, entran otras en el próximo envío).
+    // semana de OTRAS zonas (tier 4).
     const MAX_PICKS_FUERA_DE_ZONA = 3;
     const pickFuera = candidatos
       .filter((c) => c.tier === 4)
@@ -876,26 +928,95 @@ export const toolCatalogPick = internalQuery({
     const enPickFuera = new Set(pickFuera.map((c) => c.item.propertyId));
     const principal = candidatos.filter((c) => !enPickFuera.has(c.item.propertyId));
     const cupoPrincipal = Math.max(MAX_CATALOG_CARDS - pickFuera.length, 0);
-    const lote = [...principal.slice(0, cupoPrincipal), ...pickFuera];
-    const repuesto = principal.slice(cupoPrincipal);
 
-    // PRESENTACIÓN ORDENADA SIN MATAR LA ROTACIÓN (pedido de Vane, 21-jul):
-    // la rotación (shuffle por seed) ya decidió CUÁLES ~12 fincas entran al
-    // lote; aquí ese lote se presenta de la MÁS AJUSTADA al grupo hacia
-    // arriba (14 personas → 14,15,16…20) y, a igual cupo, la más económica.
-    // Solo se ordena el LOTE que sale (primeras MAX_CATALOG_CARDS): si se
-    // ordenaran los 30 candidatos, el envío tomaría siempre las 12 más
-    // pequeñas y volveríamos al bug de "siempre las mismas fincas". El resto
-    // queda detrás en orden de rotación como repuesto si Meta rechaza alguna.
-    // El tier manda primero, así que tier 0 (semana en zona) abre y tier 4
-    // (semana fuera de zona) cierra el lote siempre.
+    /**
+     * Orden DENTRO de un pool (mismo tier): cupo ajustado → no lujo →
+     * compactas/económicas. El tier manda QUIÉN entra primero; esto solo
+     * reparte prioridad dentro del mismo escalón.
+     */
+    const scoreWithinTier = (
+      pool: typeof principal,
+      cupo: number,
+      preferMax: number,
+    ): typeof principal => {
+      const scored = pool.map((c, i) => {
+        const overPrefer = c.capacity > preferMax ? 1 : 0;
+        const luxuryPenalty = c.grandOrLuxury ? 1 : 0;
+        const softPenalty = c.softDemoted ? 1 : 0;
+        const compactBonus = c.compactFriendly ? 1 : 0;
+        const jitter = ((rotSeed + i * 9973) % 81) - 40;
+        const score =
+          overPrefer * 1000 +
+          luxuryPenalty * 250 +
+          softPenalty * 180 +
+          (c.capacity - cupo) * 12 -
+          compactBonus * 40 +
+          (c.desde > 0 ? c.desde / 50_000 : 80) +
+          jitter;
+        return { c, score };
+      });
+      scored.sort((a, b) => a.score - b.score);
+      return scored.map((s) => s.c);
+    };
+
+    // LLENADO POR TIERS (regla comercial, NO se rompe):
+    //   🥇 0 = fincas de la SEMANA en la zona (o todas las de la semana si
+    //      el cliente no pidió zona)
+    //   🥈 1 = demás fincas del municipio pedido
+    //   🥉 2–3 = favoritas / resto (otras zonas cercanas del embudo)
+    // Dentro de cada tier se prioriza cupo ajustado + no lujo (amigos).
+    let lote: typeof principal;
+    let repuesto: typeof principal;
+    if (cupoPrincipal > 0) {
+      const preferMax =
+        personas && personas > 0
+          ? capacityPreferMaxForCupo(personas)
+          : Number.MAX_SAFE_INTEGER;
+      const cupo = personas && personas > 0 ? personas : 0;
+      const taken = new Set<string>();
+      const chosen: typeof principal = [];
+
+      const takeFromTier = (tiers: number[]) => {
+        const need = cupoPrincipal - chosen.length;
+        if (need <= 0) return;
+        const pool = principal.filter(
+          (c) => tiers.includes(c.tier) && !taken.has(c.item.propertyId),
+        );
+        const ordered =
+          personas && personas > 0
+            ? scoreWithinTier(pool, cupo, preferMax)
+            : seededShuffle(pool, rotSeed);
+        for (const c of ordered.slice(0, need)) {
+          chosen.push(c);
+          taken.add(c.item.propertyId);
+        }
+      };
+
+      takeFromTier([0]); // 🥇 semana en zona
+      takeFromTier([1]); // 🥈 municipio pedido
+      takeFromTier([2, 3]); // favoritas + resto
+
+      lote = chosen;
+      repuesto = principal.filter((c) => !taken.has(c.item.propertyId));
+    } else {
+      lote = [];
+      repuesto = principal;
+    }
+    lote = [...lote, ...pickFuera];
+
+    // PRESENTACIÓN: mismo orden de tiers (semana → zona → resto → semana
+    // fuera), y dentro del tier: cupo más ajustado → precio → no lujo.
     if (personas && personas > 0) {
       lote.sort(
         (a, b) =>
           a.tier - b.tier ||
           a.capacity - b.capacity ||
-          (a.desde || Number.MAX_SAFE_INTEGER) - (b.desde || Number.MAX_SAFE_INTEGER),
+          (a.desde || Number.MAX_SAFE_INTEGER) -
+            (b.desde || Number.MAX_SAFE_INTEGER) ||
+          Number(a.grandOrLuxury) - Number(b.grandOrLuxury),
       );
+    } else {
+      lote.sort((a, b) => a.tier - b.tier);
     }
     const items = [...lote, ...repuesto].map((c) => c.item);
 
@@ -1101,7 +1222,12 @@ export const recordCatalogSend = internalMutation({
         wamid: v.optional(v.string()),
         /** Ficha WEB: datos para renderizar la tarjeta en el widget. */
         image: v.optional(v.union(v.string(), v.null())),
+        /** Cuerpo enviado a WhatsApp (precio de temporada, cupo, etc.). */
         bodyText: v.optional(v.string()),
+        /** Precio por noche que se envió (para que el inbox no reconstruya el "Desde $mín"). */
+        priceFrom: v.optional(v.number()),
+        /** false = precio de temporada; true/omitido = "Desde $mín". */
+        priceIsDesde: v.optional(v.boolean()),
       }),
     ),
   },
@@ -1120,6 +1246,13 @@ export const recordCatalogSend = internalMutation({
         metadata: {
           productRetailerId: card.retailerId,
           source,
+          ...(card.bodyText
+            ? {
+                bodyText: card.bodyText,
+                priceFrom: card.priceFrom,
+                priceIsDesde: card.priceIsDesde ?? false,
+              }
+            : {}),
           // Solo el widget web usa esto (imagen/título/precio de la ficha).
           ...(card.image !== undefined || card.bodyText !== undefined
             ? {
@@ -2403,11 +2536,15 @@ export const runAgentTurn = internalAction({
                 });
                 if (row.ok) {
                   okCount++;
+                  const priced = parsePriceFromCatalogBody(item.bodyText);
                   const card = {
                     propertyId: item.propertyId as Id<'properties'>,
                     title: item.title,
                     retailerId: item.retailerId,
                     wamid: row.wamid,
+                    bodyText: item.bodyText,
+                    priceFrom: priced?.priceFrom,
+                    priceIsDesde: priced?.priceIsDesde,
                   };
                   sent.push(card);
                   await ctx.runMutation(internal.agent.recordCatalogSend, {
@@ -2732,6 +2869,7 @@ export const runAgentTurn = internalAction({
                       },
                     });
                     if (row.ok) {
+                      const priced = parsePriceFromCatalogBody(item.bodyText);
                       await ctx.runMutation(internal.agent.recordCatalogSend, {
                         conversationId,
                         sent: [
@@ -2740,6 +2878,9 @@ export const runAgentTurn = internalAction({
                             title: item.title,
                             retailerId: item.retailerId,
                             wamid: row.wamid,
+                            bodyText: item.bodyText,
+                            priceFrom: priced?.priceFrom,
+                            priceIsDesde: priced?.priceIsDesde,
                           },
                         ],
                       });

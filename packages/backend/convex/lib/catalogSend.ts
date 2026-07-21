@@ -224,3 +224,16 @@ export async function sendCatalogCards(args: {
 export function formatCop(n: number): string {
   return `$${Math.round(n).toLocaleString('es-CO')}`;
 }
+
+/** Extrae precio y si llevaba prefijo "Desde" del bodyText de una ficha. */
+export function parsePriceFromCatalogBody(bodyText: string): {
+  priceFrom: number;
+  priceIsDesde: boolean;
+} | null {
+  const priceIsDesde = /\bDesde\b/i.test(bodyText);
+  const m = bodyText.match(/\$\s*([\d.]+)/);
+  if (!m) return null;
+  const priceFrom = Number(m[1].replace(/\./g, ''));
+  if (!Number.isFinite(priceFrom) || priceFrom <= 0) return null;
+  return { priceFrom, priceIsDesde };
+}
