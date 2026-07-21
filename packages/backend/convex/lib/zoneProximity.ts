@@ -3,7 +3,7 @@
  * palabras clave (municipios/departamentos) para filtrar el catálogo. Ej.:
  *   "cerca a Bogotá" → municipios de escapada cercanos (Anapoima, Girardot,
  *                      Melgar, La Mesa, Tocaima…).
- *   "Villavicencio"  → también el departamento del Meta.
+ *   "Villavicencio" / "llanos" / "villavo" → Meta (NO Melgar).
  *   "melgar"         → también Tolima.
  */
 
@@ -17,18 +17,61 @@ const NEAR_BOGOTA = [
   'ricaurte', 'apulo', 'flandes', 'carmen de apicala', 'anolaima', 'cundinamarca',
 ];
 
+/** Meta / Llanos — NUNCA mezclar con Melgar/Cundinamarca. */
+const META_LLANOS = [
+  'villavicencio',
+  'restrepo',
+  'acacias',
+  'cumaral',
+  'meta',
+  'villavo',
+];
+
 /** Sinónimos/expansiones por región (se evalúan en orden). */
 const ZONE_ALIASES: Array<{ match: RegExp; keywords: string[]; label: string }> = [
   { match: /(cerca|cercan|alrededor|afuera|salir de).*bogot/, keywords: NEAR_BOGOTA, label: 'cerca de Bogotá' },
   { match: /bogot/, keywords: NEAR_BOGOTA, label: 'cerca de Bogotá' },
-  { match: /\bllanos?\b/, keywords: ['villavicencio', 'restrepo', 'acacias', 'cumaral', 'meta'], label: 'Meta / Llanos' },
-  { match: /villavicencio/, keywords: ['villavicencio', 'meta'], label: 'Villavicencio (Meta)' },
+  // Llanos / Villavo: "llanos orientales", "villavo", "meta" — NUNCA Melgar.
+  {
+    match: /\bllanos?\b|\bvillavo\b|\bmeta\b/,
+    keywords: META_LLANOS,
+    label: 'Meta / Llanos',
+  },
+  { match: /villavicencio/, keywords: ['villavicencio', 'meta', 'villavo'], label: 'Villavicencio (Meta)' },
   { match: /eje cafetero|quindio|pereira|armenia|quimbaya/, keywords: ['quindio', 'quimbaya', 'eje cafetero', 'pereira', 'armenia'], label: 'Eje Cafetero' },
+];
+
+/** Frases detectables en texto libre del cliente (orden: más específicas primero). */
+const ZONE_PHRASES: Array<{ match: RegExp; zona: string }> = [
+  { match: /\bllanos?\s+orientales?\b|\bllanos?\b|\bvillavo\b/, zona: 'Llanos / Meta' },
+  { match: /villavicencio/, zona: 'Villavicencio' },
+  { match: /\bdepartamento\s+(?:del?\s+)?meta\b|\ben\s+(?:el\s+)?meta\b/, zona: 'Meta' },
+  { match: /cerca\s+(?:a|de)\s+bogot/, zona: 'cerca a Bogotá' },
+  { match: /eje\s+cafetero/, zona: 'Eje Cafetero' },
+  { match: /\bmelgar\b/, zona: 'Melgar' },
+  { match: /\bgirardot\b/, zona: 'Girardot' },
+  { match: /\banapoima\b/, zona: 'Anapoima' },
+  { match: /\btocaima\b/, zona: 'Tocaima' },
+  { match: /\bvilleta\b/, zona: 'Villeta' },
+  { match: /\bricaurte\b/, zona: 'Ricaurte' },
+  { match: /\bapulo\b/, zona: 'Apulo' },
+  { match: /\bnilo\b/, zona: 'Nilo' },
+  { match: /carmen\s+de\s+apicala/, zona: 'Carmen de Apicalá' },
+  { match: /\bflandes\b/, zona: 'Flandes' },
+  { match: /\bla\s+mesa\b/, zona: 'La Mesa' },
+  { match: /\bla\s+vega\b/, zona: 'La Vega' },
+  { match: /\brestrepo\b/, zona: 'Restrepo' },
+  { match: /\bacacias\b/, zona: 'Acacias' },
+  { match: /\bcumaral\b/, zona: 'Cumaral' },
+  { match: /santa\s+marta/, zona: 'Santa Marta' },
+  { match: /cartagena/, zona: 'Cartagena' },
+  { match: /\bcosta\b|\bplaya\b/, zona: 'costa' },
 ];
 
 /** Municipio → departamento (para expandir la búsqueda a la zona). */
 const MUNICIPALITY_TO_DEPT: Record<string, string> = {
   villavicencio: 'meta', restrepo: 'meta', acacias: 'meta', cumaral: 'meta',
+  villavo: 'meta',
   anapoima: 'cundinamarca', girardot: 'cundinamarca', 'la mesa': 'cundinamarca',
   tocaima: 'cundinamarca', villeta: 'cundinamarca', nilo: 'cundinamarca',
   ricaurte: 'cundinamarca', anolaima: 'cundinamarca', tenjo: 'cundinamarca',
@@ -78,6 +121,33 @@ export function resolveZoneKeywords(zonaRaw: string): ZoneResolution {
     labels.push(r.label);
   }
   return { keywords: [...keywords], label: labels.join(' / ') || zonaRaw.trim() };
+}
+
+/**
+ * Extrae la zona pedida del texto libre del cliente (ej. "finca en los llanos
+ * orientales"). Usado para sticky de zona aunque el LLM omita el parámetro.
+ */
+export function extractZoneFromText(text: string): string | null {
+  const z = norm(text);
+  if (!z) return null;
+  for (const phrase of ZONE_PHRASES) {
+    if (phrase.match.test(z)) return phrase.zona;
+  }
+  return null;
+}
+
+/** Soft-ampliación: departamento de la zona (Meta, Tolima…) sin abrir a todo el país. */
+export function departmentSoftZone(zonaRaw: string): string | null {
+  const kw = resolveZoneKeywords(zonaRaw).keywords;
+  if (kw.includes('meta') || kw.includes('villavicencio') || kw.includes('villavo')) {
+    return 'Meta';
+  }
+  if (kw.includes('tolima') || kw.includes('melgar')) return 'Tolima';
+  if (kw.includes('cundinamarca') || kw.some((k) => NEAR_BOGOTA.includes(k))) {
+    return 'Cundinamarca';
+  }
+  if (kw.includes('quindio') || kw.includes('eje cafetero')) return 'Eje Cafetero';
+  return null;
 }
 
 /** Normaliza texto de zona/ubicación (minúsculas, sin tildes). Para comparar. */

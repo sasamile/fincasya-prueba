@@ -28,6 +28,11 @@ import {
 } from './lib/openai';
 import { buildSystemPrompt } from './lib/prompts';
 import {
+  REGLAS_NOCHES,
+  classifyTemporadaEspecial,
+  ciclosOficialesNota,
+} from './lib/seasonNights';
+import {
   buildMinimoNochesMessage,
   buildPropertySelectionHandoff,
   buildWelcomeMessage,
@@ -55,11 +60,11 @@ import {
 } from './lib/agentEscalation';
 import { detectPuenteFestivo, humanHolidayEs } from './lib/colombiaPublicHolidays';
 import {
+  departmentSoftZone,
+  extractZoneFromText,
   isCoastalProperty,
   propertyMatchesZone,
   resolveZoneKeywords,
-  normZoneText,
-  splitZoneParts,
   zoneRequestsCoast,
 } from './lib/zoneProximity';
 import { sendWhatsappText } from './lib/ycloud';
@@ -633,10 +638,9 @@ export const toolCatalogPick = internalQuery({
 
     const zonaTrim = zona?.trim() || undefined;
     const zoneKw = zonaTrim ? resolveZoneKeywords(zonaTrim).keywords : [];
-    // Municipios EXACTOS pedidos (para el tier 1 del orden). Soporta varios:
-    // "la Vega o Villeta" → ['la vega','villeta'] — antes se comparaba la
-    // frase completa y el tier nunca aplicaba con dos municipios.
-    const zonaParts = zonaTrim ? splitZoneParts(zonaTrim) : [];
+    // "En zona pedida" usa keywords resueltas (llanos → villavicencio/meta),
+    // NO el texto crudo: si no, "llanos orientales" no matchea ninguna finca
+    // y Melgar (picks de la semana) invade el lote.
 
     // COSTA SOLO SI LA PIDEN (regla comercial): Santa Marta, Cartagena, Islas
     // del Rosario… jamás se mezclan en las favoritas sin zona ni en la
@@ -756,24 +760,35 @@ export const toolCatalogPick = internalQuery({
     //   3. el resto
     //   4. fincas de la SEMANA de otras zonas — cierran el lote
     const rotSeed = typeof seed === 'number' && seed !== 0 ? seed : 1;
-    const inExactZone = (location: string): boolean => {
-      if (zonaParts.length === 0) return false;
-      const loc = normZoneText(location);
-      return zonaParts.some((p) => loc.includes(p));
+    const inRequestedZone = (
+      location: string,
+      departamentos?: string[],
+    ): boolean => {
+      if (zoneKw.length === 0) return false;
+      return propertyMatchesZone(location, departamentos, zoneKw);
     };
     // Tiers (0 primero): fincas de la SEMANA en la zona pedida (o sin zona) →
-    // municipio exacto → favoritas → resto → fincas de la SEMANA de OTRAS
+    // municipio/región pedida → favoritas → resto → fincas de la SEMANA de OTRAS
     // zonas (cierran el lote como recomendación extra — decisión Vane 21-jul).
-    const zonaGiven = zonaParts.length > 0;
+    const zonaGiven = zoneKw.length > 0;
     const tierPickFirst = matches.filter(
-      (p) => esPick(p) && (!zonaGiven || inExactZone(p.location)),
+      (p) =>
+        esPick(p) &&
+        (!zonaGiven || inRequestedZone(p.location, p.departamentos)),
     );
     const tierPickLast = matches.filter(
-      (p) => esPick(p) && zonaGiven && !inExactZone(p.location),
+      (p) =>
+        esPick(p) &&
+        zonaGiven &&
+        !inRequestedZone(p.location, p.departamentos),
     );
     const noPick = matches.filter((p) => !esPick(p));
-    const tierExact = noPick.filter((p) => inExactZone(p.location));
-    const rest = noPick.filter((p) => !inExactZone(p.location));
+    const tierExact = noPick.filter((p) =>
+      inRequestedZone(p.location, p.departamentos),
+    );
+    const rest = noPick.filter(
+      (p) => !inRequestedZone(p.location, p.departamentos),
+    );
     const tierFav = rest.filter((p) => p.isFavorite === true);
     const tierRest = rest.filter((p) => p.isFavorite !== true);
     matches = [
@@ -1284,20 +1299,9 @@ export const recordCatalogSend = internalMutation({
 });
 
 /**
- * Minimos/maximos de noches por temporada (respuesta rapida oficial
- * "/NOCHES DISPONIBLES" + regla de Santiago: fin de año maximo 7 dias).
- */
-const REGLAS_NOCHES: Record<string, { min: number; max?: number }> = {
-  'Fin de año': { min: 6, max: 7 },
-  Navidad: { min: 4 },
-  'Puente Reyes': { min: 3 },
-  'Semana Santa': { min: 3 },
-};
-
-/**
  * Consulta las REGLAS GLOBALES de temporadas (tabla globalPricing, las mismas
- * del panel admin del sistema anterior) para un rango de fechas: dice en que
- * temporada(s) caen las fechas y si cumplen el minimo/maximo de noches.
+ * del panel admin) + clasificación dura Navidad/Fin de año por fecha de
+ * ENTRADA (lib/seasonNights.ts). El mínimo de 6 noches es SOLO Fin de año.
  */
 export const toolConsultarTemporada = internalQuery({
   args: {
@@ -1354,7 +1358,14 @@ export const toolConsultarTemporada = internalQuery({
       if (match) temporadas.push(r.nombre);
     }
 
-    const reglasOut = temporadas
+    // Clasificación DURA por entrada: evita que un rango de precios del panel
+    // (o el LLM) confunda Navidad (3–4 noches) con Fin de año (mín. 6).
+    const especial = classifyTemporadaEspecial(fechaEntrada);
+    if (especial && !temporadas.includes(especial)) {
+      temporadas.push(especial);
+    }
+
+    let reglasOut = temporadas
       .filter((t) => REGLAS_NOCHES[t])
       .map((t) => ({
         temporada: t,
@@ -1364,6 +1375,22 @@ export const toolConsultarTemporada = internalQuery({
           noches >= REGLAS_NOCHES[t].min &&
           (REGLAS_NOCHES[t].max === undefined || noches <= REGLAS_NOCHES[t].max!),
       }));
+
+    if (especial) {
+      const rule = REGLAS_NOCHES[especial];
+      // Quita la otra temporada especial conflictiva (p. ej. panel marca ambas).
+      reglasOut = reglasOut.filter(
+        (r) => r.temporada !== 'Navidad' && r.temporada !== 'Fin de año',
+      );
+      reglasOut.unshift({
+        temporada: especial,
+        minimoNoches: rule.min,
+        maximoNoches: rule.max,
+        cumple:
+          noches >= rule.min &&
+          (rule.max === undefined || noches <= rule.max),
+      });
+    }
 
     // Puente festivo (calendario real de Colombia): mínimo 2 noches. Se calcula
     // aunque no haya una regla de temporada de precios que coincida.
@@ -1386,6 +1413,7 @@ export const toolConsultarTemporada = internalQuery({
           : `Estas fechas son puente festivo (${dia}); cumplen el mínimo de 2 noches.`;
     }
 
+    const ciclosNota = especial ? ciclosOficialesNota(especial) : '';
     const baseNota =
       reglasOut.length > 0
         ? 'si alguna regla no se cumple, avisa al cliente el minimo/maximo y pide ajustar fechas ANTES de enviar catalogo'
@@ -1393,11 +1421,12 @@ export const toolConsultarTemporada = internalQuery({
           ? `fechas en ${temporadas.join(', ')}: los precios varian segun temporada`
           : 'fechas en temporada normal (fin de semana sin festivo: minimo 1 noche; con puente festivo: minimo 2)';
 
+    const notaParts = [puenteNota, ciclosNota, baseNota].filter(Boolean);
     return {
       noches,
       temporadas,
       reglas: reglasOut,
-      nota: puenteNota ? `${puenteNota} ${baseNota}` : baseNota,
+      nota: notaParts.join(' '),
     };
   },
 });
@@ -1553,7 +1582,7 @@ const TOOL_DEFS: ToolDef[] = [
     function: {
       name: 'consultar_temporada',
       description:
-        'Consulta las REGLAS GLOBALES de temporadas del panel (Fin de año, Navidad, Puente Reyes, Semana Santa, temporada media/baja) para un rango de fechas. Usala SIEMPRE que el cliente de fechas concretas, ANTES de enviar catalogo: te dice en que temporada caen, el minimo/maximo de noches y si las fechas cumplen. Si no cumplen, avisa al cliente y pide ajustar fechas antes de enviar opciones. OJO: el nombre de la temporada de PRECIOS (media/alta/baja) es informacion INTERNA — jamas se lo digas al cliente; al cliente solo se le dice que el valor varia segun la temporada. Las especiales (Navidad, Fin de año, Reyes, Semana Santa) si se mencionan por sus minimos.',
+        'Consulta las REGLAS GLOBALES de temporadas del panel (Fin de año, Navidad, Puente Reyes, Semana Santa, temporada media/baja) para un rango de fechas. Usala SIEMPRE que el cliente de fechas concretas, ANTES de enviar catalogo: te dice en que temporada caen, el minimo/maximo de noches, si cumplen y los ciclos oficiales. REGLA DURA: entrada 22–27 dic = Navidad (3–4 noches, NUNCA exigir 6); entrada 28–31 dic = Fin de año (mínimo 6, máximo 7). Si no cumplen, avisa y pide ajustar. OJO: el nombre de la temporada de PRECIOS (media/alta/baja) es INTERNO — jamas se lo digas al cliente; al cliente solo que el valor varia segun la temporada. Las especiales (Navidad, Fin de año, Reyes, Semana Santa) si se mencionan por sus minimos.',
       parameters: {
         type: 'object',
         properties: {
@@ -1841,6 +1870,26 @@ export const runAgentTurn = internalAction({
     const botHasSpoken = context.history.some((m) => m.sender === 'assistant');
     const userBurst = getUserBurstSinceLastBot(context.history);
 
+    // ZONA desde historial: si el cliente dijo "llanos" en un mensaje anterior
+    // y el LLM aún no la pegó en sticky, la recuperamos aquí (evita mandar
+    // Melgar a quien pidió Villavo).
+    let stickyZone: string | null = context.lastRequestedZone;
+    if (!stickyZone) {
+      for (let i = context.history.length - 1; i >= 0; i--) {
+        const m = context.history[i];
+        if (!m || m.sender !== 'user') continue;
+        const z = extractZoneFromText(m.content);
+        if (z) {
+          stickyZone = z;
+          await ctx.runMutation(internal.agent.setRequestedZone, {
+            conversationId,
+            zona: z,
+          });
+          break;
+        }
+      }
+    }
+
     const priceLoopMotivo = detectPriceLoopEscalation(
       context.history,
       last.content,
@@ -2071,6 +2120,7 @@ export const runAgentTurn = internalAction({
           horaBogota,
           saludoFranja,
           firstTurn: !botHasSpoken,
+          zonaActiva: stickyZone ?? undefined,
         }),
       },
       ...context.history.map((m): ChatMessage =>
@@ -2151,8 +2201,8 @@ export const runAgentTurn = internalAction({
     let skipFinalReply = false;
     let finalText: string | null = null;
     // ZONA STICKY: la zona que pidio el cliente sigue vigente todo el chat.
-    // Arranca de lo persistido y se actualiza cuando CUALQUIER tool trae zona.
-    let stickyZone: string | null = context.lastRequestedZone;
+    // Ya se hidrato desde historial arriba; aquí solo se actualiza si una tool
+    // trae zona (o "cualquier lugar" la limpia).
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
       const { content, toolCalls } = await chatCompletion({
         messages,
@@ -2444,10 +2494,37 @@ export const runAgentTurn = internalAction({
               seed: catalogSeed,
             });
             // REGLA DEL EQUIPO: nunca dejar al cliente sin opciones. Si la zona
-            // pedida no tiene fincas para ese grupo, se amplía SOLO a otros
-            // municipios (favoritas de distintas zonas, hasta el Meta si toca)
-            // y se envían esas fichas como alternativas cercanas.
+            // pedida no tiene fincas, primero se amplía al DEPARTAMENTO (Meta,
+            // Tolima…) y solo después a todo el país — evita mandar Melgar a
+            // quien pidió Llanos cuando aún hay fincas en Villavo/Restrepo.
             let zonaAmpliada = false;
+            if (pick.ok && pick.items.length === 0 && effectiveZona) {
+              const softZona = departmentSoftZone(effectiveZona);
+              if (softZona && softZona.toLowerCase() !== effectiveZona.toLowerCase()) {
+                const softRetry = await ctx.runQuery(
+                  internal.agent.toolCatalogPick,
+                  {
+                    conversationId,
+                    personas:
+                      typeof args.personas === 'number'
+                        ? args.personas
+                        : undefined,
+                    zona: softZona,
+                    mascotas:
+                      typeof args.mascotas === 'boolean'
+                        ? args.mascotas
+                        : undefined,
+                    fechaEntradaMs: feMs,
+                    fechaSalidaMs: fsMs,
+                    seed: catalogSeed,
+                  },
+                );
+                if (softRetry.ok && softRetry.items.length > 0) {
+                  pick = softRetry;
+                  zonaAmpliada = true;
+                }
+              }
+            }
             if (pick.ok && pick.items.length === 0 && effectiveZona) {
               const retry = await ctx.runQuery(internal.agent.toolCatalogPick, {
                 conversationId,

@@ -194,6 +194,12 @@ export function extractCatalogHintsFromChat(text: string): CatalogChatHints {
   }
 
   const zones = [
+    'Villavicencio',
+    'Llanos',
+    'Meta',
+    'Restrepo',
+    'Acacias',
+    'Cumaral',
     'Melgar',
     'Girardot',
     'Anapoima',
@@ -219,12 +225,15 @@ export function extractCatalogHintsFromChat(text: string): CatalogChatHints {
   const lower = text.toLowerCase();
   for (const z of zones) {
     if (lower.includes(z.toLowerCase())) {
-      out.zona = z;
+      out.zona = z === 'Llanos' ? 'Llanos / Meta' : z;
       break;
     }
   }
   if (!out.zona && /\bcerca\s+(?:a|de)\s+bogot/i.test(text)) {
     out.zona = 'cerca a Bogotá';
+  }
+  if (!out.zona && /\bvillavo\b/i.test(text)) {
+    out.zona = 'Villavicencio';
   }
 
   if (/\bmascotas?\b|\bperr[oa]s?\b|\bgat[oa]s?\b/i.test(text)) {

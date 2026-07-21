@@ -90,23 +90,44 @@ Si deseas, al avanzar con tu reserva te contactamos con las personas adecuadas q
 📅 Fines de semana (con puente): Mínimo 2 noches.
 🤴 Reyes: Mínimo 3 noches.
 ⛪ Semana Santa: Mínimo 3 a 4 noches.
-🎅 Navidad: Mínimo 4 noches.
-🎄 Fin de Año: Mínimo 6 a 7 noches.`,
+🎅 Navidad: 3 a 4 noches (NO 6).
+🎄 Fin de Año: Mínimo 6 noches (máximo 7) — solo en esta temporada.`,
   },
   {
     key: 'qr:fdaa-ciclos',
     situation:
-      'El cliente quiere reservar fin de año: se le comparten los ciclos de reserva disponibles (maximo 7 dias).',
+      'El cliente quiere reservar fin de año: se le comparten los ciclos de reserva disponibles (minimo 6 noches, maximo 7).',
     clientExamples: [
       'Quiero finca para fin de año',
       'Del 30 de diciembre al 2 de enero',
       'Disponibilidad para año nuevo',
     ],
-    response: `Contamos con los siguientes ciclos de reserva 🏡:
+    response: `Para *Fin de año* la estadía mínima es de *6 noches* (máximo 7). Ciclos disponibles 🏡:
 🗓️ 28 de dic al 03 de ene
+🗓️ 28 de dic al 04 de ene
 🗓️ 29 de dic al 04 de ene
+🗓️ 29 de dic al 05 de ene
 🗓️ 30 de dic al 05 de ene
+🗓️ 30 de dic al 06 de ene
 ¡Asegura tu fecha con anticipación! ✨`,
+  },
+  {
+    key: 'qr:navidad-ciclos',
+    situation:
+      'El cliente quiere reservar Navidad (no Fin de año): se le aclaran 3 a 4 noches y los ciclos oficiales. PROHIBIDO exigir 6 noches.',
+    clientExamples: [
+      'Quiero finca para Navidad',
+      'Del 24 al 27 de diciembre',
+      'Todas las fincas tienen mínimo de 6 noches?',
+      'Disponibilidad 23 al 26 de dic',
+    ],
+    response: `En *Navidad* sí se puede reservar de *3 a 4 noches* (el mínimo de 6 noches aplica solo en Fin de año ☃️). Ciclos disponibles 🎄:
+🗓️ 22 de dic al 26 de dic
+🗓️ 23 de dic al 26 de dic
+🗓️ 23 de dic al 27 de dic
+🗓️ 24 de dic al 27 de dic
+🗓️ 24 de dic al 28 de dic
+¿Te acomodan alguna de estas fechas? Con gusto te comparto opciones 🏡✨`,
   },
   {
     key: 'qr:celebracion',
@@ -272,21 +293,28 @@ A la mayor brevedad te compartiremos la información detallada de esta casa y ot
     ],
     response: `Por favor ten presente que en temporadas especiales como *Fin de año*, *Navidad* y *puente de Reyes*, los costos y condiciones de alquiler son distintos ☝️🎄
 
-🏡 Las propiedades tienen una *estancia mínima de noches*, que varía según la fecha:
+🏡 La *estancia mínima de noches* varía según la fecha (importante: las 6 noches son SOLO Fin de año):
 
-🎅 Navidad: Mínimo 4 noches.
-🎄 Fin de Año: Mínimo 6 a 7 noches (máximo 7).
+🎅 Navidad: 3 a 4 noches.
+☃️ Fin de Año: Mínimo 6 noches (máximo 7).
 🤴 Reyes: Mínimo 3 noches.
 
-✅ *DISPONIBILIDAD DE FECHAS NAVIDAD Y FIN DE AÑO:*
+✅ *DISPONIBILIDAD DE FECHAS NAVIDAD* 🎄
 
 🗓️ 22 de dic al 26 de dic
-🗓️ 23 de dic al 26/27 de dic
-🗓️ 24 de dic al 27/28 de dic
+🗓️ 23 de dic al 26 de dic
+🗓️ 23 de dic al 27 de dic
+🗓️ 24 de dic al 27 de dic
+🗓️ 24 de dic al 28 de dic
 
-🗓️ 28 de dic al 03/04 de ene
-🗓️ 29 de dic al 04/05 de ene
-🗓️ 30 de dic al 05/06 de ene
+✅ *DISPONIBILIDAD FIN DE AÑO* ☃️
+
+🗓️ 28 de dic al 03 de ene
+🗓️ 28 de dic al 04 de ene
+🗓️ 29 de dic al 04 de ene
+🗓️ 29 de dic al 05 de ene
+🗓️ 30 de dic al 05 de ene
+🗓️ 30 de dic al 06 de ene
 
 Si tus fechas cumplen el mínimo, con gusto te compartimos las opciones disponibles; si no, ajustemos las fechas y seguimos 🙌`,
   },
