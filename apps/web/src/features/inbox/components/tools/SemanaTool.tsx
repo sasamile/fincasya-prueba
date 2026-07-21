@@ -45,11 +45,26 @@ export function SemanaTool() {
   const [lista, setLista] = useState<Lista>('semana');
   const picks = useQuery(api.weeklyPicks.list, { lista });
   const [q, setQ] = useState('');
+  /** Filtro local de la lista de impulsadas (crece a 40-50 fincas). */
+  const [filtro, setFiltro] = useState('');
   const resultados = useQuery(api.weeklyPicks.searchProperties, { q, lista });
   const add = useMutation(api.weeklyPicks.add);
+  const addMany = useMutation(api.weeklyPicks.addMany);
   const setEnabled = useMutation(api.weeklyPicks.setEnabled);
   const remove = useMutation(api.weeklyPicks.remove);
   const [busy, setBusy] = useState<string | null>(null);
+
+  const norm = (s: string) =>
+    s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  const picksFiltradas = (picks ?? []).filter((p) =>
+    filtro.trim()
+      ? norm(p.title).includes(norm(filtro)) ||
+        norm(p.location).includes(norm(filtro)) ||
+        norm(p.code ?? '').includes(norm(filtro))
+      : true,
+  );
+  /** Resultados del buscador que aún NO están en la lista (para el lote). */
+  const agregables = (resultados ?? []).filter((r) => !r.yaSeleccionada);
 
   async function run(key: string, fn: () => Promise<unknown>, okMsg: string) {
     setBusy(key);
@@ -122,8 +137,26 @@ export function SemanaTool() {
             </p>
           </div>
         ) : (
-          <ul className="flex flex-col gap-2">
-            {picks.map((p) => (
+          <>
+            {/* Filtro local: con 40-50 fincas la lista crece — buscar dentro. */}
+            {picks.length > 5 && (
+              <div className="relative mb-2">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={filtro}
+                  onChange={(e) => setFiltro(e.target.value)}
+                  placeholder="Filtrar seleccionadas…"
+                  className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-[13px] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+            )}
+            {picksFiltradas.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Ninguna coincide con &quot;{filtro}&quot;
+              </p>
+            ) : (
+          <ul className="flex max-h-[420px] flex-col gap-2 overflow-y-auto pr-1">
+            {picksFiltradas.map((p) => (
               <li
                 key={p.id}
                 className={cn(
@@ -220,6 +253,8 @@ export function SemanaTool() {
               </li>
             ))}
           </ul>
+            )}
+          </>
         )}
         <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground/70">
           {lista === 'semana'
@@ -242,6 +277,35 @@ export function SemanaTool() {
             className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
         </div>
+        {/* Lote: agrega todo el resultado de una (luego se apagan/quitan las
+            que no, con el switch o la basurita de arriba). */}
+        {agregables.length > 1 && (
+          <button
+            type="button"
+            disabled={busy === '__all__'}
+            onClick={() =>
+              void run(
+                '__all__',
+                () =>
+                  addMany({
+                    propertyIds: agregables.map(
+                      (r) => r.propertyId as Id<'properties'>,
+                    ),
+                    lista,
+                  }),
+                `${agregables.length} fincas agregadas — desmarca las que no con el switch`,
+              )
+            }
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/10 py-2 text-[12.5px] font-bold text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+          >
+            {busy === '__all__' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            Agregar todas ({agregables.length})
+          </button>
+        )}
         <ul className="mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
           {(resultados ?? []).map((r) => (
             <li

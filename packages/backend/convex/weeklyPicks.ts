@@ -223,6 +223,52 @@ export const add = mutation({
   },
 });
 
+/**
+ * Agrega VARIAS fincas de una (botón "Seleccionar todas" del panel).
+ * Idempotente: las que ya estaban solo se re-activan.
+ */
+export const addMany = mutation({
+  args: {
+    propertyIds: v.array(v.id('properties')),
+    lista: v.optional(listaValidator),
+  },
+  handler: async (ctx, { propertyIds, lista: listaArg }): Promise<number> => {
+    const by = await requireOperator(ctx);
+    const lista: ListaPicks = listaArg ?? 'semana';
+    if (propertyIds.length === 0) return 0;
+    if (propertyIds.length > 200) throw new Error('Demasiadas fincas de una');
+    const now = Date.now();
+    const existentes = new Map(
+      (await ctx.db.query('weeklyPicks').collect())
+        .filter((w) => (w.lista ?? 'semana') === lista)
+        .map((w) => [String(w.propertyId), w] as const),
+    );
+    let agregadas = 0;
+    for (const propertyId of propertyIds) {
+      const prop = await ctx.db.get(propertyId);
+      if (!prop) continue;
+      const existing = existentes.get(String(propertyId));
+      if (existing) {
+        if (!existing.enabled) {
+          await ctx.db.patch(existing._id, { enabled: true, updatedAt: now, updatedBy: by });
+          agregadas++;
+        }
+        continue;
+      }
+      await ctx.db.insert('weeklyPicks', {
+        propertyId,
+        lista,
+        enabled: true,
+        createdAt: now,
+        updatedAt: now,
+        updatedBy: by,
+      });
+      agregadas++;
+    }
+    return agregadas;
+  },
+});
+
 /** Prende/apaga una finca de la lista sin quitarla. */
 export const setEnabled = mutation({
   args: { id: v.id('weeklyPicks'), enabled: v.boolean() },
