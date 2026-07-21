@@ -803,11 +803,8 @@ export const toolCatalogPick = internalQuery({
         : null;
       if (season) {
         desde = season.nightly;
-        precioLinea =
-          `💰 ${formatCop(season.nightly)} por noche` +
-          (season.ruleName && season.ruleName !== 'Estándar'
-            ? ` (${season.ruleName})`
-            : '');
+        // Solo el precio, SIN el nombre de la temporada (Vane 21-jul).
+        precioLinea = `💰 ${formatCop(season.nightly)} por noche`;
       } else {
         const prices = [p.priceBase, p.priceBaja, p.priceMedia, p.priceAlta].filter(
           (x): x is number => typeof x === 'number' && x > 0,
