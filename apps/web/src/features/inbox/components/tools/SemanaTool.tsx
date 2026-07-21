@@ -280,8 +280,8 @@ export function SemanaTool() {
         )}
         <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground/70">
           {lista === 'semana'
-            ? 'El bot solo las ofrece si el grupo cabe y están libres en las fechas del cliente. Si se reserva, apágala o quítala — el filtro de disponibilidad la bloquea solo para esas fechas de todas formas.'
-            : 'Estas se priorizan SOLO cuando el cliente pide fechas de fin de año (15 dic → 15 ene). El resto del año no afectan nada. Cupo y disponibilidad se respetan siempre.'}
+            ? 'El bot solo las ofrece si son del TAMAÑO adecuado para el grupo (ni pequeñas ni gigantes) y están libres en las fechas del cliente. Si se reserva, apágala o quítala — el filtro de disponibilidad la bloquea solo para esas fechas de todas formas.'
+            : 'Estas se priorizan SOLO cuando el cliente pide fechas de fin de año (15 dic → 15 ene). El resto del año no afectan nada. Tamaño del grupo y disponibilidad se respetan siempre.'}
         </p>
       </section>
 

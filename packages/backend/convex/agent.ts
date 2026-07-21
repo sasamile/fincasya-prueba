@@ -517,9 +517,11 @@ export const toolCatalogPick = internalQuery({
 
     // FINCAS DE LA SEMANA / FIN DE AÑO (Vane 21-jul): el equipo las selecciona
     // en el inbox para IMPULSARLAS. Saltan el filtro de zona y de costa
-    // (elección explícita del equipo) pero cupo mínimo, mascotas y
-    // disponibilidad se respetan SIEMPRE. En la zona pedida van primero; de
-    // otras zonas van al final del lote como recomendación extra.
+    // (elección explícita del equipo) pero CUPO (mínimo Y techo de tamaño),
+    // mascotas y disponibilidad se respetan SIEMPRE — una finca de la semana
+    // de 20 pax jamás se ofrece a un grupo de 4 (corrección Vane, 21-jul
+    // tarde). En la zona pedida van primero; de otras zonas van al final del
+    // lote como recomendación extra.
     // ¿Qué lista aplica? Si las fechas pedidas tocan la temporada de fin de
     // año (15-dic → 15-ene, de cualquier año), la lista 'findeano'; si no, la
     // 'semana'. Sin fechas → 'semana'.
@@ -620,15 +622,14 @@ export const toolCatalogPick = internalQuery({
       const relaxed = base.filter(
         (p) => min(p) && p.capacity <= capacityCeilRelaxedForCupo(personas),
       );
-      const minOnly = base.filter(min);
-      matches = strict.length >= 6 ? strict : relaxed.length >= 4 ? relaxed : minOnly;
-      // Fincas de la semana: respetan el MÍNIMO (que el grupo quepa) pero no
-      // el techo — el equipo la eligió a propósito aunque sea más grande.
-      const enMatches = new Set(matches.map((p) => String(p._id)));
-      const pickExtra = minOnly.filter(
-        (p) => esPick(p) && !enMatches.has(String(p._id)),
-      );
-      if (pickExtra.length > 0) matches = [...matches, ...pickExtra];
+      // TECHO SIEMPRE (Vane, 21-jul tarde): jamás se ofrecen casas
+      // absurdamente grandes para el grupo. Antes había un último recurso sin
+      // techo (minOnly) y las fincas de la semana también lo saltaban — un
+      // grupo de 4 recibía mansiones de 40 pax. Ahora el techo relajado es el
+      // límite DURO para todas (incluidas las de la semana): si ni así hay
+      // opciones, mejor pocas o ninguna — el agente amplía zona o escala a un
+      // experto, que ya es el flujo existente para cero resultados.
+      matches = strict.length >= 6 ? strict : relaxed;
       razones.capacidad = base.length - matches.length;
     }
 
