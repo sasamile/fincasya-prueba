@@ -572,11 +572,33 @@ export const toolCatalogPick = internalQuery({
       costa: 0, // costa sin que el cliente la pidiera
       fueraDeZona: 0, // no coincide con la zona pedida
       sinMascotas: 0, // pidieron mascotas y la finca no acepta
+      minNochesFinca: 0, // estadía más corta que el mínimo propio de la finca
       capacidad: 0, // fuera del rango de cupo del grupo
       ocupadas: 0, // reserva/bloqueo se cruza con las fechas
       retenidasCalendario: 0, // evento de calendario sin resolver
       sinFichaMeta: 0, // sin producto registrado en el catálogo Meta
     };
+
+    // MÍNIMO DE NOCHES POR FINCA (Vane 21-jul, caso HILLS: "siempre 2 noches,
+    // festivos mínimo 3"): con fechas válidas, la finca que tenga mínimo
+    // propio se excluye si la estadía es más corta. En puente festivo
+    // (calendario real de Colombia) manda `minNochesFestivo`.
+    const hayFechas =
+      typeof fechaEntradaMs === 'number' &&
+      typeof fechaSalidaMs === 'number' &&
+      fechaSalidaMs > fechaEntradaMs;
+    const nochesStay = hayFechas
+      ? Math.round(
+          ((fechaSalidaMs as number) - (fechaEntradaMs as number)) / 86_400_000,
+        )
+      : 0;
+    const esPuenteFestivo = hayFechas
+      ? detectPuenteFestivo(
+          new Date(fechaEntradaMs as number).toISOString().slice(0, 10),
+          new Date(fechaSalidaMs as number).toISOString().slice(0, 10),
+        ).puente
+      : false;
+
     const base: typeof all = [];
     for (const p of all) {
       if (exclude.has(String(p._id))) {
@@ -610,6 +632,16 @@ export const toolCatalogPick = internalQuery({
       if (mascotas && p.allowsPets !== true) {
         razones.sinMascotas++;
         continue;
+      }
+      // Estadía mínima propia de la finca (aplica también a picks de la semana).
+      if (hayFechas) {
+        const minReq = esPuenteFestivo
+          ? Math.max(p.minNochesFestivo ?? 0, p.minNoches ?? 0)
+          : (p.minNoches ?? 0);
+        if (minReq > 0 && nochesStay < minReq) {
+          razones.minNochesFinca++;
+          continue;
+        }
       }
       base.push(p);
     }

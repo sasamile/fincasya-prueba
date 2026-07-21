@@ -33,6 +33,38 @@ export const setExemplarEnabled = internalMutation({
   },
 });
 
+/**
+ * Estadía mínima POR FINCA (CLI):
+ *   bunx convex run admin:setPropertyMinNights \
+ *     '{"code": "AN#003", "minNoches": 2, "minNochesFestivo": 3}'
+ * Pasar 0 borra el mínimo. Busca por código de finca (o título parcial).
+ */
+export const setPropertyMinNights = internalMutation({
+  args: {
+    code: v.string(),
+    minNoches: v.optional(v.number()),
+    minNochesFestivo: v.optional(v.number()),
+  },
+  handler: async (ctx, { code, minNoches, minNochesFestivo }) => {
+    const q = code.trim().toUpperCase();
+    const all = await ctx.db.query('properties').collect();
+    const prop =
+      all.find((p) => (p.code ?? '').trim().toUpperCase() === q) ??
+      all.find((p) => p.title.toUpperCase().includes(q));
+    if (!prop) throw new Error(`No hay finca con código/título "${code}"`);
+    await ctx.db.patch(prop._id, {
+      minNoches: minNoches && minNoches > 0 ? minNoches : undefined,
+      minNochesFestivo:
+        minNochesFestivo && minNochesFestivo > 0 ? minNochesFestivo : undefined,
+    });
+    return {
+      finca: prop.title,
+      minNoches: minNoches ?? null,
+      minNochesFestivo: minNochesFestivo ?? null,
+    };
+  },
+});
+
 /** Cambia el ID de catalogo Meta del catalogo default (para probar/corregir). */
 export const setCatalogMetaId = internalMutation({
   args: { whatsappCatalogId: v.string() },

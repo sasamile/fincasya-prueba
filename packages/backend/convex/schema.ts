@@ -337,6 +337,14 @@ export default defineSchema(
        * (orientador para bot y catálogo; opcional).
        */
       eventPackagePrice: v.optional(v.number()),
+      /**
+       * Estadía mínima POR FINCA (Vane 21-jul, caso HILLS: "siempre 2 noches;
+       * festivos mínimo 3"). `minNoches` aplica siempre; `minNochesFestivo`
+       * manda cuando la estadía toca un puente festivo (detectPuenteFestivo).
+       * El bot no ofrece la finca a estadías más cortas.
+       */
+      minNoches: v.optional(v.number()),
+      minNochesFestivo: v.optional(v.number()),
       rating: v.optional(v.number()),
       reviewsCount: v.optional(v.number()),
       video: v.optional(v.string()),
