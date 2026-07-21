@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import {
   AlertTriangle,
   CalendarRange,
+  Check,
   CheckCircle2,
   Loader2,
   MapPin,
@@ -48,11 +49,17 @@ export function SemanaTool() {
   /** Filtro local de la lista de impulsadas (crece a 40-50 fincas). */
   const [filtro, setFiltro] = useState('');
   const resultados = useQuery(api.weeklyPicks.searchProperties, { q, lista });
-  const add = useMutation(api.weeklyPicks.add);
   const addMany = useMutation(api.weeklyPicks.addMany);
   const setEnabled = useMutation(api.weeklyPicks.setEnabled);
   const remove = useMutation(api.weeklyPicks.remove);
   const [busy, setBusy] = useState<string | null>(null);
+  /**
+   * MODO SELECCIÓN (Vane): "Seleccionar todas" marca los resultados, ella
+   * DESMARCA las 3-4 que no quiere y confirma con "Agregar seleccionadas".
+   * Nada se agrega hasta confirmar. La selección sobrevive a cambios del
+   * buscador (puede marcar de varios municipios antes de confirmar).
+   */
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
 
   const norm = (s: string) =>
     s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
@@ -65,6 +72,15 @@ export function SemanaTool() {
   );
   /** Resultados del buscador que aún NO están en la lista (para el lote). */
   const agregables = (resultados ?? []).filter((r) => !r.yaSeleccionada);
+
+  const toggleSeleccion = (id: string) => {
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   async function run(key: string, fn: () => Promise<unknown>, okMsg: string) {
     setBusy(key);
@@ -86,7 +102,10 @@ export function SemanaTool() {
       <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-muted/40 p-1">
         <button
           type="button"
-          onClick={() => setLista('semana')}
+          onClick={() => {
+            setLista('semana');
+            setSeleccion(new Set());
+          }}
           className={cn(
             'flex items-center justify-center gap-1.5 rounded-lg py-2 text-[12px] font-bold transition-colors',
             lista === 'semana'
@@ -98,7 +117,10 @@ export function SemanaTool() {
         </button>
         <button
           type="button"
-          onClick={() => setLista('findeano')}
+          onClick={() => {
+            setLista('findeano');
+            setSeleccion(new Set());
+          }}
           className={cn(
             'flex items-center justify-center gap-1.5 rounded-lg py-2 text-[12px] font-bold transition-colors',
             lista === 'findeano'
@@ -277,40 +299,45 @@ export function SemanaTool() {
             className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
         </div>
-        {/* Lote: agrega todo el resultado de una (luego se apagan/quitan las
-            que no, con el switch o la basurita de arriba). */}
+        {/* Selección en lote: marcar todas → desmarcar las que no → confirmar. */}
         {agregables.length > 1 && (
-          <button
-            type="button"
-            disabled={busy === '__all__'}
-            onClick={() =>
-              void run(
-                '__all__',
-                () =>
-                  addMany({
-                    propertyIds: agregables.map(
-                      (r) => r.propertyId as Id<'properties'>,
-                    ),
-                    lista,
-                  }),
-                `${agregables.length} fincas agregadas — desmarca las que no con el switch`,
-              )
-            }
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/10 py-2 text-[12.5px] font-bold text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
-          >
-            {busy === '__all__' ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4" />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setSeleccion((prev) => {
+                  const next = new Set(prev);
+                  for (const r of agregables) next.add(r.propertyId);
+                  return next;
+                })
+              }
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border py-1.5 text-[12px] font-bold text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+            >
+              <Check className="h-3.5 w-3.5" /> Seleccionar todas ({agregables.length})
+            </button>
+            {seleccion.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSeleccion(new Set())}
+                className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-bold text-muted-foreground transition-colors hover:text-destructive"
+              >
+                Limpiar
+              </button>
             )}
-            Agregar todas ({agregables.length})
-          </button>
+          </div>
         )}
         <ul className="mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
           {(resultados ?? []).map((r) => (
             <li
               key={r.propertyId}
-              className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted/60"
+              onClick={() => {
+                if (!r.yaSeleccionada) toggleSeleccion(r.propertyId);
+              }}
+              className={cn(
+                'flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted/60',
+                !r.yaSeleccionada && 'cursor-pointer',
+                seleccion.has(r.propertyId) && 'bg-primary/5 ring-1 ring-primary/25',
+              )}
             >
               {r.image ? (
                 <img
@@ -337,35 +364,52 @@ export function SemanaTool() {
                   En la lista
                 </span>
               ) : (
-                <button
-                  type="button"
-                  title="Agregar a fincas de la semana"
-                  disabled={busy === r.propertyId}
-                  onClick={() =>
-                    void run(
-                      r.propertyId,
-                      () =>
-                        add({
-                          propertyId: r.propertyId as Id<'properties'>,
-                          lista,
-                        }),
-                      lista === 'semana'
-                        ? 'Agregada — el bot ya la prioriza'
-                        : 'Agregada para fin de año',
-                    )
-                  }
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-                >
-                  {busy === r.propertyId ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Plus className="h-4 w-4" />
+                <span
+                  aria-hidden
+                  className={cn(
+                    'grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 transition-colors',
+                    seleccion.has(r.propertyId)
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-background text-transparent',
                   )}
-                </button>
+                >
+                  <Check className="h-4 w-4" strokeWidth={3} />
+                </span>
               )}
             </li>
           ))}
         </ul>
+
+        {/* Confirmación del lote: nada se agrega hasta tocar este botón. */}
+        {seleccion.size > 0 && (
+          <button
+            type="button"
+            disabled={busy === '__confirm__'}
+            onClick={() =>
+              void run(
+                '__confirm__',
+                async () => {
+                  await addMany({
+                    propertyIds: [...seleccion] as Id<'properties'>[],
+                    lista,
+                  });
+                  setSeleccion(new Set());
+                },
+                lista === 'semana'
+                  ? `${seleccion.size} fincas agregadas — el bot ya las prioriza`
+                  : `${seleccion.size} fincas agregadas para fin de año`,
+              )
+            }
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-[13px] font-bold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {busy === '__confirm__' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            Agregar seleccionadas ({seleccion.size})
+          </button>
+        )}
       </section>
     </div>
   );
