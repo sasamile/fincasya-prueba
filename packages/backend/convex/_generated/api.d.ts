@@ -65,6 +65,7 @@ import type * as lib_bookings_dates from "../lib/bookings/dates.js";
 import type * as lib_bookings_listFilters from "../lib/bookings/listFilters.js";
 import type * as lib_businessHours from "../lib/businessHours.js";
 import type * as lib_calendarEventMatch from "../lib/calendarEventMatch.js";
+import type * as lib_capacityCeil from "../lib/capacityCeil.js";
 import type * as lib_catalogHints from "../lib/catalogHints.js";
 import type * as lib_catalogPrice from "../lib/catalogPrice.js";
 import type * as lib_catalogSend from "../lib/catalogSend.js";
@@ -197,6 +198,7 @@ declare const fullApi: ApiFromModules<{
   "lib/bookings/listFilters": typeof lib_bookings_listFilters;
   "lib/businessHours": typeof lib_businessHours;
   "lib/calendarEventMatch": typeof lib_calendarEventMatch;
+  "lib/capacityCeil": typeof lib_capacityCeil;
   "lib/catalogHints": typeof lib_catalogHints;
   "lib/catalogPrice": typeof lib_catalogPrice;
   "lib/catalogSend": typeof lib_catalogSend;

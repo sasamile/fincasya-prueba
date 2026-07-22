@@ -136,6 +136,40 @@ export function extractZoneFromText(text: string): string | null {
   return null;
 }
 
+/**
+ * REGIONES para la ampliación "lugares CERCANOS" (Adriana, 22-jul): cuando el
+ * cliente pide un destino y no alcanzan las fincas de ahí, el lote se completa
+ * con la MISMA región — jamás con el otro extremo del país. Quien pide
+ * Cartagena ve Santa Marta / Barú, no Melgar ni Villavicencio.
+ */
+const REGIONES: ReadonlyArray<readonly string[]> = [
+  // Costa Caribe
+  [
+    'santa marta', 'cartagena', 'rosario', 'baru', 'tierra bomba', 'covenas',
+    'tolu', 'magdalena', 'bolivar', 'atlantico', 'sucre', 'cordoba', 'guajira',
+  ],
+  // Cundinamarca + Tolima cercano (escapada desde Bogotá)
+  NEAR_BOGOTA,
+  // Meta / Llanos
+  META_LLANOS,
+  // Eje Cafetero
+  ['quindio', 'quimbaya', 'eje cafetero', 'pereira', 'armenia', 'risaralda'],
+];
+
+/**
+ * Palabras clave de la REGIÓN a la que pertenece la zona pedida (incluye la
+ * zona misma). Sirve para completar el lote con destinos vecinos sin salirse
+ * de la región. Devuelve [] si la zona no cae en ninguna región conocida.
+ */
+export function nearbyZoneKeywords(zonaRaw: string): string[] {
+  const propias = resolveZoneKeywords(zonaRaw).keywords;
+  if (propias.length === 0) return [];
+  const region = REGIONES.find((r) =>
+    propias.some((k) => r.some((m) => m.includes(k) || k.includes(m))),
+  );
+  return region ? [...region] : [];
+}
+
 /** Soft-ampliación: departamento de la zona (Meta, Tolima…) sin abrir a todo el país. */
 export function departmentSoftZone(zonaRaw: string): string | null {
   const kw = resolveZoneKeywords(zonaRaw).keywords;

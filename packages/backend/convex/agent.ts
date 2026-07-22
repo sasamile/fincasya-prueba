@@ -29,6 +29,7 @@ import {
 import { buildSystemPrompt } from './lib/prompts';
 import {
   REGLAS_NOCHES,
+  TEMPORADA_CORRIDA,
   classifyTemporadaEspecial,
   ciclosOficialesNota,
 } from './lib/seasonNights';
@@ -60,9 +61,14 @@ import {
 } from './lib/agentEscalation';
 import { detectPuenteFestivo, humanHolidayEs } from './lib/colombiaPublicHolidays';
 import {
-  departmentSoftZone,
+  capacityCeilForCupo,
+  capacityCeilRelaxedForCupo,
+  capacityPreferMaxForCupo,
+} from './lib/capacityCeil';
+import {
   extractZoneFromText,
   isCoastalProperty,
+  nearbyZoneKeywords,
   propertyMatchesZone,
   resolveZoneKeywords,
   zoneRequestsCoast,
@@ -157,6 +163,11 @@ type CatalogPickResult =
   | {
       ok: true;
       catalogMetaId: string;
+      /**
+       * El lote trae fincas de destinos VECINOS (misma región) porque la zona
+       * pedida no alcanzó a llenarlo. El agente lo aclara en su mensaje.
+       */
+      incluyeCercanas?: boolean;
       items: Array<{
         propertyId: string;
         retailerId: string;
@@ -301,6 +312,20 @@ export const getAgentContext = internalQuery({
         };
       }
     }
+    // La zona pegajosa se re-valida en cada turno: las conversaciones viejas
+    // pueden traer basura guardada antes de la validación (caso «HILLS»), y esa
+    // basura terminaba en el prompt ("finca en la zona HILLS") y en el filtro.
+    let zonaSticky = conversation.lastRequestedZone ?? null;
+    if (zonaSticky) {
+      const props = await ctx.db.query('properties').collect();
+      if (!zonaExisteEnInventario(zonaSticky, props)) {
+        console.warn('[agent] zona sticky ignorada (no existe en el inventario)', {
+          conversationId,
+          zona: zonaSticky,
+        });
+        zonaSticky = null;
+      }
+    }
     return {
       status: conversation.status,
       channel: conversation.channel,
@@ -310,7 +335,7 @@ export const getAgentContext = internalQuery({
       lastUserMessageId,
       catalogSent: (conversation.lastSentCatalogPropertyIds?.length ?? 0) > 0,
       returning,
-      lastRequestedZone: conversation.lastRequestedZone ?? null,
+      lastRequestedZone: zonaSticky,
       humanHandling,
       aiManualOverride: conversation.aiManualOverride === true,
       fincaConsultada,
@@ -318,13 +343,47 @@ export const getAgentContext = internalQuery({
   },
 });
 
-/** Persiste la zona que pidió el cliente (sticky para el resto del chat). */
+/**
+ * ¿La zona corresponde a algún lugar donde REALMENTE hay fincas? Filtra basura
+ * como «HILLS» (nombre de finca) antes de que se vuelva pegajosa.
+ */
+function zonaExisteEnInventario(
+  zona: string,
+  props: Array<{ location: string; departamentos?: string[] }>,
+): boolean {
+  const { keywords } = resolveZoneKeywords(zona);
+  if (keywords.length === 0) return false;
+  return props.some((p) =>
+    propertyMatchesZone(p.location, p.departamentos, keywords),
+  );
+}
+
+/**
+ * Persiste la zona que pidió el cliente (sticky para el resto del chat).
+ *
+ * VALIDA contra el inventario real (Adriana, 22-jul): el LLM llegó a mandar
+ * «HILLS» —un pedazo del NOMBRE de una finca (ANAPOIMA HOME LUXURY HILLS)— como
+ * si fuera zona. Al quedar pegajosa, el bot le hablaba al cliente de "la zona
+ * HILLS" en todos los turnos siguientes y filtraba el catálogo por un lugar que
+ * no existe. Si ninguna finca está en esa zona, NO se guarda.
+ *
+ * Devuelve si quedó guardada para que quien llama no la use en memoria.
+ */
 export const setRequestedZone = internalMutation({
   args: { conversationId: v.id('conversations'), zona: v.string() },
-  handler: async (ctx, { conversationId, zona }): Promise<void> => {
+  handler: async (ctx, { conversationId, zona }): Promise<{ guardada: boolean }> => {
     const z = zona.trim();
-    if (!z) return;
+    if (!z) return { guardada: false };
+    const props = await ctx.db.query('properties').collect();
+    if (!zonaExisteEnInventario(z, props)) {
+      console.warn('[agent] zona descartada (no existe en el inventario)', {
+        conversationId,
+        zona: z,
+      });
+      return { guardada: false };
+    }
     await ctx.db.patch(conversationId, { lastRequestedZone: z });
+    return { guardada: true };
   },
 });
 
@@ -468,41 +527,6 @@ export const toolDisponibilidad = internalQuery({
   },
 });
 
-/**
- * Techo de capacidad a recomendar (política del equipo).
- * Ajustado 21-jul (Vane): grupos chicos recibían demasiadas fincas grandes
- * (favoritas 17–25+ pax). Techos más cerrados + banda "preferida" abajo.
- * cupo ≤6 → +3 · ≤12 → +4 · ≤16 → +5 · ≤25 → +6 · >25 → +8.
- */
-function capacityCeilForCupo(cupo: number): number {
-  if (cupo <= 6) return cupo + 3;
-  if (cupo <= 12) return cupo + 4;
-  if (cupo <= 16) return cupo + 5;
-  if (cupo <= 25) return cupo + 6;
-  return cupo + 8;
-}
-
-/** Techo RELAJADO (pasada intermedia cuando el rango estricto da pocas). */
-function capacityCeilRelaxedForCupo(cupo: number): number {
-  if (cupo <= 6) return cupo + 5;
-  if (cupo <= 12) return cupo + 7;
-  if (cupo <= 16) return cupo + 8;
-  if (cupo <= 25) return Math.ceil(cupo * 1.45);
-  return Math.ceil(cupo * 1.35);
-}
-
-/**
- * Banda PREFERIDA dentro del techo: la mayoría del lote debe caer aquí
- * (opciones "ajustadas" al grupo). Ej. 12 personas → prefer ≤15.
- */
-function capacityPreferMaxForCupo(cupo: number): number {
-  if (cupo <= 6) return cupo + 2;
-  if (cupo <= 12) return cupo + 3;
-  if (cupo <= 16) return cupo + 4;
-  if (cupo <= 25) return cupo + 5;
-  return cupo + 8;
-}
-
 /** Lujo / premium / grupos grandes: mal default para plan de amigos. */
 function isGrandOrLuxuryCategory(category: string | undefined): boolean {
   return (
@@ -575,6 +599,13 @@ export const toolCatalogPick = internalQuery({
   args: {
     conversationId: v.id('conversations'),
     personas: v.optional(v.number()),
+    /**
+     * Piso del RANGO cuando el cliente dio uno ("15 a 20 personas"): personas
+     * es el tope (20) y personasMin el piso (15). Con rango, el mínimo de cupo
+     * baja al piso para que también entren fincas de 16–19 pax; el techo sigue
+     * saliendo del tope. Sin rango, va undefined y manda `personas`.
+     */
+    personasMin: v.optional(v.number()),
     zona: v.optional(v.string()),
     mascotas: v.optional(v.boolean()),
     /** ms epoch — si vienen, solo se envian fincas LIBRES esas fechas. */
@@ -589,7 +620,16 @@ export const toolCatalogPick = internalQuery({
   },
   handler: async (
     ctx,
-    { conversationId, personas, zona, mascotas, fechaEntradaMs, fechaSalidaMs, seed },
+    {
+      conversationId,
+      personas,
+      personasMin,
+      zona,
+      mascotas,
+      fechaEntradaMs,
+      fechaSalidaMs,
+      seed,
+    },
   ): Promise<CatalogPickResult> => {
     const conversation = await ctx.db.get(conversationId);
     const exclude = new Set(
@@ -638,6 +678,11 @@ export const toolCatalogPick = internalQuery({
 
     const zonaTrim = zona?.trim() || undefined;
     const zoneKw = zonaTrim ? resolveZoneKeywords(zonaTrim).keywords : [];
+    // ANILLO DE CERCANÍA (Adriana, 22-jul): primero la zona pedida y, si falta
+    // para llenar el lote, destinos de la MISMA región — nunca el otro extremo
+    // del país. Quien pide Cartagena completa con Santa Marta / Barú, jamás con
+    // Melgar o Villavicencio.
+    const nearKw = zonaTrim ? nearbyZoneKeywords(zonaTrim) : [];
     // "En zona pedida" usa keywords resueltas (llanos → villavicencio/meta),
     // NO el texto crudo: si no, "llanos orientales" no matchea ninguna finca
     // y Melgar (picks de la semana) invade el lote.
@@ -709,7 +754,16 @@ export const toolCatalogPick = internalQuery({
         razones.costa++;
         continue;
       }
-      if (!esPick(p) && !propertyMatchesZone(p.location, p.departamentos, zoneKw)) {
+      // Zona pedida o su región vecina. Fuera de la región no entra: el lote
+      // se queda corto antes que mandarle Melgar a quien pidió la costa.
+      if (
+        !esPick(p) &&
+        !propertyMatchesZone(p.location, p.departamentos, zoneKw) &&
+        !(
+          nearKw.length > 0 &&
+          propertyMatchesZone(p.location, p.departamentos, nearKw)
+        )
+      ) {
         razones.fueraDeZona++;
         continue;
       }
@@ -731,11 +785,18 @@ export const toolCatalogPick = internalQuery({
     }
 
     // Pasadas de capacidad: estricta → relajada (techo SIEMPRE).
+    // RANGO (Vane, 22-jul): si el cliente dijo "15 a 20", el piso del cupo es
+    // 15 y el techo se calcula sobre 20 — antes se filtraba con capacity >= 20
+    // y las fincas de 16, 17, 18 y 19 pax NUNCA salían.
+    const cupoPiso =
+      personasMin && personasMin > 0 && personas && personasMin < personas
+        ? personasMin
+        : personas;
     let matches = base;
     if (personas && personas > 0) {
       // Minimo por capacidad de HOSPEDAJE (el cupo de evento solo aplicaria
       // si supieramos que es evento; el bot viejo hace lo mismo).
-      const min = (p: (typeof all)[number]) => p.capacity >= personas;
+      const min = (p: (typeof all)[number]) => p.capacity >= cupoPiso!;
       const strict = base.filter(
         (p) => min(p) && p.capacity <= capacityCeilForCupo(personas),
       );
@@ -776,11 +837,16 @@ export const toolCatalogPick = internalQuery({
         esPick(p) &&
         (!zonaGiven || inRequestedZone(p.location, p.departamentos)),
     );
+    // Picks de la semana FUERA de la zona pedida: solo si son de la región
+    // vecina. Antes cerraban el lote con fincas de cualquier parte del país
+    // (quien pidió costa recibía Melgar y Villavicencio).
     const tierPickLast = matches.filter(
       (p) =>
         esPick(p) &&
         zonaGiven &&
-        !inRequestedZone(p.location, p.departamentos),
+        !inRequestedZone(p.location, p.departamentos) &&
+        nearKw.length > 0 &&
+        propertyMatchesZone(p.location, p.departamentos, nearKw),
     );
     const noPick = matches.filter((p) => !esPick(p));
     const tierExact = noPick.filter((p) =>
@@ -987,7 +1053,10 @@ export const toolCatalogPick = internalQuery({
         personas && personas > 0
           ? capacityPreferMaxForCupo(personas)
           : Number.MAX_SAFE_INTEGER;
-      const cupo = personas && personas > 0 ? personas : 0;
+      // El "ajuste al grupo" se mide contra el PISO del rango: así una finca
+      // de 16 pax puntúa como ajustada para un "15 a 20" y no queda sepultada
+      // bajo las de 20+.
+      const cupo = personas && personas > 0 ? (cupoPiso ?? personas) : 0;
       const taken = new Set<string>();
       const chosen: typeof principal = [];
 
@@ -1034,6 +1103,9 @@ export const toolCatalogPick = internalQuery({
       lote.sort((a, b) => a.tier - b.tier);
     }
     const items = [...lote, ...repuesto].map((c) => c.item);
+    // Con zona pedida, los tiers 2+ ya no son "cualquier parte del país" sino
+    // destinos de la misma región: si el lote los usó, el agente lo aclara.
+    const incluyeCercanas = zonaGiven && lote.some((c) => c.tier >= 2);
 
     console.log('[catalogo] embudo', {
       totalFincas: all.length,
@@ -1046,7 +1118,12 @@ export const toolCatalogPick = internalQuery({
       zona: zonaTrim ?? null,
       conFechas: checkAvailability,
     });
-    return { ok: true, catalogMetaId: catalog.whatsappCatalogId, items };
+    return {
+      ok: true,
+      catalogMetaId: catalog.whatsappCatalogId,
+      incluyeCercanas,
+      items,
+    };
   },
 });
 
@@ -1300,8 +1377,9 @@ export const recordCatalogSend = internalMutation({
 
 /**
  * Consulta las REGLAS GLOBALES de temporadas (tabla globalPricing, las mismas
- * del panel admin) + clasificación dura Navidad/Fin de año por fecha de
- * ENTRADA (lib/seasonNights.ts). El mínimo de 6 noches es SOLO Fin de año.
+ * del panel admin) + clasificación dura Navidad/Fin de año por la ESTADÍA
+ * completa (lib/seasonNights.ts): la noche del 31 de dic manda Fin de año
+ * (6–8 noches). El mínimo de 6 noches es SOLO Fin de año.
  */
 export const toolConsultarTemporada = internalQuery({
   args: {
@@ -1358,9 +1436,12 @@ export const toolConsultarTemporada = internalQuery({
       if (match) temporadas.push(r.nombre);
     }
 
-    // Clasificación DURA por entrada: evita que un rango de precios del panel
-    // (o el LLM) confunda Navidad (3–4 noches) con Fin de año (mín. 6).
-    const especial = classifyTemporadaEspecial(fechaEntrada);
+    // Clasificación DURA por la estadía completa: si duerme la noche del 31 de
+    // dic es Fin de año (6–8 noches) aunque llegue el 27; y si además duerme
+    // Navidad (24/25) es el CORRIDO, que va sin máximo. Evita que un rango de
+    // precios del panel (o el LLM) lo trate como Navidad (máx. 4 noches) o le
+    // aplique al corrido el tope de Fin de año.
+    const especial = classifyTemporadaEspecial(fechaEntrada, fechaSalida);
     if (especial && !temporadas.includes(especial)) {
       temporadas.push(especial);
     }
@@ -1378,9 +1459,13 @@ export const toolConsultarTemporada = internalQuery({
 
     if (especial) {
       const rule = REGLAS_NOCHES[especial];
-      // Quita la otra temporada especial conflictiva (p. ej. panel marca ambas).
+      // Quita las otras temporadas especiales conflictivas (el panel puede
+      // marcar Navidad y Fin de año a la vez) y la copia que ya metió el map.
       reglasOut = reglasOut.filter(
-        (r) => r.temporada !== 'Navidad' && r.temporada !== 'Fin de año',
+        (r) =>
+          r.temporada !== 'Navidad' &&
+          r.temporada !== 'Fin de año' &&
+          r.temporada !== TEMPORADA_CORRIDA,
       );
       reglasOut.unshift({
         temporada: especial,
@@ -1552,11 +1637,20 @@ const TOOL_DEFS: ToolDef[] = [
       parameters: {
         type: 'object',
         properties: {
-          personas: { type: 'number', description: 'Numero de personas' },
+          personas: {
+            type: 'number',
+            description:
+              'Numero de personas. Si el cliente dio un RANGO ("15 a 20", "entre 10 y 12", "unas 8 o 10"), aqui va el TOPE (20) y el piso va en personasMin (15).',
+          },
+          personasMin: {
+            type: 'number',
+            description:
+              'Piso del rango de personas, SOLO cuando el cliente dio un rango ("15 a 20" → personasMin 15, personas 20). Asi el catalogo tambien incluye fincas de 16, 17, 18 pax y no solo las de 20+. Si el cliente dio un numero exacto, NO lo mandes.',
+          },
           zona: {
             type: 'string',
             description:
-              'Zona, municipio o departamento que pidio el cliente (ej. "cerca a bogota", "Melgar"). OBLIGATORIA siempre que el cliente haya NOMBRADO algun lugar en la conversacion — incluso si nombro VARIOS: pasa la frase tal cual ("la Vega o Villeta") y el sistema busca en todos. PERSISTENTE: si el cliente la dio ANTES en el chat, PASALA IGUAL aunque en este mensaje solo actualice fechas o personas — NO la omitas. Solo cambia si el cliente pide OTRA zona; si dice "cualquier lugar / donde sea", pasa exactamente eso.',
+              'Zona, municipio o departamento que pidio el cliente (ej. "cerca a bogota", "Melgar"). OBLIGATORIA siempre que el cliente haya NOMBRADO algun lugar en la conversacion — incluso si nombro VARIOS: pasa la frase tal cual ("la Vega o Villeta") y el sistema busca en todos. PERSISTENTE: si el cliente la dio ANTES en el chat, PASALA IGUAL aunque en este mensaje solo actualice fechas o personas — NO la omitas. Solo cambia si el cliente pide OTRA zona. "cualquier lugar / donde sea" SOLO cuando el cliente NO nombra ningun destino: si dice "cualquiera de esas partes, Santa Marta o Cartagena" NO mandes "cualquiera...", manda "Santa Marta o Cartagena" (los destinos que nombro).',
           },
           mascotas: {
             type: 'boolean',
@@ -1582,7 +1676,7 @@ const TOOL_DEFS: ToolDef[] = [
     function: {
       name: 'consultar_temporada',
       description:
-        'Consulta las REGLAS GLOBALES de temporadas del panel (Fin de año, Navidad, Puente Reyes, Semana Santa, temporada media/baja) para un rango de fechas. Usala SIEMPRE que el cliente de fechas concretas, ANTES de enviar catalogo: te dice en que temporada caen, el minimo/maximo de noches, si cumplen y los ciclos oficiales. REGLA DURA: entrada 22–27 dic = Navidad (3–4 noches, NUNCA exigir 6); entrada 28–31 dic = Fin de año (mínimo 6, máximo 7). Si no cumplen, avisa y pide ajustar. OJO: el nombre de la temporada de PRECIOS (media/alta/baja) es INTERNO — jamas se lo digas al cliente; al cliente solo que el valor varia segun la temporada. Las especiales (Navidad, Fin de año, Reyes, Semana Santa) si se mencionan por sus minimos.',
+        'Consulta las REGLAS GLOBALES de temporadas del panel (Fin de año, Navidad, Puente Reyes, Semana Santa, temporada media/baja) para un rango de fechas. Usala SIEMPRE que el cliente de fechas concretas, ANTES de enviar catalogo: te dice en que temporada caen, el minimo/maximo de noches, si cumplen y los ciclos oficiales. REGLA DURA: si la estadía duerme la noche del 31 de dic es Fin de año (6 a 8 noches) aunque llegue el 25, 26 o 27 — ej. 27 dic → 3 ene son 7 noches válidas. Si ADEMÁS duerme Navidad (24/25 dic) es el CORRIDO "Navidad + Fin de año" (ej. 23 dic → 3 ene): mínimo 6 noches y SIN máximo, SE PERMITE de corrido y el valor mixto lo confirma un asesor. Solo es Navidad sola (3–4 noches, NUNCA exigir 6) si entra 22–27 dic y sale el 31 de dic o antes. Si no cumplen, avisa y pide ajustar. OJO: el nombre de la temporada de PRECIOS (media/alta/baja) es INTERNO — jamas se lo digas al cliente; al cliente solo que el valor varia segun la temporada. Las especiales (Navidad, Fin de año, Reyes, Semana Santa) si se mencionan por sus minimos.',
       parameters: {
         type: 'object',
         properties: {
@@ -1880,11 +1974,11 @@ export const runAgentTurn = internalAction({
         if (!m || m.sender !== 'user') continue;
         const z = extractZoneFromText(m.content);
         if (z) {
-          stickyZone = z;
-          await ctx.runMutation(internal.agent.setRequestedZone, {
-            conversationId,
-            zona: z,
-          });
+          const { guardada } = await ctx.runMutation(
+            internal.agent.setRequestedZone,
+            { conversationId, zona: z },
+          );
+          if (guardada) stickyZone = z;
           break;
         }
       }
@@ -2226,10 +2320,16 @@ export const runAgentTurn = internalAction({
           // en un turno posterior. "cualquier lugar/donde sea" la limpia.
           if (typeof args.zona === 'string' && args.zona.trim()) {
             const z = args.zona.trim();
+            // "Cualquier lugar" SOLO limpia la zona si NO nombra ningún lugar.
+            // Caso real (Adriana, 22-jul): el cliente dijo "es para cualquiera
+            // de esas partes, Santa Marta, Cartagena" — el modelo pasó esa
+            // frase tal cual, el regex vio "cualquier..." al inicio y BORRÓ la
+            // zona, así que el catálogo salió de Melgar y Villavicencio a quien
+            // pidió costa. Si la frase menciona un destino, manda el destino.
             const broaden =
               /^(cualquier|donde sea|no importa|todas? part|toda colombia|indiferente|el que sea)/.test(
                 z.toLowerCase().normalize('NFD').replace(/\p{M}/gu, ''),
-              );
+              ) && extractZoneFromText(z) === null;
             if (broaden) {
               if (stickyZone !== null) {
                 stickyZone = null;
@@ -2238,11 +2338,13 @@ export const runAgentTurn = internalAction({
                 });
               }
             } else if (z !== stickyZone) {
-              stickyZone = z;
-              await ctx.runMutation(internal.agent.setRequestedZone, {
-                conversationId,
-                zona: z,
-              });
+              // Si no es una zona real del inventario (ej. el LLM mandó el
+              // nombre de una finca), se ignora: ni sticky ni filtro.
+              const { guardada } = await ctx.runMutation(
+                internal.agent.setRequestedZone,
+                { conversationId, zona: z },
+              );
+              if (guardada) stickyZone = z;
             }
           }
           if (
@@ -2486,6 +2588,8 @@ export const runAgentTurn = internalAction({
             let pick = await ctx.runQuery(internal.agent.toolCatalogPick, {
               conversationId,
               personas: typeof args.personas === 'number' ? args.personas : undefined,
+              personasMin:
+                typeof args.personasMin === 'number' ? args.personasMin : undefined,
               zona: effectiveZona,
               mascotas:
                 typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
@@ -2493,55 +2597,14 @@ export const runAgentTurn = internalAction({
               fechaSalidaMs: fsMs,
               seed: catalogSeed,
             });
-            // REGLA DEL EQUIPO: nunca dejar al cliente sin opciones. Si la zona
-            // pedida no tiene fincas, primero se amplía al DEPARTAMENTO (Meta,
-            // Tolima…) y solo después a todo el país — evita mandar Melgar a
-            // quien pidió Llanos cuando aún hay fincas en Villavo/Restrepo.
-            let zonaAmpliada = false;
-            if (pick.ok && pick.items.length === 0 && effectiveZona) {
-              const softZona = departmentSoftZone(effectiveZona);
-              if (softZona && softZona.toLowerCase() !== effectiveZona.toLowerCase()) {
-                const softRetry = await ctx.runQuery(
-                  internal.agent.toolCatalogPick,
-                  {
-                    conversationId,
-                    personas:
-                      typeof args.personas === 'number'
-                        ? args.personas
-                        : undefined,
-                    zona: softZona,
-                    mascotas:
-                      typeof args.mascotas === 'boolean'
-                        ? args.mascotas
-                        : undefined,
-                    fechaEntradaMs: feMs,
-                    fechaSalidaMs: fsMs,
-                    seed: catalogSeed,
-                  },
-                );
-                if (softRetry.ok && softRetry.items.length > 0) {
-                  pick = softRetry;
-                  zonaAmpliada = true;
-                }
-              }
-            }
-            if (pick.ok && pick.items.length === 0 && effectiveZona) {
-              const retry = await ctx.runQuery(internal.agent.toolCatalogPick, {
-                conversationId,
-                personas:
-                  typeof args.personas === 'number' ? args.personas : undefined,
-                zona: undefined,
-                mascotas:
-                  typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
-                fechaEntradaMs: feMs,
-                fechaSalidaMs: fsMs,
-                seed: catalogSeed,
-              });
-              if (retry.ok && retry.items.length > 0) {
-                pick = retry;
-                zonaAmpliada = true;
-              }
-            }
+            // ZONA PEDIDA = LÍMITE (Adriana, 22-jul). El lote se llena con la
+            // zona y, si falta, con destinos VECINOS de la misma región — eso
+            // ya lo resuelve toolCatalogPick con el anillo de cercanía. Se
+            // eliminó la ampliación a todo el país: quien pidió Cartagena y
+            // Santa Marta recibía Melgar, Villavicencio y Anapoima. Si no queda
+            // nada ni con los vecinos, NO se rellena: se escala a un Experto
+            // (jamás se le dice al cliente "no hay").
+            const zonaAmpliada = pick.ok && pick.incluyeCercanas === true;
             if (!pick.ok) {
               result = { enviadas: [], error: pick.motivo };
             } else if (pick.items.length === 0) {
@@ -2644,7 +2707,7 @@ export const runAgentTurn = internalAction({
                 result = {
                   enviadas: sent.map((s) => s.title),
                   nota: zonaAmpliada
-                    ? 'OJO: en la zona que pidio el cliente NO habia fincas para ese grupo, asi que se enviaron opciones de municipios CERCANOS/otras zonas (esto es lo correcto — PROHIBIDO decir "no tenemos fincas/disponibilidad"). El mensaje oficial YA salio completo con las fichas (valor por noche, invitacion a elegir, mas opciones) — NO repitas nada de eso. Escribe SOLO 1-2 lineas con empatia aclarando que estas opciones estan en zonas cercanas a la que pidio, y que si prefiere, un experto le busca en su zona exacta.'
+                    ? 'OJO: la zona que pidio el cliente no alcanzo a llenar el lote, asi que ADEMAS de las de su zona se enviaron opciones de destinos CERCANOS de la MISMA region (esto es lo correcto — PROHIBIDO decir "no tenemos fincas/disponibilidad"). El mensaje oficial YA salio completo con las fichas (valor por noche, invitacion a elegir, mas opciones) — NO repitas nada de eso. Escribe SOLO 1-2 lineas con empatia aclarando que algunas opciones son de destinos cercanos al que pidio, y que si prefiere solo su zona exacta, un experto se la busca.'
                     : 'El mensaje oficial YA salio completo junto a las fichas (valor por noche, invitacion a decir cual le gusto, ayuda con la mejor tarifa y ver mas opciones). PROHIBIDO escribir un cierre que repita algo de eso. Solo escribe algo si el cliente pregunto algo puntual que aun NO se ha respondido; si no hay nada pendiente, no escribas nada este turno.',
                 };
               } else {
