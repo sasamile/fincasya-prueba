@@ -1906,7 +1906,7 @@ async function finalizeSaleLinkCheckin(
     return { ok: false as const, reason: 'missing_guests' as const };
   }
   for (let i = 0; i < args.guests.length; i++) {
-    const g = args.guests[i];
+    const g = args.guests[i]!;
     if (!g.nombreCompleto.trim()) {
       return { ok: false as const, reason: 'missing_name' as const, index: i };
     }

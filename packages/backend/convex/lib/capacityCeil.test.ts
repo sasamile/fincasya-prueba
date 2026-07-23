@@ -3,6 +3,7 @@ import {
   capacityCeilForCupo,
   capacityCeilRelaxedForCupo,
   capacityPreferMaxForCupo,
+  CUPO_GRUPO_GRANDE,
 } from './capacityCeil';
 
 describe('piso del techo — grupos pequeños', () => {
@@ -32,6 +33,24 @@ describe('techo por fórmula — grupos medianos y grandes', () => {
 
   test('sigue habiendo techo: a 20 personas no se le ofrece una de 40', () => {
     expect(capacityCeilRelaxedForCupo(20)).toBeLessThan(40);
+  });
+});
+
+describe('grupo grande — techo abierto de emergencia', () => {
+  // Caso real (Hernán, 23-jul): 29 personas + perro en Melgar. El techo
+  // relajado (40) dejaba fuera la MELGAR 55/60PAX (cap 57) y al cliente le
+  // llegó UNA sola ficha (Viotá). Por eso agent.ts abre el techo cuando el
+  // grupo es grande y el lote queda corto.
+  test('el techo relajado de 29 personas NO alcanza la 55/60PAX — de ahí la pasada abierta', () => {
+    expect(capacityCeilRelaxedForCupo(29)).toBeLessThan(57);
+  });
+
+  test('un grupo de 29 califica como grande (la pasada abierta le aplica)', () => {
+    expect(CUPO_GRUPO_GRANDE).toBeLessThanOrEqual(29);
+  });
+
+  test('los grupos chicos NO califican: a 4 personas jamás se les abre el techo', () => {
+    expect(CUPO_GRUPO_GRANDE).toBeGreaterThan(12);
   });
 });
 

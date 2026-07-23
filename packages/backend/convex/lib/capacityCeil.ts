@@ -15,6 +15,16 @@
 const PISO_TECHO = 10;
 const PISO_TECHO_RELAJADO = 12;
 
+/**
+ * Desde este cupo el grupo cuenta como GRANDE: si aun con el techo relajado
+ * el lote queda corto, el techo se ABRE del todo (solo manda el piso de cupo).
+ * Para 29 personas una finca de 55/60 pax no es "absurda" — y el inventario de
+ * casas tan grandes es mínimo. Caso real (Hernán, 23-jul): 29 personas + perro
+ * en Melgar → el techo dejó UNA sola ficha (Viotá 36) y la MELGAR 55/60PAX,
+ * favorita y pet friendly, quedó por fuera.
+ */
+export const CUPO_GRUPO_GRANDE = 20;
+
 function techoPorFormula(cupo: number): number {
   if (cupo <= 6) return cupo + 3;
   if (cupo <= 12) return cupo + 4;

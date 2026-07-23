@@ -74,6 +74,7 @@ import {
   capacityCeilForCupo,
   capacityCeilRelaxedForCupo,
   capacityPreferMaxForCupo,
+  CUPO_GRUPO_GRANDE,
 } from './lib/capacityCeil';
 import {
   extractZoneFromText,
@@ -817,6 +818,12 @@ export const toolCatalogPick = internalQuery({
       // absurdamente grandes para el grupo. Umbral bajado a 4 (antes 6): si
       // hay 4+ ajustadas al techo estricto, NO abrimos a fincas más grandes.
       matches = strict.length >= 4 ? strict : relaxed;
+      // GRUPO GRANDE (Hernán, 23-jul): con 20+ personas el techo se abre si
+      // aun relajado quedan pocas — a la Sra. Juana (29 pax + perro, Melgar)
+      // le llegó UNA ficha porque la 55/60PAX de Melgar caía por techo.
+      if (matches.length < 4 && personas >= CUPO_GRUPO_GRANDE) {
+        matches = base.filter(min);
+      }
       razones.capacidad = base.length - matches.length;
     }
 
@@ -2653,6 +2660,21 @@ export const runAgentTurn = internalAction({
             // nada ni con los vecinos, NO se rellena: se escala a un Experto
             // (jamás se le dice al cliente "no hay").
             const zonaAmpliada = pick.ok && pick.incluyeCercanas === true;
+            // PRECIOS DEL PRÓXIMO AÑO (Hernán, 23-jul): la Sra. Juana cotizó
+            // octubre del año siguiente y las fichas salieron con tarifas de
+            // ESTE año sin aclaración. Si la entrada cae en un año posterior,
+            // el bot DEBE aclarar que el valor es referencia y puede subir.
+            const anioActualBogota = Number(
+              new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'America/Bogota',
+                year: 'numeric',
+              }).format(new Date()),
+            );
+            const anioEntrada = new Date(feMs).getUTCFullYear();
+            const notaProximoAnio =
+              anioEntrada > anioActualBogota
+                ? ` ADEMAS (OBLIGATORIO, aunque no haya nada mas pendiente): la estadia es para ${anioEntrada}, un año posterior al actual. Escribe 1-2 lineas calidas aclarando que los valores de las fichas son las tarifas de ESTE año como referencia: para ${anioEntrada} pueden ajustarse (en puentes y temporada suelen subir alrededor de un 10%) y mas cerca de la fecha el equipo le confirma la tarifa exacta.`
+                : '';
             if (!pick.ok) {
               result = { enviadas: [], error: pick.motivo };
             } else if (pick.items.length === 0) {
@@ -2754,9 +2776,11 @@ export const runAgentTurn = internalAction({
                 });
                 result = {
                   enviadas: sent.map((s) => s.title),
-                  nota: zonaAmpliada
-                    ? 'OJO: la zona que pidio el cliente no alcanzo a llenar el lote, asi que ADEMAS de las de su zona se enviaron opciones de destinos CERCANOS de la MISMA region (esto es lo correcto — PROHIBIDO decir "no tenemos fincas/disponibilidad"). El mensaje oficial YA salio completo con las fichas (valor por noche, invitacion a elegir, mas opciones) — NO repitas nada de eso. Escribe SOLO 1-2 lineas con empatia aclarando que algunas opciones son de destinos cercanos al que pidio, y que si prefiere solo su zona exacta, un experto se la busca.'
-                    : 'El mensaje oficial YA salio completo junto a las fichas (valor por noche, invitacion a decir cual le gusto, ayuda con la mejor tarifa y ver mas opciones). PROHIBIDO escribir un cierre que repita algo de eso. Solo escribe algo si el cliente pregunto algo puntual que aun NO se ha respondido; si no hay nada pendiente, no escribas nada este turno.',
+                  nota:
+                    (zonaAmpliada
+                      ? 'OJO: la zona que pidio el cliente no alcanzo a llenar el lote, asi que ADEMAS de las de su zona se enviaron opciones de destinos CERCANOS de la MISMA region (esto es lo correcto — PROHIBIDO decir "no tenemos fincas/disponibilidad"). El mensaje oficial YA salio completo con las fichas (valor por noche, invitacion a elegir, mas opciones) — NO repitas nada de eso. Escribe SOLO 1-2 lineas con empatia aclarando que algunas opciones son de destinos cercanos al que pidio, y que si prefiere solo su zona exacta, un experto se la busca.'
+                      : 'El mensaje oficial YA salio completo junto a las fichas (valor por noche, invitacion a decir cual le gusto, ayuda con la mejor tarifa y ver mas opciones). PROHIBIDO escribir un cierre que repita algo de eso. Solo escribe algo si el cliente pregunto algo puntual que aun NO se ha respondido; si no hay nada pendiente, no escribas nada este turno.') +
+                    notaProximoAnio,
                 };
               } else {
                 // Catalogo no conectado al numero / producto invalido: NO
