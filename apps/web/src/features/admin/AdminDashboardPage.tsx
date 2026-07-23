@@ -23,8 +23,6 @@ import {
   Activity,
 } from 'lucide-react';
 import {
-  AreaChart,
-  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -792,6 +790,28 @@ function VisitStatsCardContent({
       description={`${formatVisitCount(stats.prevMonthViews)} mes anterior`}
       changeIsPercent
     />
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  icon: ComponentType<{ className?: string }>;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-background px-3 py-3">
+      <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        <span className="text-[10px] font-bold uppercase tracking-wider">
+          {label}
+        </span>
+      </div>
+      <p className="text-xl font-bold tracking-tight text-foreground">{value}</p>
+    </div>
   );
 }
 
