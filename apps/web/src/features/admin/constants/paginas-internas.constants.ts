@@ -88,7 +88,7 @@ export const BLOG_DEFAULT = {
       title: "Hoy FincasYa da un paso gigante con inteligencia artificial",
       excerpt:
         "Seguimos construyendo el futuro de nuestra empresa con IA supervisada y software propio, para una mejor experiencia de clientes y propietarios.",
-      imageUrl: "/apple-touch-icon.png",
+      imageUrl: "/images/PHOTO-2026-07-23-11-02-24.jpg",
       date: "23 de julio, 2026",
       readTime: 3,
       active: true,

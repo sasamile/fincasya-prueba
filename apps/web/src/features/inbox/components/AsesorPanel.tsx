@@ -20,6 +20,7 @@ import {
   DoorOpen,
   FileText,
   Home,
+  ImagePlus,
   Link2,
   Loader2,
   Plus,
@@ -47,6 +48,7 @@ import {
 } from '@/features/admin/components/contracts/cop-money-input';
 import {
   DEFAULT_ADMIN_SETTINGS,
+  getBankAccountImages,
   getContractSettingsSnapshot,
   useContractSettingsStore,
   type BankAccount as StoreBankAccount,
@@ -255,6 +257,9 @@ type BankAccount = {
   ownerName?: string;
   ownerCedula?: string;
   brebKey?: boolean;
+  qrOnly?: boolean;
+  imageUrl?: string;
+  imageUrls?: string[];
 };
 
 /** Selector de finca con imagen + buscador (estilo página de contratos). */
@@ -420,6 +425,9 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         ownerName: a.ownerName,
         ownerCedula: a.ownerCedula,
         brebKey: a.brebKey,
+        qrOnly: a.qrOnly,
+        imageUrl: a.imageUrl,
+        imageUrls: a.imageUrls,
       });
     }
     for (const a of (settings?.bankAccounts ?? []) as BankAccount[]) {
@@ -489,6 +497,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const [showPreview, setShowPreview] = useState(false);
   const [deletingBankId, setDeletingBankId] = useState<string | null>(null);
   const [bankDialogOpen, setBankDialogOpen] = useState(false);
+  const [editingBank, setEditingBank] = useState<BankAccount | null>(null);
   const [savingBank, setSavingBank] = useState(false);
   const [firmanteDialogOpen, setFirmanteDialogOpen] = useState(false);
   const [editingFirmante, setEditingFirmante] = useState<InboxFirmante | null>(
@@ -595,6 +604,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         ownerName: data.ownerName,
         ownerCedula: data.ownerCedula,
         imageUrls: data.imageUrls ?? [],
+        imageUrl: data.imageUrl ?? data.imageUrls?.[0],
         qrOnly: data.qrOnly,
         brebKey: data.brebKey,
       };
@@ -625,10 +635,59 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
       const ownerKey = (data.ownerName || 'Sin titular').trim();
       setOpenOwners((prev) => new Set(prev).add(ownerKey));
       setBankDialogOpen(false);
+      setEditingBank(null);
       toast.success('Cuenta agregada');
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : 'No se pudo guardar la cuenta',
+      );
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
+  const handleUpdateBank = async (
+    id: string,
+    data: Omit<StoreBankAccount, 'id'>,
+  ) => {
+    if (savingBank) return;
+    setSavingBank(true);
+    try {
+      const updated: StoreBankAccount = {
+        id,
+        bankName: data.bankName,
+        accountType: data.accountType,
+        accountNumber: data.accountNumber,
+        ownerName: data.ownerName,
+        ownerCedula: data.ownerCedula,
+        imageUrls: data.imageUrls ?? [],
+        imageUrl: data.imageUrl ?? data.imageUrls?.[0],
+        qrOnly: data.qrOnly,
+        brebKey: data.brebKey,
+      };
+
+      const base =
+        settings ??
+        getContractSettingsSnapshot(useContractSettingsStore.getState());
+      const prevAccounts = (base.bankAccounts as StoreBankAccount[] | undefined) ?? [];
+      const nextAccounts = prevAccounts.map((a) =>
+        a.id === id ? { ...a, ...updated } : a,
+      );
+
+      await replaceSettings({
+        payload: {
+          ...base,
+          bankAccounts: nextAccounts,
+        },
+      });
+
+      useContractSettingsStore.getState().updateBankAccount(id, updated);
+      setBankDialogOpen(false);
+      setEditingBank(null);
+      toast.success('Cuenta actualizada');
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo actualizar la cuenta',
       );
     } finally {
       setSavingBank(false);
@@ -1356,10 +1415,18 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         title="Cuentas de pago"
         hint={`${selectedBankIds.length} seleccionada${selectedBankIds.length === 1 ? '' : 's'}`}
       >
+        <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
+          Marca las cuentas del contrato. En cada una puedes cargar una o más
+          fotos (flyer / QR): al enviar el contrato también se mandan por
+          WhatsApp junto al RNT.
+        </p>
         <div className="mb-3 flex justify-end">
           <button
             type="button"
-            onClick={() => setBankDialogOpen(true)}
+            onClick={() => {
+              setEditingBank(null);
+              setBankDialogOpen(true);
+            }}
             disabled={savingBank}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[11px] font-bold text-foreground hover:bg-muted disabled:opacity-60"
           >
@@ -1429,6 +1496,9 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                           .includes(String(acc.id));
                         const deleting = deletingBankId === acc.id;
                         const label = `${acc.bankName}${acc.accountNumber ? ` · ${acc.accountNumber}` : ''}`;
+                        const images = getBankAccountImages(
+                          acc as StoreBankAccount,
+                        );
                         return (
                           <div
                             key={acc.id}
@@ -1466,7 +1536,44 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                                 <p className="truncate text-[11px] text-muted-foreground">
                                   {acc.accountNumber}
                                 </p>
+                                <p
+                                  className={cn(
+                                    'mt-0.5 text-[10px] font-semibold',
+                                    images.length > 0
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : 'text-amber-600 dark:text-amber-400',
+                                  )}
+                                >
+                                  {images.length > 0
+                                    ? `${images.length} foto${images.length === 1 ? '' : 's'} de pago`
+                                    : 'Sin foto — edita y carga el flyer'}
+                                </p>
                               </div>
+                              {images[0] ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={images[0]}
+                                  alt=""
+                                  className="h-10 w-10 shrink-0 rounded-md border border-border object-cover"
+                                />
+                              ) : null}
+                            </button>
+                            <button
+                              type="button"
+                              title="Editar / cargar fotos"
+                              aria-label={`Editar ${label}`}
+                              disabled={savingBank}
+                              onClick={() => {
+                                setEditingBank(acc);
+                                setBankDialogOpen(true);
+                              }}
+                              className="shrink-0 rounded-lg p-2 text-muted-foreground hover:bg-muted disabled:opacity-50"
+                            >
+                              {images.length > 0 ? (
+                                <Pencil className="h-3.5 w-3.5" />
+                              ) : (
+                                <ImagePlus className="h-3.5 w-3.5 text-amber-600" />
+                              )}
                             </button>
                             <button
                               type="button"
@@ -1494,8 +1601,33 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         )}
         <BankAccountDialog
           open={bankDialogOpen}
-          onClose={() => setBankDialogOpen(false)}
-          onSave={(data) => void handleSaveBank(data)}
+          onClose={() => {
+            setBankDialogOpen(false);
+            setEditingBank(null);
+          }}
+          initial={
+            editingBank
+              ? ({
+                  id: editingBank.id,
+                  bankName: editingBank.bankName ?? '',
+                  accountType: editingBank.accountType ?? '',
+                  accountNumber: editingBank.accountNumber ?? '',
+                  ownerName: editingBank.ownerName ?? '',
+                  ownerCedula: editingBank.ownerCedula ?? '',
+                  imageUrl: editingBank.imageUrl,
+                  imageUrls: editingBank.imageUrls,
+                  qrOnly: editingBank.qrOnly,
+                  brebKey: editingBank.brebKey,
+                } satisfies StoreBankAccount)
+              : null
+          }
+          onSave={(data) => {
+            if (editingBank) {
+              void handleUpdateBank(editingBank.id, data);
+            } else {
+              void handleSaveBank(data);
+            }
+          }}
           contentClassName="bg-card text-foreground"
         />
       </Section>

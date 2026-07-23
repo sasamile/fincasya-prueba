@@ -18,7 +18,10 @@ import { justifySuperDocContract } from "@/features/admin/utils/superdoc-justify
 import '@harbour-enterprises/superdoc/style.css';
 import type { ConversationRow } from '@/features/inbox/types';
 import { buildInboxContractUpsertArgs } from '@/features/inbox/utils/persist-inbox-contract';
-import { resolveSelectedBankPayload } from '@/features/inbox/utils/selected-bank-accounts';
+import {
+  collectSelectedBankImageUrls,
+  resolveSelectedBankPayload,
+} from '@/features/inbox/utils/selected-bank-accounts';
 import { firmaUrlToDataUrl } from '@/features/inbox/utils/firma-to-data-url';
 import { toStoredCopLabel } from '@/features/admin/components/contracts/cop-money-input';
 import { carpetaDeContrato } from '@/lib/contract-folder';
@@ -79,6 +82,7 @@ export function ContractPreviewModal({
     accountNumber?: string;
     ownerName?: string;
     ownerCedula?: string;
+    imageUrls?: string[];
   }>;
   firmanteFields?: {
     adminName?: string;
@@ -92,6 +96,7 @@ export function ContractPreviewModal({
   onClose: () => void;
 }) {
   const sendDocument = useAction(api.advisorDocuments.sendDocumentToConversation);
+  const sendImage = useAction(api.advisorDocuments.sendImageToConversation);
   const upsertContract = useMutation(api.contracts.upsert);
   const registerDocument = useMutation(api.contractDocuments.registerDocument);
   // RNT de la finca: se manda junto al contrato (Adriana, 22-jul).
@@ -543,6 +548,38 @@ export function ContractPreviewModal({
       } else {
         toast.warning(
           'Esta finca no tiene RNT cargado: el contrato salió sin el RNT.',
+        );
+      }
+
+      // Fotos de las cuentas seleccionadas (flyer / QR), una o más.
+      const paymentImages = collectSelectedBankImageUrls(selectedBankAccounts);
+      if (paymentImages.length > 0) {
+        let sentOk = 0;
+        for (let i = 0; i < paymentImages.length; i++) {
+          const url = paymentImages[i]!;
+          try {
+            const imgRes = await sendImage({
+              conversationId: conversation.conversationId,
+              imageUrl: url,
+              filename: `medios-pago-${draft.contractCode || 'contrato'}-${i + 1}.jpg`,
+              caption:
+                i === 0
+                  ? 'Medios de pago FincasYa — datos de la cuenta'
+                  : undefined,
+            });
+            if (imgRes.ok) sentOk += 1;
+          } catch {
+            /* se avisa abajo si faltó alguna */
+          }
+        }
+        if (sentOk < paymentImages.length) {
+          toast.warning(
+            `El contrato salió, pero solo ${sentOk} de ${paymentImages.length} fotos de cuenta se enviaron.`,
+          );
+        }
+      } else {
+        toast.warning(
+          'El contrato salió sin fotos de cuenta. Edita las cuentas y carga el flyer / QR.',
         );
       }
 

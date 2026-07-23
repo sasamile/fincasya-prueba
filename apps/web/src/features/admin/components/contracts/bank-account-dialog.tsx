@@ -368,12 +368,14 @@ export function BankAccountDialog({
           {!form.brebKey ? (
           <div className="space-y-2">
             <Label className={labelClass}>
-              {form.qrOnly ? "Imagen del QR * " : "Imágenes QR / flyer "}(
-              {form.imageUrls.length})
+              {form.qrOnly
+                ? "Imagen del QR * "
+                : "Fotos de la cuenta (flyer / QR) "}
+              ({form.imageUrls.length})
             </Label>
             <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Puedes agregar varias imágenes por cuenta. Se guardan en la nube y
-              no tendrás que volver a subirlas.
+              Sube una o más imágenes (como el flyer de medios de pago). Al
+              enviar el contrato por WhatsApp se mandan junto al PDF y al RNT.
             </p>
             {form.imageUrls.length > 0 ? (
               <div className="grid grid-cols-2 gap-2">
@@ -416,11 +418,16 @@ export function BankAccountDialog({
               <input
                 type="file"
                 accept="image/*"
+                multiple
                 className="hidden"
                 disabled={uploading}
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  void handleImageAdd(file ?? null);
+                  const files = Array.from(e.target.files ?? []);
+                  void (async () => {
+                    for (const file of files) {
+                      await handleImageAdd(file);
+                    }
+                  })();
                   e.target.value = "";
                 }}
               />

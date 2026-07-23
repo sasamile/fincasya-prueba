@@ -1,8 +1,3 @@
-/**
- * Resuelve las cuentas seleccionadas del sheet "Generar contrato" (inbox)
- * para el POST del .docx. Compara IDs como string y exige datos útiles.
- */
-
 export type InboxBankAccount = {
   id: string;
   bankName?: string;
@@ -10,6 +5,9 @@ export type InboxBankAccount = {
   accountNumber?: string;
   ownerName?: string;
   ownerCedula?: string;
+  /** Flyer / QR de esta cuenta (se envían con el contrato). */
+  imageUrls?: string[];
+  imageUrl?: string;
 };
 
 export type BankContractPayload = {
@@ -21,6 +19,7 @@ export type BankContractPayload = {
     accountNumber?: string;
     ownerName?: string;
     ownerCedula?: string;
+    imageUrls?: string[];
   }>;
   /** Campos sueltos (1ª cuenta) por si el cluster multi falla. */
   bankName?: string;
@@ -29,11 +28,19 @@ export type BankContractPayload = {
   idNumber?: string;
 };
 
+function accountImages(a: InboxBankAccount): string[] {
+  const fromArray = (a.imageUrls ?? []).filter(Boolean);
+  if (fromArray.length > 0) return fromArray;
+  if (a.imageUrl?.trim()) return [a.imageUrl.trim()];
+  return [];
+}
+
 function hasBankData(a: InboxBankAccount): boolean {
   return Boolean(
     String(a.accountNumber ?? "").trim() ||
       String(a.bankName ?? "").trim() ||
-      String(a.ownerName ?? "").trim(),
+      String(a.ownerName ?? "").trim() ||
+      accountImages(a).length > 0,
   );
 }
 
@@ -55,6 +62,7 @@ export function resolveSelectedBankPayload(
     accountNumber: a.accountNumber,
     ownerName: a.ownerName,
     ownerCedula: a.ownerCedula,
+    imageUrls: accountImages(a),
   }));
 
   const first = bankAccounts[0];
@@ -70,4 +78,21 @@ export function resolveSelectedBankPayload(
         }
       : {}),
   };
+}
+
+/** URLs únicas de fotos de las cuentas seleccionadas (orden estable). */
+export function collectSelectedBankImageUrls(
+  accounts: Array<{ imageUrls?: string[] }>,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const a of accounts) {
+    for (const url of a.imageUrls ?? []) {
+      const u = url.trim();
+      if (!u || seen.has(u)) continue;
+      seen.add(u);
+      out.push(u);
+    }
+  }
+  return out;
 }

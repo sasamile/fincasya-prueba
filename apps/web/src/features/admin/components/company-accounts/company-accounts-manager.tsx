@@ -313,6 +313,23 @@ export function CompanyAccountsManager() {
                                 ? account.accountNumber?.trim() || "Solo QR"
                                 : account.accountNumber}
                             </p>
+                            {images.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5 pt-1">
+                                {images.map((url) => (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    key={url}
+                                    src={url}
+                                    alt=""
+                                    className="h-12 w-12 rounded-lg border border-border object-cover"
+                                  />
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="pt-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                                Sin foto — edita y carga el flyer
+                              </p>
+                            )}
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
                             <button
