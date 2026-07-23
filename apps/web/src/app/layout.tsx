@@ -6,7 +6,7 @@ import { Toaster as SonnerToaster } from 'sonner';
 import { ConsentBootstrap } from '@/features/legal/components/consent-bootstrap';
 import { SiteVisitTracker } from '@/features/landing/components/SiteVisitTracker';
 import { MetaPixel, MetaPixelRouteTracker } from '@/lib/meta-pixel';
-import { buildOgMetadata } from '@/lib/og-image';
+import { buildOgMetadata, getPublicSiteOrigin } from '@/lib/og-image';
 import { Providers } from './providers';
 import './globals.css';
 
@@ -24,12 +24,7 @@ const homeOg = buildOgMetadata({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-      (process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : 'https://fincasya.com'),
-  ),
+  metadataBase: new URL(getPublicSiteOrigin()),
   ...homeOg,
   applicationName: 'FincasYa',
   manifest: '/site.webmanifest',
