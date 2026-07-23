@@ -91,8 +91,9 @@ export function DirectBookPage({
 
   const [checkIn] = useState(initialCheckIn);
   const [checkOut] = useState(initialCheckOut);
-  const [guests, setGuests] = useState(initialGuests);
-  const [pets, setPets] = useState(Math.max(0, initialPets));
+  /** Texto editable (evita que type=number vuelva a 1 al borrar). */
+  const [guestsText, setGuestsText] = useState(String(Math.max(1, initialGuests)));
+  const [petsText, setPetsText] = useState(String(Math.max(0, initialPets)));
   const [incluirServicio, setIncluirServicio] = useState(initialService);
   const [price, setPrice] = useState<StayPrice | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
@@ -130,6 +131,16 @@ export function DirectBookPage({
       return 0;
     }
   }, [checkIn, checkOut]);
+
+  const maxGuests = Math.max(1, finca?.capacity || 20);
+  const guests = Math.max(
+    1,
+    Math.min(maxGuests, Number.parseInt(guestsText, 10) || 1),
+  );
+  const pets = Math.max(
+    0,
+    Math.min(10, Number.parseInt(petsText, 10) || 0),
+  );
 
   const loggedIn = Boolean(session?.user);
   const sessionEmail = session?.user?.email?.trim().toLowerCase() ?? '';
@@ -713,18 +724,16 @@ export function DirectBookPage({
               <Label htmlFor="guests">Huéspedes</Label>
               <Input
                 id="guests"
-                type="number"
-                min={1}
-                max={Math.max(1, finca.capacity || 20)}
-                value={guests}
-                onChange={(e) =>
-                  setGuests(
-                    Math.min(
-                      Math.max(1, finca.capacity || 20),
-                      Math.max(1, Number(e.target.value) || 1),
-                    ),
-                  )
-                }
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="off"
+                value={guestsText}
+                onChange={(e) => {
+                  const next = e.target.value.replace(/\D/g, '');
+                  setGuestsText(next);
+                }}
+                onBlur={() => setGuestsText(String(guests))}
                 className="mt-1"
               />
             </div>
@@ -733,15 +742,16 @@ export function DirectBookPage({
                 <Label htmlFor="pets">Mascotas</Label>
                 <Input
                   id="pets"
-                  type="number"
-                  min={0}
-                  max={10}
-                  value={pets}
-                  onChange={(e) =>
-                    setPets(
-                      Math.max(0, Math.min(10, Number(e.target.value) || 0)),
-                    )
-                  }
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="off"
+                  value={petsText}
+                  onChange={(e) => {
+                    const next = e.target.value.replace(/\D/g, '');
+                    setPetsText(next);
+                  }}
+                  onBlur={() => setPetsText(String(pets))}
                   className="mt-1"
                 />
               </div>
