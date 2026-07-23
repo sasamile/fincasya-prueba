@@ -315,114 +315,239 @@ export function AdminDashboardPage() {
         </VisitStatsErrorBoundary>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
-        <div className="lg:col-span-2 bg-muted/30 border border-border rounded-2xl p-5 md:p-6 flex flex-col min-h-0">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-lg font-bold text-foreground">
-                Tendencia de ingresos
-              </h3>
-              <p className="text-xs text-muted-foreground font-medium mt-0.5">
-                Últimos 6 meses · reservas confirmadas
-              </p>
-            </div>
-            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
-              <TrendingUp className="w-4 h-4 text-primary" />
-            </div>
-          </div>
-
-          {hasRevenueTrend ? (
-            <div className="h-56 w-full">
-              <ResponsiveContainer width="100%" height={224}>
-                <BarChart
-                  data={revenueTrendData}
-                  margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    vertical={false}
-                    stroke="var(--border)"
-                  />
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      fill: 'var(--muted-foreground)',
-                    }}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    width={48}
-                    tick={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      fill: 'var(--muted-foreground)',
-                    }}
-                    tickFormatter={(val) =>
-                      val >= 1_000_000
-                        ? `$${(val / 1_000_000).toFixed(1)}M`
-                        : val >= 1000
-                          ? `$${(val / 1000).toFixed(0)}k`
-                          : `$${val}`
-                    }
-                  />
-                  <Tooltip
-                    formatter={(val: number) => formatCurrency(val)}
-                    labelFormatter={(label) => String(label)}
-                    contentStyle={{
-                      borderRadius: '12px',
-                      border: '1px solid var(--border)',
-                      backgroundColor: 'var(--background)',
-                    }}
-                    itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
-                  />
-                  <Bar
-                    dataKey="revenue"
-                    fill="var(--primary)"
-                    radius={[6, 6, 0, 0]}
-                    maxBarSize={40}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <div className="flex flex-1 flex-col gap-3 rounded-xl border border-dashed border-border bg-background/60 p-4">
-              <p className="text-sm text-muted-foreground">
-                Aún no hay ventas confirmadas en los últimos 6 meses. Mientras
-                tanto, el pulso operativo:
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <MiniStat
-                  label="IA activa"
-                  value={String(activeAiChats)}
-                  icon={MessageSquare}
-                />
-                <MiniStat
-                  label="En humano"
-                  value={String(executive?.humanChats ?? 0)}
-                  icon={Inbox}
-                />
-                <MiniStat
-                  label="Conversión"
-                  value={`${conversionRate.toFixed(1)}%`}
-                  icon={Percent}
-                />
-                <MiniStat
-                  label="Reservas mes"
-                  value={String(activeReservations)}
-                  icon={CalendarCheck2}
-                />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-muted/30 border border-border rounded-2xl p-5 md:p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-foreground">
+                  Tendencia de ingresos
+                </h3>
+                <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                  Últimos 6 meses · reservas confirmadas
+                </p>
+              </div>
+              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                <TrendingUp className="w-4 h-4 text-primary" />
               </div>
             </div>
-          )}
+
+            {hasRevenueTrend ? (
+              <div className="w-full" style={{ height: 220 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={revenueTrendData}
+                    margin={{ top: 4, right: 4, left: 0, bottom: 4 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      vertical={false}
+                      stroke="var(--border)"
+                    />
+                    <XAxis
+                      dataKey="name"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        fill: 'var(--muted-foreground)',
+                      }}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      width={48}
+                      tick={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        fill: 'var(--muted-foreground)',
+                      }}
+                      tickFormatter={(val) =>
+                        val >= 1_000_000
+                          ? `$${(val / 1_000_000).toFixed(1)}M`
+                          : val >= 1000
+                            ? `$${(val / 1000).toFixed(0)}k`
+                            : `$${val}`
+                      }
+                    />
+                    <Tooltip
+                      formatter={(val: number) => formatCurrency(val)}
+                      labelFormatter={(label) => String(label)}
+                      contentStyle={{
+                        borderRadius: '12px',
+                        border: '1px solid var(--border)',
+                        backgroundColor: 'var(--background)',
+                      }}
+                      itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
+                    />
+                    <Bar
+                      dataKey="revenue"
+                      fill="var(--primary)"
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={40}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-border bg-background/60 p-4">
+                <p className="text-sm text-muted-foreground">
+                  Aún no hay ventas confirmadas en los últimos 6 meses. Mientras
+                  tanto, el pulso operativo:
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <MiniStat
+                    label="IA activa"
+                    value={String(activeAiChats)}
+                    icon={MessageSquare}
+                  />
+                  <MiniStat
+                    label="En humano"
+                    value={String(executive?.humanChats ?? 0)}
+                    icon={Inbox}
+                  />
+                  <MiniStat
+                    label="Conversión"
+                    value={`${conversionRate.toFixed(1)}%`}
+                    icon={Percent}
+                  />
+                  <MiniStat
+                    label="Reservas mes"
+                    value={String(activeReservations)}
+                    icon={CalendarCheck2}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Rellena la columna izquierda: demanda + top fincas en fila */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-muted/30 border border-border rounded-2xl p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-base font-bold text-foreground">
+                  Demanda por temporada
+                </h3>
+                <ImageIcon className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="h-44 w-full">
+                {seasonData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={seasonData}
+                        innerRadius={48}
+                        outerRadius={68}
+                        paddingAngle={6}
+                        cornerRadius={4}
+                        dataKey="value"
+                      >
+                        {seasonData.map((entry, index) => (
+                          <Cell
+                            key={entry.name}
+                            fill={COLORS[index % COLORS.length]}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: '12px',
+                          border: '1px solid var(--border)',
+                          backgroundColor: 'var(--background)',
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    Sin reservas este mes
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 space-y-1.5">
+                {seasonData.map((item, i) => (
+                  <div
+                    key={item.name}
+                    className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: COLORS[i % COLORS.length] }}
+                      />
+                      <span className="text-muted-foreground">{item.name}</span>
+                    </div>
+                    <span>{item.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-muted/30 border border-border rounded-2xl p-5 flex flex-col">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-base font-bold text-foreground">
+                  Top ingresos
+                </h3>
+                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-emerald-600">
+                  Top 5
+                </span>
+              </div>
+              <div className="min-h-44 flex-1 w-full">
+                {topPropertiesData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart
+                      data={topPropertiesData}
+                      layout="vertical"
+                      margin={{ left: 0, right: 12, top: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        horizontal
+                        vertical={false}
+                        stroke="var(--border)"
+                      />
+                      <XAxis type="number" hide />
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        axisLine={false}
+                        tickLine={false}
+                        width={88}
+                        tick={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          fill: 'var(--foreground)',
+                        }}
+                      />
+                      <Tooltip
+                        formatter={(val) => formatCurrency(val as number)}
+                        contentStyle={{
+                          borderRadius: '12px',
+                          border: '1px solid var(--border)',
+                          backgroundColor: 'var(--background)',
+                        }}
+                      />
+                      <Bar
+                        dataKey="revenue"
+                        fill="var(--primary)"
+                        radius={[0, 6, 6, 0]}
+                        barSize={14}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-44 items-center justify-center text-sm text-muted-foreground">
+                    Sin ingresos registrados
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-muted/30 border border-border rounded-2xl p-5 md:p-6 shadow-sm flex flex-col h-[380px] lg:h-auto lg:min-h-[280px]">
-          <div className="mb-4 flex items-center justify-between">
+        <div className="bg-muted/30 border border-border rounded-2xl p-5 md:p-6 flex flex-col max-h-[560px] lg:sticky lg:top-4">
+          <div className="mb-4 flex items-center justify-between shrink-0">
             <div>
               <h3 className="text-base md:text-lg font-bold text-foreground">
                 Actividad reciente
@@ -488,132 +613,6 @@ export function AdminDashboardPage() {
                 <p className="text-xs font-bold uppercase tracking-widest">
                   Sin actividad reciente
                 </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-background border border-border rounded-[32px] p-6 md:p-8 shadow-sm hover:shadow-xl hover:shadow-primary/5 transition-all duration-500">
-          <div className="flex items-center justify-between mb-8">
-            <h3 className="text-lg font-bold text-foreground">
-              Demanda por Temporada
-            </h3>
-            <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
-              <ImageIcon className="w-5 h-5 text-muted-foreground" />
-            </div>
-          </div>
-          <div className="h-[240px] w-full">
-            {seasonData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={seasonData}
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={8}
-                    cornerRadius={4}
-                    dataKey="value"
-                  >
-                    {seasonData.map((entry, index) => (
-                      <Cell
-                        key={entry.name}
-                        fill={COLORS[index % COLORS.length]}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: '16px',
-                      border: 'none',
-                      backgroundColor: 'var(--background)',
-                      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Sin reservas este mes
-              </div>
-            )}
-          </div>
-          <div className="mt-4 space-y-2 text-left">
-            {seasonData.map((item, i) => (
-              <div
-                key={item.name}
-                className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest"
-              >
-                <div className="flex items-center gap-2 text-left">
-                  <div
-                    className="w-2.5 h-2.5 rounded-full"
-                    style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                  />
-                  <span className="text-muted-foreground">{item.name}</span>
-                </div>
-                <span>{item.value} reservas</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 bg-background border border-border rounded-[32px] p-5 md:p-8 shadow-sm flex flex-col h-[500px]">
-          <div className="flex items-center justify-between mb-6 md:mb-8">
-            <h3 className="text-base md:text-lg font-bold text-foreground">
-              Fincas con Mayores Ingresos
-            </h3>
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold uppercase tracking-widest border border-emerald-500/20">
-              Top 5
-            </div>
-          </div>
-          <div className="flex-1 w-full min-h-0">
-            {topPropertiesData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={topPropertiesData}
-                  layout="vertical"
-                  margin={{ left: -10, right: 30, top: 10, bottom: 10 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    horizontal
-                    vertical={false}
-                    stroke="var(--border)"
-                  />
-                  <XAxis type="number" hide />
-                  <YAxis
-                    dataKey="name"
-                    type="category"
-                    axisLine={false}
-                    tickLine={false}
-                    width={100}
-                    tick={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      fill: 'var(--foreground)',
-                    }}
-                  />
-                  <Tooltip
-                    formatter={(val) => formatCurrency(val as number)}
-                    contentStyle={{
-                      borderRadius: '16px',
-                      border: 'none',
-                      backgroundColor: 'var(--background)',
-                      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                    }}
-                  />
-                  <Bar
-                    dataKey="revenue"
-                    fill="var(--primary)"
-                    radius={[0, 8, 8, 0]}
-                    barSize={20}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Sin ingresos registrados
               </div>
             )}
           </div>
