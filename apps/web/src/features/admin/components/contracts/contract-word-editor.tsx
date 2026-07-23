@@ -12,7 +12,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { Download, FileWarning, Loader2, RefreshCw } from "lucide-react";
+import {
+  Download,
+  FileWarning,
+  Loader2,
+  Minus,
+  Plus,
+  RefreshCw,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -20,11 +27,18 @@ import {
   loadSuperDocModules,
   preloadSuperDoc,
 } from "@/features/admin/utils/preload-superdoc";
+import { justifySuperDocContract } from "@/features/admin/utils/superdoc-justify-contract";
 import "@harbour-enterprises/superdoc/style.css";
 
 // SuperDoc se carga dinámico (solo cliente); su API no está tipada aquí.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SuperDocInstance = any;
+
+const ZOOM_MIN = 50;
+const ZOOM_MAX = 150;
+const ZOOM_STEP = 10;
+/** Ancho aproximado de página Letter en CSS px (96dpi). */
+const PAGE_WIDTH_CSS_PX = 816;
 
 export type ContractWordEditorHandle = {
   isReady: () => boolean;
@@ -47,6 +61,11 @@ type Props = {
   /** Altura del área del documento. */
   heightClassName?: string;
   onReadyChange?: (ready: boolean) => void;
+  /**
+   * Al abrir, ajusta el zoom para que la página quepa en el ancho del panel
+   * (el selector nativo de SuperDoc suele quedar cortado por overflow).
+   */
+  fitZoomOnReady?: boolean;
 };
 
 type LoadPhase = "idle" | "docx" | "editor" | "ready" | "error";
@@ -61,6 +80,7 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
       className,
       heightClassName = "h-[min(62vh,720px)]",
       onReadyChange,
+      fitZoomOnReady = false,
     },
     ref,
   ) {
@@ -69,6 +89,7 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
     const toolbarId = `admin-superdoc-toolbar-${uid}`;
 
     const superdocRef = useRef<SuperDocInstance | null>(null);
+    const viewportRef = useRef<HTMLDivElement | null>(null);
     const payloadRef = useRef(payload);
     payloadRef.current = payload;
     const [ready, setReady] = useState(false);
@@ -77,8 +98,43 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
     const [baseName, setBaseName] = useState("contrato");
     const [busy, setBusy] = useState<null | "pdf" | "docx">(null);
     const [manualReload, setManualReload] = useState(0);
+    const [zoomPct, setZoomPct] = useState(100);
 
     const loading = phase === "docx" || phase === "editor";
+
+    function applyZoom(pct: number) {
+      const next = Math.max(
+        ZOOM_MIN,
+        Math.min(ZOOM_MAX, Math.round(pct / ZOOM_STEP) * ZOOM_STEP),
+      );
+      const sd = superdocRef.current;
+      if (!sd || typeof sd.setZoom !== "function") {
+        setZoomPct(next);
+        return;
+      }
+      try {
+        sd.setZoom(next);
+        setZoomPct(next);
+      } catch {
+        try {
+          // Algunas builds aceptan factor 0–1.
+          sd.setZoom(next / 100);
+          setZoomPct(next);
+        } catch {
+          toast.error("No se pudo cambiar el zoom.");
+        }
+      }
+    }
+
+    function fitZoomToViewport() {
+      const width = viewportRef.current?.clientWidth ?? 0;
+      if (width < 80) {
+        applyZoom(75);
+        return;
+      }
+      const fit = Math.floor(((width - 56) / PAGE_WIDTH_CSS_PX) * 100);
+      applyZoom(Math.max(ZOOM_MIN, Math.min(100, fit)));
+    }
 
     useImperativeHandle(
       ref,
@@ -215,11 +271,33 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
             toolbar: `#${toolbarId}`,
             documentMode: "editing",
             fonts,
+            zoom: { initial: fitZoomOnReady ? 75 : 100 },
             documents: [{ id: "contract", type: "docx", data: file }],
-            onReady: () => {
-              if (!cancelled) {
-                setReady(true);
-                setPhase("ready");
+            onReady: (sd) => {
+              if (cancelled) return;
+              const live = sd ?? instance;
+              justifySuperDocContract(live);
+              superdocRef.current = live;
+              setReady(true);
+              setPhase("ready");
+              if (fitZoomOnReady) {
+                requestAnimationFrame(() => {
+                  if (cancelled) return;
+                  fitZoomToViewport();
+                });
+              } else {
+                try {
+                  // getZoom no está en el tipo del payload de SuperDoc; se
+                  // consulta de forma defensiva.
+                  const getZoom = (live as { getZoom?: () => number }).getZoom;
+                  const z =
+                    typeof getZoom === "function" ? Number(getZoom()) : 100;
+                  if (Number.isFinite(z) && z > 0) {
+                    setZoomPct(z > 1 ? Math.round(z) : Math.round(z * 100));
+                  }
+                } catch {
+                  setZoomPct(100);
+                }
               }
             },
           });
@@ -245,7 +323,15 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
         superdocRef.current = null;
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [active, propertyId, documentKey, manualReload, editorId, toolbarId]);
+    }, [
+      active,
+      propertyId,
+      documentKey,
+      manualReload,
+      editorId,
+      toolbarId,
+      fitZoomOnReady,
+    ]);
 
     async function handleDownloadDocx() {
       if (!ready || !superdocRef.current) return;
@@ -357,6 +443,39 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
+            <div className="mr-1 flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md"
+                title="Alejar"
+                disabled={!ready || busy !== null || zoomPct <= ZOOM_MIN}
+                onClick={() => applyZoom(zoomPct - ZOOM_STEP)}
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </Button>
+              <button
+                type="button"
+                className="min-w-12 px-1 text-center text-[11px] font-bold tabular-nums text-foreground hover:underline disabled:opacity-50"
+                title="Ajustar al ancho"
+                disabled={!ready || busy !== null}
+                onClick={() => fitZoomToViewport()}
+              >
+                {zoomPct}%
+              </button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md"
+                title="Acercar"
+                disabled={!ready || busy !== null || zoomPct >= ZOOM_MAX}
+                onClick={() => applyZoom(zoomPct + ZOOM_STEP)}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
             <Button
               type="button"
               variant="outline"
@@ -407,9 +526,13 @@ export const ContractWordEditor = forwardRef<ContractWordEditorHandle, Props>(
         />
 
         <div
-          className={cn("relative overflow-auto bg-muted/40", heightClassName)}
+          ref={viewportRef}
+          className={cn("relative min-h-0 overflow-auto bg-muted/40", heightClassName)}
         >
-          <div id={editorId} className="min-h-full" />
+          <div
+            id={editorId}
+            className="superdoc-contract-surface min-h-full"
+          />
 
           {loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/70">

@@ -659,7 +659,9 @@ export const getOwnerView = query({
           showInternalNotes: false,
         }
       : {
-          showGuestList: shareRaw.showGuestList !== false,
+          // El listado de invitados al propietario nace APAGADO (Adriana,
+          // 22-jul): solo se comparte cuando el asesor lo habilita a propósito.
+          showGuestList: shareRaw.showGuestList === true,
           showPlates: shareRaw.showPlates !== false,
           showEmpleada: shareRaw.showEmpleada !== false,
           showInternalNotes: shareRaw.showInternalNotes === true,
@@ -862,6 +864,8 @@ export const create = mutation({
     nombreCompleto: v.string(),
     cedula: v.string(),
     celular: v.string(),
+    /** Segundo número de contacto. Dato interno: NO sale en el contrato. */
+    celularAdicional: v.optional(v.string()),
     correo: v.string(),
     fechaEntrada: v.number(),
     fechaSalida: v.number(),
@@ -993,6 +997,7 @@ export const create = mutation({
       nombreCompleto: args.nombreCompleto,
       cedula: args.cedula,
       celular: args.celular,
+      celularAdicional: args.celularAdicional?.trim() || undefined,
       correo: args.correo,
       fechaEntrada: args.fechaEntrada,
       fechaSalida: args.fechaCheckOut || args.fechaSalida,
@@ -1060,6 +1065,138 @@ export const create = mutation({
     );
 
     return bookingId;
+  },
+});
+
+/**
+ * Crea la RESERVA en el calendario a partir de un contrato, al enviar la
+ * confirmación (Adriana, 22-jul).
+ *
+ * Antes la confirmación salía por WhatsApp pero la reserva nunca aparecía en
+ * /admin/reservations: el cliente creía tener cupo y el calendario seguía
+ * libre. Ahora al confirmar se bloquea la finca esas fechas.
+ *
+ * Idempotente por `reference` (el CR): reenviar la confirmación NO duplica la
+ * reserva. Devuelve el código para armar el link de check-in.
+ */
+export const createFromConfirmation = mutation({
+  args: {
+    contractNumber: v.string(),
+    montoAbonado: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ ok: boolean; reference?: string; error?: string }> => {
+    const contractNumber = args.contractNumber.trim();
+    if (!contractNumber) return { ok: false, error: 'Falta el código.' };
+
+    // Ya existe la reserva → no se duplica.
+    const yaExiste = await ctx.db
+      .query('bookings')
+      .withIndex('by_reference', (q) => q.eq('reference', contractNumber))
+      .first();
+    if (yaExiste) return { ok: true, reference: contractNumber };
+
+    const contrato = await ctx.db
+      .query('contracts')
+      .withIndex('by_contract_number', (q) =>
+        q.eq('contractNumber', contractNumber),
+      )
+      .first();
+    if (!contrato) return { ok: false, error: 'No se encontró el contrato.' };
+    if (!contrato.propertyId) {
+      return { ok: false, error: 'El contrato no tiene finca asociada.' };
+    }
+
+    let draft: Record<string, unknown> = {};
+    if (contrato.draftJson) {
+      try {
+        const parsed = JSON.parse(contrato.draftJson);
+        if (parsed && typeof parsed === 'object') draft = parsed;
+      } catch {
+        /* borrador ilegible: se usan los defaults */
+      }
+    }
+    const num = (v: unknown): number => {
+      const n = Number(String(v ?? '').replace(/[^\d]/g, ''));
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+    const ymdToMs = (v?: string): number => {
+      const ms = Date.parse(`${(v ?? '').trim()}T12:00:00-05:00`);
+      return Number.isFinite(ms) ? ms : 0;
+    };
+
+    const entradaMs = ymdToMs(contrato.fechaEntrada);
+    const salidaMs = ymdToMs(contrato.fechaSalida);
+    if (!entradaMs || !salidaMs || salidaMs <= entradaMs) {
+      return { ok: false, error: 'Las fechas del contrato no son válidas.' };
+    }
+    const noches =
+      num(draft.nights) ||
+      Math.max(1, Math.round((salidaMs - entradaMs) / 86_400_000));
+
+    const total = contrato.valorTotal ?? 0;
+    const aseo = num(draft.cleaningFee);
+    const deposito = num(draft.refundableDeposit);
+    const alquiler = Math.max(total - aseo - deposito, 0);
+    const abono = args.montoAbonado ?? 0;
+
+    let bookingId: Id<'bookings'>;
+    try {
+      bookingId = (await ctx.runMutation(api.bookings.create, {
+        propertyId: contrato.propertyId,
+        nombreCompleto: contrato.clienteNombre ?? '',
+        cedula: contrato.clienteCedula ?? '',
+        celular: (contrato.clienteTelefono ?? '').replace(/[^\d]/g, ''),
+        correo: contrato.clienteEmail ?? '',
+        fechaEntrada: entradaMs,
+        fechaSalida: salidaMs,
+        numeroNoches: noches,
+        numeroPersonas: num(draft.guests) || 1,
+        subtotal: alquiler || total,
+        precioTotal: total,
+        temporada: 'ESTANDAR',
+        depositoAseo: aseo || undefined,
+        depositoGarantia: deposito || undefined,
+        city: contrato.clienteCiudad,
+        address: contrato.clienteDireccion,
+        horaEntrada:
+          typeof draft.checkInTime === 'string' ? draft.checkInTime : undefined,
+        horaSalida:
+          typeof draft.checkOutTime === 'string'
+            ? draft.checkOutTime
+            : undefined,
+        reference: contractNumber,
+        calendarLabel: contractNumber,
+        // Con abono es reserva CONFIRMADA; sin abono, pendiente de pago.
+        status: abono > 0 ? 'CONFIRMED' : 'PENDING_PAYMENT',
+        observaciones: `Contrato: ${contractNumber}`,
+      })) as Id<'bookings'>;
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'No se pudo crear la reserva.';
+      return { ok: false, error: msg };
+    }
+
+    // REGISTRA EL ABONO como pago (Adriana, 22-jul): la reserva se creaba pero
+    // sin el pago, así que en el calendario salía "$0 abonado" aunque en la
+    // confirmación se hubiera puesto el abono. Lo abonado sale de `payments`.
+    if (abono > 0) {
+      const now = Date.now();
+      await ctx.db.insert('payments', {
+        bookingId,
+        type: 'ABONO_50',
+        amount: abono,
+        currency: 'COP',
+        status: 'PAID',
+        reference: contractNumber,
+        notes: `Abono registrado desde la confirmación de reserva ${contractNumber}`,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    return { ok: true, reference: contractNumber };
   },
 });
 

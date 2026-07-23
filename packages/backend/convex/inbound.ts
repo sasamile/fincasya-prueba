@@ -702,6 +702,27 @@ export const ingestInboundMessage = internalMutation({
       );
     }
 
+    // CONTRATO FIRMADO DE VUELTA: si a este chat se le envió un contrato y el
+    // cliente responde con un documento o una foto, la IA revisa si es ese
+    // contrato firmado y lo archiva en su carpeta. Va FUERA del bloque del bot
+    // a propósito: el firmado casi siempre llega cuando ya atiende un humano.
+    if (
+      (args.msgType === 'document' || args.msgType === 'image') &&
+      args.mediaUrl
+    ) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.contractDocuments.checkIncomingSignedContract,
+        {
+          conversationId: conversation._id,
+          fileUrl: args.mediaUrl,
+          filename:
+            args.mediaUrl.split('/').pop()?.split('?')[0] || 'documento',
+          messageId,
+        },
+      );
+    }
+
     if (conversation.status === 'ai') {
       const isManual = conversation.aiManualOverride === true;
       if (!isManual) {

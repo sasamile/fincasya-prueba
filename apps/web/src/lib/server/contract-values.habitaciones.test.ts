@@ -55,8 +55,8 @@ describe("habitaciones en contrato", () => {
     expect(text).toBe("02 HABITACIONES\nPISCINA\n02 BAÑO");
   });
 
-  test("prioriza featuredIcons y limita a 22 amenidades (default)", () => {
-    const features = Array.from({ length: 40 }, (_, i) => ({
+  test("prioriza featuredIcons y limita a 24 amenidades (default)", () => {
+    const features = Array.from({ length: 50 }, (_, i) => ({
       name: `Amenidad ${i + 1}`,
       quantity: 1,
       iconId: `icon-${i + 1}`,
@@ -67,7 +67,7 @@ describe("habitaciones en contrato", () => {
     });
     const lines = text.split("\n");
     expect(lines[0]).toBe("04 HABITACIONES");
-    expect(lines).toHaveLength(23); // 1 habitaciones + 22 amenidades
+    expect(lines).toHaveLength(25); // 1 habitaciones + 24 amenidades
     expect(lines[1]).toBe("AMENIDAD 40");
     expect(lines[2]).toBe("AMENIDAD 39");
     expect(lines[3]).toBe("AMENIDAD 1");
@@ -91,6 +91,23 @@ describe("habitaciones en contrato", () => {
     expect(lines).toContain("COCINA EQUIPADA");
     expect(lines.some((l) => /cama/i.test(l))).toBe(false);
     expect(lines.some((l) => /nido/i.test(l))).toBe(false);
+  });
+
+  test("fusiona TELEVISIÓN y TELEVISOR en una sola línea", () => {
+    const text = formatFincaFeaturesPlain(
+      [
+        { name: "Piscina", quantity: 1 },
+        { name: "Televisión", quantity: 1 },
+        { name: "Televisor", quantity: 1 },
+        { name: "Jacuzzi", quantity: 1 },
+      ],
+      { habitaciones: 4, maxAmenities: 20 },
+    );
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("04 HABITACIONES");
+    expect(lines.filter((l) => /TELEVI/i.test(l))).toEqual(["TELEVISIÓN"]);
+    expect(lines).toContain("PISCINA");
+    expect(lines).toContain("JACUZZI");
   });
 
   test("override manual de habitaciones gana sobre zonas", () => {

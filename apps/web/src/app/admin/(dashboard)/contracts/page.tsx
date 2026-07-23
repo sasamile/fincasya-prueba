@@ -25,6 +25,8 @@ import {
   AlertCircle,
   Inbox,
   Trash2,
+  PenLine,
+  FileType,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -34,6 +36,11 @@ import {
   ContractPreviewModal,
   type ContractPreviewTarget,
 } from "@/features/admin/components/contracts/contract-preview-modal";
+import { ContractWordEditModal } from "@/features/admin/components/contracts/contract-word-edit-modal";
+import {
+  downloadBlob,
+  fetchContractDocxBlob,
+} from "@/features/admin/utils/rebuild-contract-docx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -70,6 +77,10 @@ type ContractItem = {
   propertyLocation?: string;
   clienteNombre?: string;
   clienteCedula?: string;
+  clienteEmail?: string;
+  clienteTelefono?: string;
+  clienteCiudad?: string;
+  clienteDireccion?: string;
   valorTotal?: number;
   fechaEntrada?: string;
   fechaSalida?: string;
@@ -157,6 +168,9 @@ export default function ContractsManagerPage() {
   const [detailContract, setDetailContract] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] =
     useState<ContractPreviewTarget | null>(null);
+  const [wordEditContract, setWordEditContract] =
+    useState<ContractItem | null>(null);
+  const [downloadingWord, setDownloadingWord] = useState<string | null>(null);
 
   const { data: propertiesData } = useProperties({ limit: 500, all: true });
   const properties =
@@ -185,6 +199,21 @@ export default function ContractsManagerPage() {
   const removeContract = useConvexMutation(api.contracts.remove);
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [deletingContract, setDeletingContract] = useState<string | null>(null);
+
+  const handleDownloadWord = async (c: ContractItem) => {
+    setDownloadingWord(c.contractNumber);
+    try {
+      const { blob, filename } = await fetchContractDocxBlob(c);
+      downloadBlob(blob, filename);
+      toast.success("Word descargado.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo descargar el Word.",
+      );
+    } finally {
+      setDownloadingWord(null);
+    }
+  };
 
   const handleDeleteContract = async (contractNumber: string) => {
     const label = contractNumber.trim() || "este contrato";
@@ -608,11 +637,39 @@ export default function ContractsManagerPage() {
                               download={contractFile.filename || undefined}
                               target="_blank"
                               rel="noopener noreferrer"
-                              title="Descargar contrato"
+                              title="Descargar PDF"
                             >
                               <Download className="w-4 h-4" />
                             </a>
                           </Button>
+                        ) : null}
+                        {c.estado !== "borrador" &&
+                        (c.propertyId || c.draftJson) ? (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-lg"
+                              title="Descargar Word"
+                              disabled={downloadingWord === c.contractNumber}
+                              onClick={() => void handleDownloadWord(c)}
+                            >
+                              {downloadingWord === c.contractNumber ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <FileType className="w-4 h-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-lg"
+                              title="Editar en Word"
+                              onClick={() => setWordEditContract(c)}
+                            >
+                              <PenLine className="w-4 h-4" />
+                            </Button>
+                          </>
                         ) : null}
                         {c.estado !== "borrador" && canPreview ? (
                           <Button
@@ -670,6 +727,12 @@ export default function ContractsManagerPage() {
         target={previewTarget}
         open={!!previewTarget}
         onClose={() => setPreviewTarget(null)}
+      />
+
+      <ContractWordEditModal
+        contract={wordEditContract}
+        open={!!wordEditContract}
+        onClose={() => setWordEditContract(null)}
       />
     </div>
   );

@@ -18,6 +18,7 @@ import {
   type MovimientoRow,
   type TerceroRow,
 } from "@/lib/xlsx-export";
+import { ReportesGastosCaja } from "@/features/admin/components/reportes/reportes-gastos-caja";
 
 function money(v?: number | null) {
   if (!v || v <= 0) return "—";
@@ -94,8 +95,9 @@ export default function ReportesPage() {
           Reportes
         </h1>
         <p className="text-sm text-muted-foreground mt-1 ml-11">
-          Descarga en Excel el libro de movimientos (ingresos/egresos) y los
-          clientes para importar a Siigo o cualquier software contable.
+          Descarga en Excel el libro de movimientos (ingresos/egresos), registra
+          gastos y maneja la caja menor para importar a Siigo o cualquier
+          software contable.
         </p>
       </div>
 
@@ -137,6 +139,8 @@ export default function ReportesPage() {
         </div>
       </div>
 
+      <ReportesGastosCaja start={start} end={end} />
+
       {/* Movimientos */}
       <div className="rounded-2xl border border-border bg-card shadow-sm">
         <div className="flex items-center justify-between gap-3 p-4 border-b border-border">
@@ -159,7 +163,7 @@ export default function ReportesPage() {
               No hay movimientos registrados en este mes.
             </div>
           ) : (
-            <table className="w-full min-w-[820px] text-left text-sm">
+            <table className="w-full min-w-205 text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                   <th className="px-3 py-2.5">Fecha</th>

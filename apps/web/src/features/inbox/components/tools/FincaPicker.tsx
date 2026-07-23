@@ -3,6 +3,7 @@
 /** Selector de finca con imagen + buscador (reutilizable en las herramientas). */
 import { useState } from 'react';
 import { ChevronDown, Home, Search } from 'lucide-react';
+import { propertyMatchesSearchQuery } from '@/lib/property/property-search';
 import { cn } from '@/lib/utils';
 
 export type FincaOption = {
@@ -32,15 +33,12 @@ export function FincaPicker({
   const [query, setQuery] = useState('');
   const selected = fincas?.find((f) => f._id === value) ?? null;
 
-  const list = (fincas ?? []).filter((f) => {
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      f.title.toLowerCase().includes(q) ||
-      (f.code ?? '').toLowerCase().includes(q) ||
-      (f.location ?? '').toLowerCase().includes(q)
-    );
-  });
+  const list = (fincas ?? []).filter((f) =>
+    propertyMatchesSearchQuery(
+      { title: f.title, code: f.code, location: f.location },
+      query,
+    ),
+  );
 
   return (
     <div className="relative">

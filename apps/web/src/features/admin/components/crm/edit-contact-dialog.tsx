@@ -26,6 +26,7 @@ export type EditableContact = {
   cedula?: string;
   city?: string;
   address?: string;
+  phoneAlt?: string;
   fechaNacimiento?: string;
   crmType?: "lead" | "client";
 };
@@ -48,6 +49,7 @@ export function EditContactDialog({
   const [email, setEmail] = useState("");
   const [city, setCity] = useState("");
   const [address, setAddress] = useState("");
+  const [phoneAlt, setPhoneAlt] = useState("");
   const [fechaNacimiento, setFechaNacimiento] = useState("");
   const [crmType, setCrmType] = useState<"lead" | "client">("lead");
 
@@ -58,6 +60,7 @@ export function EditContactDialog({
     setEmail(contact.email?.trim() ?? "");
     setCity(contact.city?.trim() ?? "");
     setAddress(contact.address?.trim() ?? "");
+    setPhoneAlt(contact.phoneAlt?.trim() ?? "");
     setFechaNacimiento(contact.fechaNacimiento?.trim() ?? "");
     setCrmType(contact.crmType === "client" ? "client" : "lead");
   }, [open, contact]);
@@ -71,6 +74,7 @@ export function EditContactDialog({
         email: email.trim() || undefined,
         city: city.trim() || undefined,
         address: address.trim() || undefined,
+        phoneAlt: phoneAlt.trim() || undefined,
         fechaNacimiento: fechaNacimiento.trim() || undefined,
         crmType,
       });
@@ -160,6 +164,16 @@ export function EditContactDialog({
                 id="edit-contact-address"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-contact-phone-alt">Número adicional</Label>
+              <Input
+                id="edit-contact-phone-alt"
+                value={phoneAlt}
+                onChange={(e) => setPhoneAlt(e.target.value)}
+                placeholder="Otro celular de contacto"
               />
             </div>
 

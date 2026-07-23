@@ -8,8 +8,39 @@ import PizZip from "pizzip";
  * las llaves entre varios w:r/w:t. No usa docxtemplater; motor propio de regex.
  */
 
+import { justifyWordDocumentParagraphs } from "./word-justify";
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * En el bloque de firma del cliente solo el nombre va en negrita.
+ * Cédula, correo, celular y dirección quedan en peso normal.
+ * Solo toca párrafos cortos (firma), no el párrafo introductorio largo.
+ */
+function stripBoldFromClientDetailRuns(
+  xml: string,
+  details: string[],
+): string {
+  const needles = details
+    .map((d) => String(d ?? "").trim())
+    .filter((d) => d.length >= 3)
+    .map(escapeWordPlainText);
+  if (needles.length === 0) return xml;
+
+  return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) => {
+    const plain = para.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    // Intro / cláusulas largas: no tocar (ahí la cédula sí va en negrita).
+    if (plain.length > 100) return para;
+    const hit = needles.some((n) => n && plain.includes(n));
+    if (!hit) return para;
+    return para
+      .replace(/<w:b\s*\/>/g, "")
+      .replace(/<w:b\s+[^/]*\/>/g, "")
+      .replace(/<w:bCs\s*\/>/g, "")
+      .replace(/<w:bCs\s+[^/]*\/>/g, "");
+  });
 }
 
 /** `{{` … `}}` cuyo interior, sin XML, coincide exactamente con key. */
@@ -63,7 +94,7 @@ function escapeWordPlainText(rawVal: string): string {
 function buildWordLeftAlignedParagraphs(
   lines: string[],
   bold = false,
-  paragraphPr = '<w:pPr><w:jc w:val="left"/></w:pPr>',
+  paragraphPr = '<w:pPr><w:jc w:val="left"/><w:ind w:left="550"/></w:pPr>',
 ): string {
   const rPr = bold ? "<w:rPr><w:b/><w:bCs/></w:rPr>" : "";
   return lines
@@ -171,16 +202,16 @@ function buildWordBankAccountsClusterXml(
       if (i === 0) {
         xml += buildWordTemplateRun(label, true);
       } else {
-        xml += buildWordTemplateRun(` o ${label}`, false);
+        xml += buildWordTemplateRun(` o ${label}`, true);
       }
     });
     if (firstHolder) {
       xml += buildWordTemplateRun(" a nombre de ", false);
-      xml += buildWordTemplateRun(firstHolder, false);
+      xml += buildWordTemplateRun(firstHolder, true);
     }
     if (firstCedula) {
       xml += buildWordTemplateRun(" con la cédula N° ", false);
-      xml += buildWordTemplateRun(firstCedula, false);
+      xml += buildWordTemplateRun(firstCedula, true);
     }
     return xml;
   }
@@ -190,14 +221,14 @@ function buildWordBankAccountsClusterXml(
     const holder = holderOf(acc);
     const cedula = cedulaOf(acc);
     const prefix = i === 0 ? "" : " o ";
-    xml += buildWordTemplateRun(`${prefix}${label}`, i === 0);
+    xml += buildWordTemplateRun(`${prefix}${label}`, true);
     if (holder) {
       xml += buildWordTemplateRun(" a nombre de ", false);
-      xml += buildWordTemplateRun(holder, false);
+      xml += buildWordTemplateRun(holder, true);
     }
     if (cedula) {
       xml += buildWordTemplateRun(" con la cédula N° ", false);
-      xml += buildWordTemplateRun(cedula, false);
+      xml += buildWordTemplateRun(cedula, true);
     }
   });
   return xml;
@@ -213,7 +244,7 @@ function buildWordBankAccountsFromPlain(plain: string): string {
   if (lines.length === 1) return buildWordTemplateRun(lines[0], true);
   let xml = buildWordTemplateRun(lines[0], true);
   for (let i = 1; i < lines.length; i++) {
-    xml += buildWordTemplateRun(` o ${lines[i]}`, false);
+    xml += buildWordTemplateRun(` o ${lines[i]}`, true);
   }
   return xml;
 }
@@ -268,11 +299,20 @@ function replaceWordListPlaceholderWithLeftAlign(
 
   const paraXml = xml.slice(para.start, para.end);
   const pPrMatch = paraXml.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
-  const paragraphPr = pPrMatch?.[0] ?? '<w:pPr><w:ind w:left="550"/></w:pPr>';
+  const paragraphPr =
+    pPrMatch?.[0] ??
+    '<w:pPr><w:jc w:val="left"/><w:ind w:left="550"/></w:pPr>';
+  // Lista de amenidades: siempre a la izquierda (no justificado).
+  const leftPr = /<w:jc\b/.test(paragraphPr)
+    ? paragraphPr.replace(/w:val="(?:both|right|center)"/gi, 'w:val="left"')
+    : paragraphPr.replace(
+        /<w:pPr>/,
+        '<w:pPr><w:jc w:val="left"/>',
+      );
   const bold = /<w:b\s*\/>/.test(paraXml);
 
   const replacement = lines.length
-    ? buildWordLeftAlignedParagraphs(lines, bold, paragraphPr)
+    ? buildWordLeftAlignedParagraphs(lines, bold, leftPr)
     : "";
 
   return xml.slice(0, para.start) + replacement + xml.slice(para.end);
@@ -554,6 +594,71 @@ function patchEmptyBankAccountsParagraph(xml: string, bankText: string): string 
   );
 }
 
+function addBoldToWordRun(run: string): string {
+  if (/<w:b[\s/>]/.test(run)) return run;
+  if (/<w:rPr>/.test(run)) {
+    return run.replace(/<w:rPr>/, "<w:rPr><w:b/><w:bCs/>");
+  }
+  return run.replace(/<w:r([^>]*)>/, "<w:r$1><w:rPr><w:b/><w:bCs/></w:rPr>");
+}
+
+/**
+ * Negrita para frases como el propietario.
+ * Caso real de la plantilla: el nombre queda DENTRO de un w:r largo
+ * ("…del señor: PEDRO BARBOSA, ubicada…"), no en su propio run.
+ * Hay que partir el run en (antes | nombre en negrita | después).
+ */
+function ensureRunsBoldContaining(xml: string, texts: string[]): string {
+  const needles = texts
+    .map((t) => t.replace(/\s+/g, " ").trim())
+    .filter((t) => t.length >= 2);
+  if (needles.length === 0) return xml;
+
+  let out = xml;
+  for (const needle of needles) {
+    const flex = new RegExp(
+      needle
+        .split(/\s+/)
+        .map((w) => escapeRegExp(w))
+        .join("\\s+"),
+      "i",
+    );
+
+    out = out.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+      const tMatches = [...run.matchAll(/<w:t([^>]*)>([\s\S]*?)<\/w:t>/g)];
+      if (tMatches.length === 0) return run;
+      const fullText = tMatches.map((t) => t[2]).join("");
+      const m = flex.exec(fullText);
+      if (!m) return run;
+
+      const start = m.index;
+      const end = start + m[0].length;
+      const before = fullText.slice(0, start);
+      const mid = fullText.slice(start, end);
+      const after = fullText.slice(end);
+
+      // Run completo ≈ solo el nombre → negrita al run entero.
+      if (!before.trim() && !after.trim()) return addBoldToWordRun(run);
+
+      const rPrMatch = run.match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
+      const basePr = rPrMatch?.[0] ?? "";
+      const boldPr = basePr
+        ? /<w:b[\s/>]/.test(basePr)
+          ? basePr
+          : basePr.replace("<w:rPr>", "<w:rPr><w:b/><w:bCs/>")
+        : "<w:rPr><w:b/><w:bCs/></w:rPr>";
+
+      const mk = (text: string, pr: string) => {
+        if (!text) return "";
+        return `<w:r>${pr}<w:t xml:space="preserve">${escapeWordPlainText(text)}</w:t></w:r>`;
+      };
+
+      return mk(before, basePr) + mk(mid, boldPr) + mk(after, basePr);
+    });
+  }
+  return out;
+}
+
 /**
  * Rellena la plantilla .docx con los valores del contrato y devuelve el buffer
  * del documento Word resultante. Procesa document.xml, headers, footers y
@@ -608,6 +713,7 @@ export function fillContractDocx(
     );
 
     if (opts.featuresRaw?.trim()) {
+      // Solo en el placeholder de la plantilla (no reinyectar antes de firmas).
       processed = replaceWordListPlaceholderWithLeftAlign(
         processed,
         "caracteristicasDeFinca",
@@ -699,6 +805,26 @@ export function fillContractDocx(
       if (fallbackText) {
         processed = patchEmptyBankAccountsParagraph(processed, fallbackText);
       }
+    }
+
+    // Firma del cliente: solo el nombre en negrita (no cédula/correo/tel/dir).
+    processed = stripBoldFromClientDetailRuns(processed, [
+      values.clienteCedula,
+      values.clienteId,
+      values.clienteIdentificacion,
+      values.clientCorreo,
+      values.clienteCelular,
+      values.direccionCliente,
+    ]);
+
+    // Propietario de la finca: la plantilla no trae negrita en ese placeholder.
+    processed = ensureRunsBoldContaining(processed, [
+      values.nombrePropietario,
+    ]);
+
+    // Cuerpo justificado (amenidades quedan a la izquierda).
+    if (name === "word/document.xml") {
+      processed = justifyWordDocumentParagraphs(processed);
     }
 
     zip.file(name, processed);

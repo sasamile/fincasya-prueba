@@ -35,6 +35,10 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn, parseCOP } from '@/lib/utils';
+import { formatPhoneCo } from '@/lib/phone-co';
+import { SuggestTextInput } from '@/components/suggest-text-input';
+import { MUNICIPIOS_COLOMBIA } from '@/lib/colombia-municipios';
+import { propertyMatchesSearchQuery } from '@/lib/property/property-search';
 import { computePetFees } from '@/lib/pet-fees';
 import {
   CopMoneyInput,
@@ -63,7 +67,6 @@ import {
   saveInboxContratoDraft,
 } from '@/features/inbox/utils/contrato-draft-storage';
 import { resolveSelectedBankPayload } from '@/features/inbox/utils/selected-bank-accounts';
-import { buildInboxContractUpsertArgs } from '@/features/inbox/utils/persist-inbox-contract';
 import { ContractCodeSellerButtons } from '@/features/admin/components/contracts/contract-code-seller-buttons';
 import type { AsesorTool } from '@/features/inbox/components/IconRail';
 import type { ConversationRow } from '@/features/inbox/types';
@@ -99,8 +102,9 @@ type ContractDraft = {
   clientLastName: string;
   clientDocType: string;
   clientCedula: string;
-  clientDocIssuedAt: string;
   clientPhone: string;
+  /** Segundo número de contacto. Dato interno: NO sale en el contrato. */
+  clientPhoneAlt: string;
   clientEmail: string;
   clientCity: string;
   clientAddress: string;
@@ -132,8 +136,8 @@ const EMPTY_DRAFT: ContractDraft = {
   clientLastName: '',
   clientDocType: 'CC',
   clientCedula: '',
-  clientDocIssuedAt: '',
   clientPhone: '',
+  clientPhoneAlt: '',
   clientEmail: '',
   clientCity: '',
   clientAddress: '',
@@ -266,15 +270,12 @@ function FincaPicker({
   const [query, setQuery] = useState('');
   const selected = fincas?.find((f) => f._id === value) ?? null;
 
-  const list = (fincas ?? []).filter((f) => {
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      f.title.toLowerCase().includes(q) ||
-      (f.code ?? '').toLowerCase().includes(q) ||
-      (f.location ?? '').toLowerCase().includes(q)
-    );
-  });
+  const list = (fincas ?? []).filter((f) =>
+    propertyMatchesSearchQuery(
+      { title: f.title, code: f.code, location: f.location },
+      query,
+    ),
+  );
 
   return (
     <div className="relative">
@@ -370,23 +371,12 @@ function FincaPicker({
   );
 }
 
-function downloadBase64(fileBase64: string, filename: string, mime: string) {
-  const bytes = Uint8Array.from(atob(fileBase64), (c) => c.charCodeAt(0));
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 /**
  * Contrato — formulario completo (como la página de contratos) con escaneo IA
  * OPCIONAL para prellenar. El asesor ve y edita todos los campos y genera.
  */
 function ContratoTool({ conversation }: { conversation: ConversationRow | null }) {
   const extract = useAction(api.contractAi.extractFromConversation);
-  const upsertContract = useMutation(api.contracts.upsert);
   const fincas = useQuery(api.adminProperties.listAll, {}) as
     | FincaOption[]
     | undefined;
@@ -495,7 +485,6 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   const [openOwners, setOpenOwners] = useState<Set<string>>(new Set());
   const [analyzing, setAnalyzing] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [deletingBankId, setDeletingBankId] = useState<string | null>(null);
   const [bankDialogOpen, setBankDialogOpen] = useState(false);
@@ -542,7 +531,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
       const last = parts.length > 1 ? (parts[parts.length - 1] ?? '') : '';
       setDraft({
         ...EMPTY_DRAFT,
-        clientPhone: conversation?.phone ?? '',
+        clientPhone: formatPhoneCo(conversation?.phone ?? ''),
         clientFirstName: first.toUpperCase(),
         clientLastName: last.toUpperCase(),
         clientName: name.toUpperCase(),
@@ -988,7 +977,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           clientFirstName: first.toUpperCase(),
           clientLastName: last.toUpperCase(),
           clientCedula: r.client.cedula || d.clientCedula,
-          clientPhone: r.client.phone || d.clientPhone,
+          clientPhone: formatPhoneCo(r.client.phone || d.clientPhone),
           clientEmail: r.client.email || d.clientEmail,
           clientCity: r.client.city || d.clientCity,
           clientAddress: r.client.address || d.clientAddress,
@@ -1012,139 +1001,57 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
     }
   }
 
-  async function handleGenerate() {
-    if (!draft.fincaId) {
-      toast.error('Selecciona la finca.');
-      return;
-    }
-    if (selectedBankIds.length === 0) {
-      toast.error('Selecciona al menos una cuenta de pago.');
-      return;
-    }
-    const bankPayload = resolveSelectedBankPayload(bankAccounts, selectedBankIds);
-    if (bankPayload.bankAccounts.length === 0) {
-      toast.error(
-        'Las cuentas marcadas no tienen número/banco. Vuelve a seleccionarlas o agrégalas de nuevo.',
-      );
-      return;
-    }
-    const nights = (() => {
-      const a = new Date(`${draft.checkIn}T12:00:00`).getTime();
-      const b = new Date(`${draft.checkOut}T12:00:00`).getTime();
-      return Number.isFinite(a) && Number.isFinite(b) && b > a
-        ? Math.max(1, Math.round((b - a) / 86400000))
-        : 1;
-    })();
-    const perNight = Number(draft.pricePerNight) || 0;
-    const clientName = fullClientName(draft);
-    setGenerating(true);
-    try {
-      const res = await fetch(
-        `/api/fincas/${draft.fincaId}/direct-booking-contract`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            outputFormat: 'docx',
-            propertyId: draft.fincaId,
-            contractNumber: draft.contractCode,
-            nightlyPrice: String(perNight),
-            totalPrice: String(perNight * nights),
-            clientName,
-            clientFirstName: draft.clientFirstName.trim().toUpperCase(),
-            clientLastName: draft.clientLastName.trim().toUpperCase(),
-            clientId: draft.clientCedula,
-            clientDocType: draft.clientDocType,
-            clientDocIssuedAt: draft.clientDocIssuedAt,
-            clientEmail: draft.clientEmail,
-            clientPhone: draft.clientPhone,
-            clientCity: draft.clientCity,
-            clientAddress: draft.clientAddress,
-            checkInDate: draft.checkIn,
-            checkOutDate: draft.checkOut,
-            checkInTime: draft.checkInTime,
-            checkOutTime: draft.checkOutTime,
-            guests: Number(draft.guests) || 1,
-            petCount: Number(draft.petCount) || 0,
-            petDeposit: Number(draft.petDeposit) || 0,
-            petSurcharge: Number(draft.petServiceFee) || 0,
-            petCleaningFee: Number(draft.petCleaningFee) || 0,
-            cleaningFee: Number(draft.cleaningFee) || 0,
-            refundableDeposit: Number(draft.refundableDeposit) || 0,
-            manillaCondominio: Number(draft.manillaCondominio) || 0,
-            otherCharges: Number(draft.otherCharges) || 0,
-            extraPersonFeeLabel: toStoredCopLabel(
-              normalizeExtraPersonFee(draft.extraPersonFee),
-            ),
-            ...bankPayload,
-            ...firmanteContractFields,
-          }),
-        },
-      );
-      const data = (await res.json()) as {
-        success?: boolean;
-        fileBase64?: string;
-        filename?: string;
-        mimeType?: string;
-        error?: string;
-      };
-      if (!res.ok || !data.fileBase64) {
-        throw new Error(data.error || 'No se pudo generar el contrato.');
-      }
-      downloadBase64(
-        data.fileBase64,
-        data.filename || 'contrato.docx',
-        data.mimeType ||
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      );
-      const finca = fincas?.find((f) => f._id === draft.fincaId);
-      try {
-        await upsertContract(
-          buildInboxContractUpsertArgs(
-            { ...draft, clientName },
-            {
-              estado: 'borrador',
-              conversationId: conversation?.conversationId,
-              propertyTitle: finca?.title ?? draft.fincaTitle,
-              propertyLocation: finca?.location,
-            },
-          ),
-        );
-      } catch (persistErr) {
-        console.error(
-          '[inbox] no se pudo guardar el contrato en la lista',
-          persistErr,
-        );
-      }
-      toast.success('Contrato Word generado y descargado.');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al generar.');
-    } finally {
-      setGenerating(false);
-    }
-  }
-
   const field = (
     label: string,
     key: keyof ContractDraft,
     placeholder = '',
     type = 'text',
+    /** Sugerencias de auto relleno; el campo sigue aceptando texto libre. */
+    suggestions?: readonly string[],
   ) => (
     <div>
       <label className={fl}>{label}</label>
-      <input
-        className={cn(
-          input,
-          (key === 'clientFirstName' ||
-            key === 'clientLastName' ||
-            key === 'clientName') &&
-            'uppercase',
-        )}
-        type={type}
-        value={draft[key]}
-        onChange={set(key)}
-        placeholder={placeholder}
-      />
+      {suggestions ? (
+        <SuggestTextInput
+          className={cn(
+            input,
+            (key === 'clientFirstName' ||
+              key === 'clientLastName' ||
+              key === 'clientName') &&
+              'uppercase',
+          )}
+          type={type}
+          value={String(draft[key] ?? '')}
+          placeholder={placeholder}
+          suggestions={suggestions}
+          onChange={(next) =>
+            setDraft((d) => ({ ...d, [key]: next }))
+          }
+        />
+      ) : (
+        <input
+          className={cn(
+            input,
+            (key === 'clientFirstName' ||
+              key === 'clientLastName' ||
+              key === 'clientName') &&
+              'uppercase',
+          )}
+          type={type}
+          value={draft[key]}
+          onChange={set(key)}
+          onBlur={
+            key === 'clientPhone' || key === 'clientPhoneAlt'
+              ? () =>
+                  setDraft((d) => ({
+                    ...d,
+                    [key]: formatPhoneCo(String(d[key])),
+                  }))
+              : undefined
+          }
+          placeholder={placeholder}
+        />
+      )}
     </div>
   );
 
@@ -1810,9 +1717,15 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             </select>
           </div>
           {field('N° documento', 'clientCedula', '—')}
-          {field('Fecha expedición', 'clientDocIssuedAt', '', 'date')}
-          {field('Ciudad expedición', 'clientCity', 'Ej. Bogotá')}
+          {field(
+            'Ciudad expedición',
+            'clientCity',
+            'Ej. Bogotá',
+            'text',
+            MUNICIPIOS_COLOMBIA,
+          )}
           {field('Teléfono', 'clientPhone', '—')}
+          {field('Número adicional', 'clientPhoneAlt', 'Otro número de contacto')}
           {field('Correo', 'clientEmail', '—')}
           <div className="col-span-2">{field('Dirección', 'clientAddress', '—')}</div>
         </div>
@@ -1846,19 +1759,6 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
         >
           <FileText className="h-4 w-4" /> Ver y enviar
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleGenerate()}
-          disabled={generating || !draft.fincaId}
-          className="flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-50"
-        >
-          {generating ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <FileText className="h-4 w-4" />
-          )}
-          Generar contrato
         </button>
       </div>
 

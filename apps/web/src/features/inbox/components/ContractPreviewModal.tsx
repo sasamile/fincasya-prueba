@@ -12,13 +12,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useAction, useMutation } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import { toast } from 'sonner';
-import { Download, FileWarning, Loader2, Send, X } from 'lucide-react';
+import { Download, Eye, FileWarning, Loader2, Send, X } from 'lucide-react';
+import { justifySuperDocContract } from "@/features/admin/utils/superdoc-justify-contract";
 import '@harbour-enterprises/superdoc/style.css';
 import type { ConversationRow } from '@/features/inbox/types';
 import { buildInboxContractUpsertArgs } from '@/features/inbox/utils/persist-inbox-contract';
 import { resolveSelectedBankPayload } from '@/features/inbox/utils/selected-bank-accounts';
 import { firmaUrlToDataUrl } from '@/features/inbox/utils/firma-to-data-url';
 import { toStoredCopLabel } from '@/features/admin/components/contracts/cop-money-input';
+import { carpetaDeContrato } from '@/lib/contract-folder';
 
 export type PreviewDraft = {
   fincaId: string;
@@ -44,7 +46,6 @@ export type PreviewDraft = {
   clientLastName?: string;
   clientDocType?: string;
   clientCedula: string;
-  clientDocIssuedAt?: string;
   clientPhone: string;
   clientEmail: string;
   clientCity: string;
@@ -91,12 +92,25 @@ export function ContractPreviewModal({
 }) {
   const sendDocument = useAction(api.advisorDocuments.sendDocumentToConversation);
   const upsertContract = useMutation(api.contracts.upsert);
+  const registerDocument = useMutation(api.contractDocuments.registerDocument);
   const superdocRef = useRef<SuperDocInstance | null>(null);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | 'send' | 'pdf' | 'docx'>(null);
+  const [busy, setBusy] = useState<null | 'send' | 'pdf' | 'docx' | 'preview'>(
+    null,
+  );
   const [baseName, setBaseName] = useState('contrato');
+  /**
+   * Vista previa del PDF REAL dentro del modal.
+   *
+   * El editor Word es un visor web: se parece, pero nunca pagina exactamente
+   * como Word (fuentes, márgenes y saltos los calcula distinto). Por eso el
+   * asesor veía el contrato de una forma y el archivo salía de otra. Con esto
+   * revisa el PDF de verdad —el mismo que se le manda al cliente— sin salir
+   * del modal (Adriana, 22-jul).
+   */
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
 
   const persistContract = async (
     estado: 'borrador' | 'enviado',
@@ -197,7 +211,6 @@ export function ContractPreviewModal({
               clientLastName: String(draft.clientLastName || '').trim().toUpperCase(),
               clientId: draft.clientCedula,
               clientDocType: draft.clientDocType || 'CC',
-              clientDocIssuedAt: draft.clientDocIssuedAt || '',
               clientEmail: draft.clientEmail,
               clientPhone: draft.clientPhone,
               clientCity: draft.clientCity,
@@ -289,8 +302,10 @@ export function ContractPreviewModal({
           documentMode: 'editing',
           fonts,
           documents: [{ id: 'contract', type: 'docx', data: file }],
-          onReady: () => {
-            if (!cancelled) setReady(true);
+          onReady: (sd) => {
+            if (cancelled) return;
+            justifySuperDocContract(sd ?? instance);
+            setReady(true);
           },
         });
         superdocRef.current = instance;
@@ -374,6 +389,29 @@ export function ContractPreviewModal({
     return { base64: data.fileBase64, filename: data.filename || `${baseName}.pdf` };
   }
 
+  async function togglePdfPreview() {
+    if (pdfPreviewUrl) {
+      URL.revokeObjectURL(pdfPreviewUrl);
+      setPdfPreviewUrl(null);
+      return;
+    }
+    if (!ready) return;
+    setBusy('preview');
+    try {
+      const { base64 } = await exportEditedPdf();
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      setPdfPreviewUrl(
+        URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })),
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'No se pudo generar la vista previa.',
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleDownloadPdf() {
     if (!ready) return;
     setBusy('pdf');
@@ -409,6 +447,8 @@ export function ContractPreviewModal({
       const fd = new FormData();
       fd.append('file', new File([bytes], filename, { type: 'application/pdf' }));
       fd.append('folder', 'documents');
+      // Carpeta del contrato: documents/{codificación}/contratos/
+      fd.append('subpath', `${carpetaDeContrato(draft.contractCode)}/contratos`);
       const up = await fetch('/api/admin/upload', { method: 'POST', body: fd });
       const upData = (await up.json().catch(() => ({}))) as {
         url?: string;
@@ -428,6 +468,53 @@ export function ContractPreviewModal({
         pdfUrl: upData.url,
         pdfFilename: filename,
       });
+      // El archivo entra al archivo del contrato SOLO aquí, al enviarse: si se
+      // genera y no se manda, no queda registrado como entregado al cliente.
+      const contractNumber = draft.contractCode.trim() || 'SIN-CR';
+      try {
+        await registerDocument({
+          contractNumber,
+          tipo: 'contrato',
+          estado: 'enviado',
+          url: upData.url,
+          filename,
+          conversationId: conversation.conversationId,
+        });
+      } catch (err) {
+        console.error('[inbox] no se pudo archivar el contrato enviado', err);
+      }
+
+      // Y el WORD editable en la misma carpeta: al cliente le llega el PDF,
+      // pero si después hay que corregir algo se retoma del .docx en vez de
+      // rehacer el contrato desde cero (Adriana, 22-jul).
+      try {
+        const docxBlob = await exportEditedDocx();
+        const docxName = `${baseName}.docx`;
+        const fdDocx = new FormData();
+        fdDocx.append('file', new File([docxBlob], docxName, { type: docxBlob.type }));
+        fdDocx.append('folder', 'documents');
+        fdDocx.append('subpath', `${carpetaDeContrato(draft.contractCode)}/contratos`);
+        const upDocx = await fetch('/api/admin/upload', {
+          method: 'POST',
+          body: fdDocx,
+        });
+        const upDocxData = (await upDocx.json().catch(() => ({}))) as {
+          url?: string;
+        };
+        if (upDocx.ok && upDocxData.url) {
+          await registerDocument({
+            contractNumber,
+            tipo: 'contrato_word',
+            estado: 'enviado',
+            url: upDocxData.url,
+            filename: docxName,
+            conversationId: conversation.conversationId,
+          });
+        }
+      } catch (err) {
+        // El contrato YA salió: que falle el respaldo Word no rompe el envío.
+        console.error('[inbox] no se pudo archivar el Word del contrato', err);
+      }
       toast.success(
         `Contrato enviado a ${conversation.name || conversation.phone}.`,
       );
@@ -438,6 +525,13 @@ export function ContractPreviewModal({
       setBusy(null);
     }
   }
+
+  // Suelta el PDF de la vista previa al cerrar el modal (evita fugas de blobs).
+  useEffect(() => {
+    return () => {
+      if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    };
+  }, [pdfPreviewUrl]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
@@ -466,7 +560,10 @@ export function ContractPreviewModal({
 
         <div className="relative flex-1 overflow-auto bg-muted/40">
           {/* Contenedor del editor Word (SuperDoc) */}
-          <div id={EDITOR_ID} className="min-h-full" />
+          <div
+            id={EDITOR_ID}
+            className="superdoc-contract-surface min-h-full"
+          />
 
           {loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/70">
@@ -490,9 +587,45 @@ export function ContractPreviewModal({
               <p className="max-w-sm text-sm text-muted-foreground">{error}</p>
             </div>
           )}
+
+          {/* PDF real encima del editor: así se ve tal cual queda el archivo. */}
+          {pdfPreviewUrl && (
+            <div className="absolute inset-0 flex flex-col bg-background">
+              <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+                <p className="text-xs font-bold">
+                  Vista previa del PDF · así queda el archivo que se envía
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void togglePdfPreview()}
+                  className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-bold hover:bg-muted"
+                >
+                  Volver a editar
+                </button>
+              </div>
+              <iframe
+                src={pdfPreviewUrl}
+                title="Vista previa del contrato en PDF"
+                className="flex-1 w-full"
+              />
+            </div>
+          )}
         </div>
 
         <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
+          <button
+            type="button"
+            onClick={() => void togglePdfPreview()}
+            disabled={!ready || (busy !== null && busy !== 'preview')}
+            className="mr-auto flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold disabled:opacity-60"
+          >
+            {busy === 'preview' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Eye className="h-4 w-4" />
+            )}
+            {pdfPreviewUrl ? 'Volver a editar' : 'Ver como PDF'}
+          </button>
           <button
             type="button"
             onClick={() => void handleDownloadDocx()}

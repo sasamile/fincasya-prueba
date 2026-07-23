@@ -6,7 +6,9 @@
  *     · Ingresos  = abonos de turistas (tabla `payments`, excepto REEMBOLSO).
  *     · Egresos   = reembolsos (payments REEMBOLSO) + pagos a propietarios
  *                   (`bookings.ownerPayout.abonos[]`) + devoluciones de depósito
- *                   (`bookings.depositReturn.devolucion`).
+ *                   (`bookings.depositReturn.devolucion`) + gastos operativos
+ *                   y salidas de caja menor (`operationalMovements`).
+ *     · Nota: las entradas de caja menor (fondeo) NO cuentan como ingreso.
  * - `getTercerosConReserva()`: clientes únicos (dedup por cédula) con reserva,
  *   para importar como terceros a Siigo / cualquier contable.
  *
@@ -155,6 +157,34 @@ export const getMovimientos = query({
           });
         }
       }
+    }
+
+    // --- Gastos operativos + salidas de caja menor ---
+    const ops = await ctx.db
+      .query('operationalMovements')
+      .withIndex('by_fecha', (q) =>
+        q.gte('fechaMs', args.start).lt('fechaMs', args.end),
+      )
+      .collect();
+    for (const m of ops) {
+      if (m.deletedAt) continue;
+      // Fondeo de caja: no es ingreso del negocio ni egreso.
+      if (m.kind === 'caja_entrada') continue;
+      const isCaja = m.kind === 'caja_salida';
+      rows.push({
+        fechaMs: m.fechaMs,
+        fecha: m.fecha || bogotaDate(m.fechaMs),
+        finca: m.propertyTitle ?? '',
+        operacion: isCaja
+          ? `CAJA MENOR — ${m.category}`
+          : `GASTO — ${m.category}`,
+        entidad: m.medio ?? (isCaja ? 'Caja menor' : ''),
+        ingreso: 0,
+        egreso: Number(m.amount) || 0,
+        observaciones: m.notes ?? '',
+        nombre: m.beneficiario ?? m.createdByName ?? '',
+        cedula: '',
+      });
     }
 
     rows.sort((a, b) => a.fechaMs - b.fechaMs);

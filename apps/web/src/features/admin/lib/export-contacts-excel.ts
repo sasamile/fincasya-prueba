@@ -9,6 +9,7 @@ export type AdminContact = {
   cedula?: string;
   city?: string;
   address?: string;
+  phoneAlt?: string;
   cedulaPhotoUrls?: string[];
   crmType?: "lead" | "client";
   lastReservationAt?: number;
@@ -61,9 +62,11 @@ function contactsToSheetRows(contacts: AdminContact[]) {
       Nombre: displayName,
       Contexto: dealContext ?? "",
       Teléfono: c.phone,
+      "Número adicional": c.phoneAlt ?? "",
       Email: c.email ?? "",
       Cédula: c.cedula ?? "",
       Ciudad: c.city ?? "",
+      Dirección: c.address ?? "",
       Tipo: isCrmClient(c) ? "Cliente" : "Lead",
       Etiquetas: (c.tags ?? []).join(", "),
       "Creado el": c.createdAt

@@ -1,4 +1,5 @@
 import type { Id } from "@fincasya/backend/convex/_generated/dataModel";
+import { phoneDigitsCo } from "@/lib/phone-co";
 
 /** Campos mínimos del borrador del inbox para registrar el contrato. */
 export type InboxContractDraftLike = {
@@ -25,6 +26,8 @@ export type InboxContractDraftLike = {
   clientLastName?: string;
   clientCedula: string;
   clientPhone: string;
+  /** Segundo número de contacto. Dato interno: NO sale en el contrato. */
+  clientPhoneAlt?: string;
   clientEmail: string;
   clientCity: string;
   clientAddress: string;
@@ -104,7 +107,10 @@ export function buildInboxContractUpsertArgs(
     clienteNombre: draft.clientName.trim().toUpperCase() || undefined,
     clienteCedula: draft.clientCedula.trim() || undefined,
     clienteEmail: draft.clientEmail.trim() || undefined,
-    clienteTelefono: draft.clientPhone.trim() || undefined,
+    // Se guarda en dígitos con indicativo: los contactos se cruzan por número,
+    // el formato bonito es solo para mostrar e imprimir.
+    clienteTelefono: phoneDigitsCo(draft.clientPhone) || undefined,
+    clienteTelefonoAdicional: phoneDigitsCo(draft.clientPhoneAlt ?? "") || undefined,
     clienteCiudad: draft.clientCity.trim() || undefined,
     clienteDireccion: draft.clientAddress.trim() || undefined,
     valorTotal: valorTotal > 0 ? valorTotal : undefined,

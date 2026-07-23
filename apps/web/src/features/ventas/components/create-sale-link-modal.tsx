@@ -76,6 +76,7 @@ import { BankLogoBadge } from "@/features/checkin/components/bank-logo-badge";
 import { splitGlobalHolders } from "../utils/payment-holder-groups";
 import { createSaleLink } from "../api/sale-links.api";
 import { propertyMatchesSearchQuery } from "@/lib/property/property-search";
+import { buildSaleLinkInviteMessage } from "../lib/sale-link-invite-message";
 
 type BankDialogTarget = "fincasya" | "hernan" | "owner" | "other";
 
@@ -184,7 +185,8 @@ const DEFAULT_VALUES: FormValues = {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: () => void;
+  /** Recibe token/url del link creado (para copiar mensaje o enviar al chat). */
+  onCreated: (created: { token: string; url: string }) => void;
   /** `inbox` = tema oscuro WhatsApp, más compacto (desde admin/inbox). */
   variant?: "admin" | "inbox";
 }
@@ -790,26 +792,28 @@ export function CreateSaleLinkModal({
       });
 
       const saleUrl = `${window.location.origin}/venta/${result.token}`;
-      await navigator.clipboard.writeText(saleUrl).catch(() => {});
+      await navigator.clipboard
+        .writeText(buildSaleLinkInviteMessage(saleUrl))
+        .catch(() => {});
 
       if (result.boldPaymentUrl) {
         toast.success(
-          `Link de venta copiado. Bold listo por ${formatCOP(result.boldPaymentAmount ?? boldChargeAmount)}.`,
+          `Mensaje con link copiado. Bold listo por ${formatCOP(result.boldPaymentAmount ?? boldChargeAmount)}.`,
           { duration: 6000 },
         );
       } else if (result.boldError) {
         toast.warning(
-          `Link de venta creado. Bold no se generó: ${result.boldError}`,
+          `Link creado y mensaje copiado. Bold no se generó: ${result.boldError}`,
           { duration: 8000 },
         );
       } else {
-        toast.success("¡Link de venta creado y copiado!");
+        toast.success("¡Link creado! Mensaje para el cliente copiado.");
       }
 
       form.reset(DEFAULT_VALUES);
       setAdvanceManual(false);
       setPropertySearch("");
-      onCreated();
+      onCreated({ token: result.token, url: saleUrl });
     } catch (err) {
       const message =
         (err as { response?: { data?: { error?: string } }; message?: string })
@@ -1087,7 +1091,7 @@ export function CreateSaleLinkModal({
                           className="h-9 rounded-lg"
                         />
                       </div>
-                      <div className="max-h-[240px] space-y-1 overflow-y-auto">
+                      <div className="max-h-60 space-y-1 overflow-y-auto">
                         {isLoadingProperties ? (
                           <div className="flex flex-col items-center gap-2 p-6">
                             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

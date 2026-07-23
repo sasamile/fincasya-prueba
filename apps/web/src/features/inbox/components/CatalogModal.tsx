@@ -12,6 +12,7 @@ import { Link2, Search, Store, X, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { propertyMatchesSearchQuery } from '@/lib/property/property-search';
 import { catalogCache } from '@/lib/queryCache';
 import { LoadingArea } from '@/components/ui/spinner';
 import { AutoCatalogModal } from '@/features/inbox/components/AutoCatalogModal';
@@ -27,11 +28,10 @@ function matchesSearch(p: CatalogRow, q: string): boolean {
   if (!q) return true;
   const cupo = /^\d+$/.test(q) ? Number(q) : null;
   if (cupo != null && p.capacity >= cupo) return true;
-  return (
-    p.title.toLowerCase().includes(q) ||
-    p.location.toLowerCase().includes(q) ||
-    (p.code ?? '').toLowerCase().includes(q) ||
-    String(p.capacity).includes(q)
+  if (String(p.capacity).includes(q)) return true;
+  return propertyMatchesSearchQuery(
+    { title: p.title, location: p.location, code: p.code },
+    q,
   );
 }
 

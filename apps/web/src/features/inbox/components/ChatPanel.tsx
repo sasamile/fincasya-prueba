@@ -22,6 +22,7 @@ import {
   Smile,
   AudioLines,
   Sparkles,
+  Headphones,
   UserRound,
   Wand2,
   X,
@@ -45,6 +46,7 @@ import { SwipeToReply } from '@/features/inbox/components/SwipeToReply';
 import { LabelPicker } from '@/features/inbox/components/LabelPicker';
 import { QuickReplyManager } from '@/features/inbox/components/QuickReplyManager';
 import { AdvisorAssistPanel } from '@/features/inbox/components/AdvisorAssistPanel';
+import { BotAudiosPicker } from '@/features/inbox/components/BotAudiosPicker';
 import { useComposerDictation } from '@/features/inbox/hooks/useComposerDictation';
 import { ASESOR_TOOLS, type AsesorTool } from '@/features/inbox/components/IconRail';
 import { SharedMedia } from '@/features/inbox/components/SharedMedia';
@@ -675,6 +677,7 @@ export function ChatPanel({
   const [showSearch, setShowSearch] = useState(false);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showAssist, setShowAssist] = useState(false);
+  const [showBotAudios, setShowBotAudios] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const dictation = useComposerDictation((text) => {
     setDraft(text);
@@ -1174,7 +1177,11 @@ export function ChatPanel({
               setShowCatalog(true);
             }}
           />
-          {(dictation.listening || dictation.error) && (
+          <BotAudiosPicker
+            conversationId={conv.conversationId}
+            open={showBotAudios}
+            onClose={() => setShowBotAudios(false)}
+          />          {(dictation.listening || dictation.error) && (
             <div
               className={cn(
                 'mb-1.5 flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-[12px]',
@@ -1415,11 +1422,31 @@ export function ChatPanel({
                 onClick={() => {
                   dictation.stop();
                   setShowAssist((v) => !v);
+                  setShowBotAudios(false);
                   setShowAttach(false);
                   setShowEmoji(false);
                 }}
               >
                 <Sparkles className="h-6 w-6" strokeWidth={1.5} />
+              </button>
+              {/* Audios del bot: casos pregrabados por situación */}
+              <button
+                type="button"
+                className={cn(
+                  'wa-composer-icon select-none touch-manipulation',
+                  showBotAudios && 'text-primary',
+                )}
+                title="Audios del bot"
+                aria-label="Audios del bot"
+                onClick={() => {
+                  dictation.stop();
+                  setShowBotAudios((v) => !v);
+                  setShowAssist(false);
+                  setShowAttach(false);
+                  setShowEmoji(false);
+                }}
+              >
+                <Headphones className="h-6 w-6" strokeWidth={1.5} />
               </button>
               {/* Dictado: habla → texto en el input */}
               <button
@@ -1436,6 +1463,7 @@ export function ChatPanel({
                 aria-label={dictation.listening ? 'Detener dictado' : 'Dictar'}
                 onClick={() => {
                   setShowAssist(false);
+                  setShowBotAudios(false);
                   dictation.toggle(draft);
                 }}
               >

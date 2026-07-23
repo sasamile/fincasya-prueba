@@ -20,6 +20,7 @@ import {
   ChevronRight,
   FileCheck,
   Link2,
+  Mail,
   Copy,
   MessageCircle,
   History,
@@ -79,6 +80,9 @@ import {
 } from "@/components/ui/select";
 import { cn, formatPriceInput, parseCOP } from "@/lib/utils";
 import { normalizeContractLookupQuery } from "@/lib/normalize-contract-lookup";
+import { carpetaDeContrato } from "@/lib/contract-folder";
+import { useMutation } from "convex/react";
+import { api } from "@fincasya/backend/convex/_generated/api";
 import { toClientFieldUpper } from "@/lib/client-field-normalize";
 import { getGuestCapacityWarning } from "@/features/admin/utils/guest-capacity-warning";
 import { GuestCapacityWarningAlert } from "@/features/admin/components/shared/guest-capacity-warning-alert";
@@ -139,9 +143,10 @@ type FormState = {
   clientLastName: string;
   clientId: string;
   clientDocType: string;
-  clientDocIssuedAt: string;
   clientEmail: string;
   clientPhone: string;
+  /** Segundo número de contacto. Dato interno: NO sale en el contrato. */
+  clientPhoneAlt: string;
   clientCity: string;
   clientAddress: string;
   checkInDate: string;
@@ -184,9 +189,9 @@ const INITIAL: FormState = {
   clientLastName: "",
   clientId: "",
   clientDocType: "CC",
-  clientDocIssuedAt: "",
   clientEmail: "",
   clientPhone: "",
+  clientPhoneAlt: "",
   clientCity: "",
   clientAddress: "",
   checkInDate: "",
@@ -329,6 +334,7 @@ function buildContractSnapshotPayload(input: {
     ),
     cedula: f.clientId,
     celular: f.clientPhone,
+    celularAdicional: f.clientPhoneAlt || undefined,
     correo: f.clientEmail,
     fechaEntrada: input.inMs,
     fechaSalida: input.outMs,
@@ -596,8 +602,7 @@ export function ContractsReservationSection({
       if (
         typeof prev.clientFirstName === "string" &&
         typeof prev.clientLastName === "string" &&
-        typeof prev.clientDocType === "string" &&
-        typeof prev.clientDocIssuedAt === "string"
+        typeof prev.clientDocType === "string"
       ) {
         return prev;
       }
@@ -615,10 +620,6 @@ export function ContractsReservationSection({
             : split.last,
         clientDocType:
           typeof prev.clientDocType === "string" ? prev.clientDocType : "CC",
-        clientDocIssuedAt:
-          typeof prev.clientDocIssuedAt === "string"
-            ? prev.clientDocIssuedAt
-            : "",
       };
     });
   }, []);
@@ -749,12 +750,16 @@ export function ContractsReservationSection({
             rec.clienteCedula || draft.cedula || prev.clientId,
           ),
           clientDocType: prev.clientDocType || "CC",
-          clientDocIssuedAt: prev.clientDocIssuedAt || "",
           clientEmail: toClientFieldUpper(
             rec.clienteEmail || draft.correo || prev.clientEmail,
           ),
           clientPhone: toClientFieldUpper(
             rec.clienteTelefono || draft.celular || prev.clientPhone,
+          ),
+          clientPhoneAlt: toClientFieldUpper(
+            rec.clienteTelefonoAdicional ||
+              draft.celularAdicional ||
+              prev.clientPhoneAlt,
           ),
           clientCity: toClientFieldUpper(rec.clienteCiudad || prev.clientCity),
           clientAddress: toClientFieldUpper(
@@ -1070,7 +1075,6 @@ export function ContractsReservationSection({
         clientLastName: form.clientLastName,
         clientId: form.clientId,
         clientDocType: form.clientDocType,
-        clientDocIssuedAt: form.clientDocIssuedAt,
         clientEmail: form.clientEmail,
         clientPhone: form.clientPhone,
         clientCity: form.clientCity,
@@ -1117,7 +1121,6 @@ export function ContractsReservationSection({
     form.clientLastName,
     form.clientId,
     form.clientDocType,
-    form.clientDocIssuedAt,
     form.clientEmail,
     form.clientPhone,
     form.clientCity,
@@ -1211,6 +1214,7 @@ export function ContractsReservationSection({
       | "clientId"
       | "clientEmail"
       | "clientPhone"
+      | "clientPhoneAlt"
       | "clientCity"
       | "clientAddress"
     >,
@@ -1337,9 +1341,6 @@ export function ContractsReservationSection({
           "Los nombres del arrendatario son obligatorios.";
       if (!strTrim(d.clientId))
         nextErrors.clientId = "El número de documento es obligatorio.";
-      if (!strTrim(d.clientDocIssuedAt))
-        nextErrors.clientDocIssuedAt =
-          "La fecha de expedición del documento es obligatoria.";
       if (!strTrim(d.clientCity))
         nextErrors.clientCity =
           "La ciudad de expedición de la cédula es obligatoria.";
@@ -1430,9 +1431,9 @@ export function ContractsReservationSection({
     clientLastName: strTrim(draft.clientLastName),
     clientId: strTrim(draft.clientId),
     clientDocType: strTrim(draft.clientDocType) || "CC",
-    clientDocIssuedAt: strTrim(draft.clientDocIssuedAt),
     clientEmail: strTrim(draft.clientEmail),
     clientPhone: strTrim(draft.clientPhone),
+    clientPhoneAlt: strTrim(draft.clientPhoneAlt),
     clientCity: strTrim(draft.clientCity),
     clientAddress: strTrim(draft.clientAddress),
     checkInDate: draft.checkInDate,
@@ -1669,6 +1670,7 @@ export function ContractsReservationSection({
         clientId: b.cedula ?? "",
         clientEmail: b.correo ?? "",
         clientPhone: b.celular ?? "",
+        clientPhoneAlt: b.celularAdicional ?? "",
         clientAddress: b.address ?? b.city ?? "",
         propertyName: b.propertyTitle ?? "",
         propertyLocation: b.propertyLocation ?? "",
@@ -1899,7 +1901,6 @@ export function ContractsReservationSection({
           form.clientName,
         ) || strTrim(form.clientName),
       clientDocType: strTrim(form.clientDocType) || "CC",
-      clientDocIssuedAt: strTrim(form.clientDocIssuedAt),
     };
 
     const effectiveForm = {
@@ -2222,7 +2223,6 @@ export function ContractsReservationSection({
           form.clientName,
         ) || strTrim(form.clientName),
       clientDocType: strTrim(form.clientDocType) || "CC",
-      clientDocIssuedAt: strTrim(form.clientDocIssuedAt),
       petDeposit: String(petDepositTotal),
       petSurcharge: String(petSurchargeTotal),
       serviceStaffFee: form.serviceStaffIncluded
@@ -2408,6 +2408,126 @@ export function ContractsReservationSection({
     }
   };
 
+  const registerContractDocument = useMutation(
+    api.contractDocuments.registerDocument,
+  );
+
+  /**
+   * Sube el archivo a la carpeta del contrato, lo registra en el archivo y
+   * abre WhatsApp para escoger el chat.
+   *
+   * El registro ocurre AQUÍ y no al generar: generar es un borrador, enviar es
+   * el hecho que hay que dejar guardado (Adriana, 22-jul).
+   */
+  const compartirArchivo = async (
+    blobUrl: string,
+    filename: string,
+    tipo: "contrato" | "confirmacion",
+    montoAbonado?: number,
+  ) => {
+    const contractNumber =
+      normalizeContractLookupQuery(form.contractNumber.trim()) ||
+      form.contractNumber.trim();
+    if (!contractNumber) {
+      toast.error("El contrato no tiene codificación: no sé en qué carpeta archivarlo.");
+      return;
+    }
+    const id = toast.loading("Subiendo el archivo a la carpeta del contrato…");
+    try {
+      const blob = await (await fetch(blobUrl)).blob();
+      const carpeta = tipo === "contrato" ? "contratos" : "confirmaciones";
+      const fd = new FormData();
+      fd.append("file", new File([blob], filename, { type: blob.type || "application/pdf" }));
+      fd.append("folder", "documents");
+      fd.append("subpath", `${carpetaDeContrato(contractNumber)}/${carpeta}`);
+      const up = await fetch("/api/admin/upload", { method: "POST", body: fd });
+      const upData = (await up.json().catch(() => ({}))) as {
+        url?: string;
+        error?: string;
+      };
+      if (!up.ok || !upData.url) {
+        throw new Error(upData.error || "No se pudo subir el archivo.");
+      }
+      await registerContractDocument({
+        contractNumber,
+        tipo,
+        estado: "enviado",
+        url: upData.url,
+        filename,
+        montoAbonado,
+      });
+      const que =
+        tipo === "contrato"
+          ? `el contrato *${contractNumber}*`
+          : `la confirmación de reserva del contrato *${contractNumber}*`;
+      const texto = encodeURIComponent(
+        `Hola! Te compartimos ${que} de *${selectedProperty?.title ?? "tu reserva"}*:\n\n${upData.url}`,
+      );
+      window.open(`https://wa.me/?text=${texto}`, "_blank", "noopener,noreferrer");
+      toast.success("Archivado en la carpeta del contrato. Escoge el chat en WhatsApp.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo compartir el archivo.",
+      );
+    } finally {
+      toast.dismiss(id);
+    }
+  };
+
+  /** Abre el correo del asesor con el enlace del archivo ya subido. */
+  const compartirPorCorreo = async (
+    blobUrl: string,
+    filename: string,
+    tipo: "contrato" | "confirmacion",
+    montoAbonado?: number,
+  ) => {
+    const contractNumber =
+      normalizeContractLookupQuery(form.contractNumber.trim()) ||
+      form.contractNumber.trim();
+    if (!contractNumber) {
+      toast.error("El contrato no tiene codificación: no sé en qué carpeta archivarlo.");
+      return;
+    }
+    const id = toast.loading("Subiendo el archivo a la carpeta del contrato…");
+    try {
+      const blob = await (await fetch(blobUrl)).blob();
+      const carpeta = tipo === "contrato" ? "contratos" : "confirmaciones";
+      const fd = new FormData();
+      fd.append("file", new File([blob], filename, { type: blob.type || "application/pdf" }));
+      fd.append("folder", "documents");
+      fd.append("subpath", `${carpetaDeContrato(contractNumber)}/${carpeta}`);
+      const up = await fetch("/api/admin/upload", { method: "POST", body: fd });
+      const upData = (await up.json().catch(() => ({}))) as {
+        url?: string;
+        error?: string;
+      };
+      if (!up.ok || !upData.url) {
+        throw new Error(upData.error || "No se pudo subir el archivo.");
+      }
+      await registerContractDocument({
+        contractNumber,
+        tipo,
+        estado: "enviado",
+        url: upData.url,
+        filename,
+        montoAbonado,
+      });
+      const asunto =
+        tipo === "contrato"
+          ? `Contrato ${contractNumber} - FincasYa.com`
+          : `Confirmación de reserva ${contractNumber} - FincasYa.com`;
+      const cuerpo = `Hola ${form.clientName || ""},\n\nTe compartimos el documento de tu reserva en ${selectedProperty?.title ?? ""}:\n${upData.url}\n\nFincasYa.com`;
+      window.location.href = `mailto:${encodeURIComponent(form.clientEmail || "")}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+      toast.success("Archivado en la carpeta del contrato.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo compartir el archivo.",
+      );
+    } finally {
+      toast.dismiss(id);
+    }
+  };
+
   const shareGeneratedLinkWhatsApp = () => {
     if (!generatedLink || !selectedProperty) return;
     const text = encodeURIComponent(
@@ -2516,6 +2636,14 @@ export function ContractsReservationSection({
                         Borrador del contrato (aún no hay reserva en el
                         calendario). Al generar la confirmación PDF se creará la
                         reserva con el pago indicado.
+                      </p>
+                    ) : null}
+                    {confFoundBooking.isContractRecord ? (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+                        Contrato generado desde el inbox (aún no hay reserva en
+                        el calendario). Al generar la confirmación PDF se creará
+                        la reserva con el pago indicado. Revisa los datos: se
+                        cargaron del contrato, no de una reserva.
                       </p>
                     ) : null}
                     <div className="flex divide-x divide-orange-100 overflow-hidden rounded-xl border border-orange-100 bg-orange-50 dark:divide-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/80">
@@ -3815,24 +3943,6 @@ export function ContractsReservationSection({
                         )}
                       </div>
                       <div className="space-y-2">
-                        <Label className={fieldLabelClass("clientDocIssuedAt")}>
-                          Fecha expedición
-                        </Label>
-                        <Input
-                          type="date"
-                          value={form.clientDocIssuedAt}
-                          onChange={(event) =>
-                            setField("clientDocIssuedAt", event.target.value)
-                          }
-                          className={fieldClass("clientDocIssuedAt")}
-                        />
-                        {errors.clientDocIssuedAt && (
-                          <p className="ml-1 text-[11px] font-semibold text-red-500">
-                            {errors.clientDocIssuedAt}
-                          </p>
-                        )}
-                      </div>
-                      <div className="space-y-2">
                         <Label className={fieldLabelClass("clientCity")}>
                           Ciudad expedición
                         </Label>
@@ -3871,6 +3981,22 @@ export function ContractsReservationSection({
                             {errors.clientPhone}
                           </p>
                         )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label className={fieldLabelClass("clientPhoneAlt")}>
+                          Número adicional
+                        </Label>
+                        <Input
+                          value={form.clientPhoneAlt}
+                          onChange={(event) =>
+                            setClientField("clientPhoneAlt", event.target.value)
+                          }
+                          placeholder="Otro número de contacto"
+                          className={fieldClass("clientPhoneAlt")}
+                        />
+                        <p className="ml-1 text-[11px] font-medium text-zinc-400">
+                          Solo para contacto: no sale impreso en el contrato.
+                        </p>
                       </div>
                       <div className="space-y-2">
                         <Label className={fieldLabelClass("clientEmail")}>
@@ -4061,7 +4187,6 @@ export function ContractsReservationSection({
                       form.clientName,
                       form.clientId,
                       form.clientDocType,
-                      form.clientDocIssuedAt,
                       form.clientEmail,
                       form.clientPhone,
                       form.clientCity,
@@ -4392,6 +4517,41 @@ export function ContractsReservationSection({
                       >
                         <Download className="mr-2 h-4 w-4" /> Descargar archivo
                       </Button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          className="h-11 rounded-xl bg-[#25D366] font-bold text-white hover:bg-[#1ebe57]"
+                          onClick={() =>
+                            void compartirArchivo(
+                              contractUrl,
+                              generatedContractFilename || "contrato.pdf",
+                              "contrato",
+                            )
+                          }
+                        >
+                          <MessageCircle className="mr-2 h-4 w-4" /> WhatsApp
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 rounded-xl font-bold"
+                          onClick={() =>
+                            void compartirPorCorreo(
+                              contractUrl,
+                              generatedContractFilename || "contrato.pdf",
+                              "contrato",
+                            )
+                          }
+                        >
+                          <Mail className="mr-2 h-4 w-4" /> Correo
+                        </Button>
+                      </div>
+                      <p className="text-center text-[10px] font-medium leading-snug text-muted-foreground">
+                        Al compartir se archiva en la carpeta{" "}
+                        <span className="font-bold">
+                          {carpetaDeContrato(form.contractNumber || "")}/contratos
+                        </span>
+                      </p>
                     </div>
                   </div>
                 </motion.div>
@@ -4469,6 +4629,43 @@ export function ContractsReservationSection({
                       >
                         <Download className="mr-2 h-4 w-4" /> Descargar archivo
                       </Button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          className="h-11 rounded-xl bg-[#25D366] font-bold text-white hover:bg-[#1ebe57]"
+                          onClick={() =>
+                            void compartirArchivo(
+                              confirmationUrl,
+                              confirmationFilename || "confirmacion.pdf",
+                              "confirmacion",
+                              parseCOP(confForm.depositAmount) || undefined,
+                            )
+                          }
+                        >
+                          <MessageCircle className="mr-2 h-4 w-4" /> WhatsApp
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 rounded-xl border-emerald-200 font-bold text-emerald-900 hover:bg-emerald-100"
+                          onClick={() =>
+                            void compartirPorCorreo(
+                              confirmationUrl,
+                              confirmationFilename || "confirmacion.pdf",
+                              "confirmacion",
+                              parseCOP(confForm.depositAmount) || undefined,
+                            )
+                          }
+                        >
+                          <Mail className="mr-2 h-4 w-4" /> Correo
+                        </Button>
+                      </div>
+                      <p className="text-center text-[10px] font-medium leading-snug text-emerald-700/80">
+                        Al compartir se archiva con el abono en{" "}
+                        <span className="font-bold">
+                          {carpetaDeContrato(form.contractNumber || "")}/confirmaciones
+                        </span>
+                      </p>
                     </div>
                   </div>
                 </motion.div>

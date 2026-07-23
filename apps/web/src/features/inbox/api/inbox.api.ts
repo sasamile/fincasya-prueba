@@ -291,7 +291,7 @@ function buildConfirmationHtml(p: ConfirmationPayload, logoDataUrl: string | nul
         </tr>
         <tr>
           <td class="peach">Tipo de grupo</td>
-          <td class="value-cell">${esc((p.groupType ?? '').trim() || '-')}</td>
+          <td class="value-cell">${esc((p.groupType ?? '').trim() || 'Descanso familiar')}</td>
           <td colspan="2" class="peach">Prop&oacute;sito estancia</td>
           <td class="value-cell">${esc((p.purpose ?? '').trim() || '-')}</td>
         </tr>

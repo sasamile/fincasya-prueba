@@ -143,6 +143,25 @@ export function BookingSummaryHero({
               {booking.celular}
             </p>
           )}
+          {booking.celularAdicional && (
+            <p className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground tabular-nums">
+              <Phone className="h-3.5 w-3.5 opacity-60" />
+              {booking.celularAdicional}
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
+                adicional
+              </span>
+            </p>
+          )}
+          {booking.correo && (
+            <p className="mt-1 truncate text-[12px] text-muted-foreground">
+              {booking.correo}
+            </p>
+          )}
+          {(booking.city || booking.address) && (
+            <p className="mt-1 line-clamp-2 text-[12px] text-muted-foreground">
+              {[booking.city, booking.address].filter(Boolean).join(" · ")}
+            </p>
+          )}
           {wa && (
             <a
               href={wa}

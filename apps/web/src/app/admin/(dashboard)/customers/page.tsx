@@ -680,6 +680,7 @@ export default function CustomersPage() {
                                         cedula: customer.cedula,
                                         city: customer.city,
                                         address: customer.address,
+                                        phoneAlt: customer.phoneAlt,
                                         fechaNacimiento: customer.fechaNacimiento,
                                         crmType: customer.crmType,
                                       })
@@ -861,6 +862,7 @@ export default function CustomersPage() {
                                         cedula: lead.cedula,
                                         city: lead.city,
                                         address: lead.address,
+                                        phoneAlt: lead.phoneAlt,
                                         fechaNacimiento: lead.fechaNacimiento,
                                         crmType: lead.crmType,
                                       })
@@ -988,6 +990,7 @@ export default function CustomersPage() {
                             cedula: history.cedula,
                             city: history.city,
                             address: history.address,
+                            phoneAlt: history.phoneAlt,
                             fechaNacimiento: history.fechaNacimiento,
                             crmType: history.crmType,
                           });

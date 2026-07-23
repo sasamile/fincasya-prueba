@@ -239,7 +239,7 @@ export type FormatFincaFeaturesOpts = {
   habitaciones?: number | string | null;
   /** Orden de zonas de la propiedad (preferido para contar habitaciones). */
   zoneOrder?: string[] | null;
-  /** Máximo de amenidades en el contrato (además de HABITACIONES). Default 22. */
+  /** Máximo de amenidades en el contrato (además de HABITACIONES). Default 24. */
   maxAmenities?: number;
   /**
    * IDs de iconography marcados como “principales” en la finca (featuredIcons).
@@ -254,12 +254,63 @@ export function isBedInventoryFeatureName(name: string): boolean {
   if (!n) return false;
   // Cama, nido, colchón, litera, camarote… (no "sala comedor", etc.)
   return (
-    /\bCAMAS?\b/.test(n) ||
+    /CAMA/.test(n) || // Cama, camas, HCAMA (typos), camarote…
     /\bNIDOS?\b/.test(n) ||
     /\bCOLCHONES?\b/.test(n) ||
-    /\bLITERAS?\b/.test(n) ||
-    /\bCAMAROTES?\b/.test(n)
+    /\bLITERAS?\b/.test(n)
   );
+}
+
+/**
+ * Clave canónica para no listar sinónimos (TELEVISIÓN + TELEVISOR, etc.).
+ */
+export function amenityCanonicalKey(name: string): string {
+  const n = name
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/g, " ");
+  if (!n) return "";
+  if (/TELEVI|\bSMART\s*TV\b|\bTV\b/.test(n)) return "TV";
+  if (/WIFI|WI-?FI|INTERNET/.test(n)) return "WIFI";
+  if (/PARQUEADERO|ESTACIONAMIENTO|PARKING/.test(n)) return "PARQUEADERO";
+  if (/JACUZZ?I/.test(n)) return "JACUZZI";
+  if (/PISCINA|\bPOOL\b/.test(n)) return "PISCINA";
+  if (/BANO\s+PRIVADO/.test(n)) return "BANO_PRIVADO";
+  if (/^(\d+\s+)?BANOS?$/.test(n)) return "BANOS";
+  if (/ZONA\s+DE\s+ASADOS|ASADOR|\bBBQ\b|PARRILLA/.test(n)) return "ASADOS";
+  if (/COCINA/.test(n)) return "COCINA";
+  return n;
+}
+
+/** Etiqueta preferida al fusionar sinónimos. */
+export function preferredAmenityLabel(
+  canonical: string,
+  candidates: string[],
+): string {
+  const list = candidates.map((c) => c.trim().toUpperCase()).filter(Boolean);
+  if (list.length === 0) return canonical;
+  if (canonical === "TV") {
+    if (list.some((c) => /SMART/.test(c))) return "SMART TV";
+    return "TELEVISIÓN";
+  }
+  if (canonical === "WIFI") return "WIFI";
+  if (canonical === "PARQUEADERO") return "PARQUEADERO";
+  if (canonical === "JACUZZI") return "JACUZZI";
+  if (canonical === "PISCINA") return "PISCINA";
+  if (canonical === "BANO_PRIVADO") return "BAÑO PRIVADO";
+  if (canonical === "BANOS") return "BAÑOS";
+  if (canonical === "ASADOS") return "ZONA DE ASADOS";
+  if (canonical === "COCINA") {
+    return list.some((c) => /EQUIPADA/.test(c)) ? "COCINA EQUIPADA" : "COCINA";
+  }
+  // Quita conteo prefijado del nombre crudo ("04 BAÑOS" → se formatea aparte).
+  const cleaned = list
+    .map((c) => c.replace(/^\d+\s+/, "").trim())
+    .filter(Boolean)
+    .sort((a, b) => a.length - b.length);
+  return cleaned[0] ?? list[0]!;
 }
 
 /** Amenidades “hero” del contrato cuando no hay featuredIcons. */
@@ -275,7 +326,8 @@ function principalAmenityScore(name: string): number {
 /**
  * Texto plano para {{caracteristicasDeFinca}}:
  * 1) "NN HABITACIONES" (zonas Habitación N, o override manual)
- * 2) hasta ~22 amenidades principales (featured primero; sin detalle de camas)
+ * 2) hasta ~24 amenidades principales (featured primero; sin detalle de camas)
+ *    para llenar el documento y que la hoja de firmas no quede casi vacía.
  */
 export function formatFincaFeaturesPlain(
   features: unknown[],
@@ -297,8 +349,8 @@ export function formatFincaFeaturesPlain(
   const roomsLine = formatHabitacionesContractLine(roomCount);
   if (roomsLine) lines.push(roomsLine);
 
-  // Tope: el bloque de firmas del DOCX no debe saltar a otra hoja.
-  const maxAmenities = Math.max(0, opts?.maxAmenities ?? 22);
+  // Tope: llena la plantilla sin saturar; 24 evita la hoja de firmas vacía.
+  const maxAmenities = Math.max(0, opts?.maxAmenities ?? 24);
   const featuredIds = (opts?.featuredIconIds ?? [])
     .map((id) => String(id ?? "").trim())
     .filter(Boolean);
@@ -331,11 +383,55 @@ export function formatFincaFeaturesPlain(
     },
   );
 
+  // Fusiona sinónimos (TELEVISIÓN + TELEVISOR → una sola línea).
+  const merged = new Map<
+    string,
+    { name: string; count: number; iconIds: string[]; names: string[] }
+  >();
+  for (const item of items) {
+    if (/^habitaciones?$/i.test(item.name.trim())) continue;
+    if (skipBeds && isBedInventoryFeatureName(item.name)) continue;
+    const key = amenityCanonicalKey(item.name);
+    if (!key) continue;
+    const prev = merged.get(key);
+    if (!prev) {
+      merged.set(key, {
+        name: item.name,
+        count: item.count,
+        iconIds: [...item.iconIds],
+        names: [item.name],
+      });
+      continue;
+    }
+    prev.count = Math.max(prev.count, item.count);
+    prev.names.push(item.name);
+    for (const id of item.iconIds) {
+      if (!prev.iconIds.includes(id)) prev.iconIds.push(id);
+    }
+    prev.name = preferredAmenityLabel(key, prev.names);
+  }
+
+  const deduped = Array.from(merged.values()).sort((a, b) => {
+    const rankA = a.iconIds.reduce(
+      (best, id) =>
+        featuredRank.has(id) ? Math.min(best, featuredRank.get(id)!) : best,
+      Number.POSITIVE_INFINITY,
+    );
+    const rankB = b.iconIds.reduce(
+      (best, id) =>
+        featuredRank.has(id) ? Math.min(best, featuredRank.get(id)!) : best,
+      Number.POSITIVE_INFINITY,
+    );
+    if (rankA !== rankB) return rankA - rankB;
+    const scoreA = principalAmenityScore(a.name);
+    const scoreB = principalAmenityScore(b.name);
+    if (scoreA !== scoreB) return scoreA - scoreB;
+    if (b.count !== a.count) return b.count - a.count;
+    return a.name.localeCompare(b.name, "es");
+  });
+
   let amenityCount = 0;
-  for (const { name, count } of items) {
-    // Evita duplicar "HABITACIONES" si alguien la cargó como amenidad suelta.
-    if (/^habitaciones?$/i.test(name.trim())) continue;
-    if (skipBeds && isBedInventoryFeatureName(name)) continue;
+  for (const { name, count } of deduped) {
     const line = formatFeatureContractLine(name, count);
     if (!line) continue;
     lines.push(line);
@@ -519,6 +615,9 @@ export type ContractFinca = {
   zoneOrder?: string[];
   /** Iconos destacados de la finca (amenidades principales). */
   featuredIcons?: string[];
+  /** Propietario de la finca (propertyOwnerInfo / ficha admin). */
+  propietarioNombre?: string;
+  propietarioCedula?: string;
 };
 
 /** Payload del contrato (salida de buildContractPayload en el front). */
@@ -639,7 +738,10 @@ export function buildContractWordValues(
       const end = new Date(`${dto.checkOutDate}T12:00:00`);
       const diffTime = Math.abs(end.getTime() - start.getTime());
       totalNights = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-      totalDays = totalNights;
+      // DÍAS = NOCHES + 1 (Adriana, 22-jul): quien entra el 24 y sale el 26
+      // duerme 2 noches pero está 3 días (24, 25 y 26). El contrato decía
+      // "DOS (2) NOCHES y DOS (2) DÍAS" y siempre quedaba un día corto.
+      totalDays = totalNights + 1;
       checkInMini = formatSpanishContractStayDate(dto.checkInDate);
       checkOutMini = formatSpanishContractStayDate(dto.checkOutDate);
     } catch {
@@ -655,7 +757,9 @@ export function buildContractWordValues(
   let totalPriceNum =
     Number.isFinite(providedTotal) && providedTotal > 0
       ? providedTotal
-      : unitPriceNum * totalDays;
+      // Se cobra por NOCHE, no por día: si multiplicara por totalDays (que
+      // ahora es noches+1) el contrato saldría con una noche de más.
+      : unitPriceNum * totalNights;
 
   const petCount = Number(dto.petCount) || 0;
   // Política por defecto (regla unificada 21-jul: depósito $100k POR CADA
@@ -720,15 +824,19 @@ export function buildContractWordValues(
         habitacionesHint != null ? String(habitacionesHint) : undefined,
       zoneOrder: finca.zoneOrder,
       featuredIconIds: finca.featuredIcons,
-      maxAmenities: 22,
+      // 24 (antes 20): más características llenan la última hoja, que salía
+      // casi vacía con solo el bloque de firmas (Adriana, 22-jul).
+      maxAmenities: 24,
     });
   const nombrePropietario =
     (dto.propertyOwnerName && String(dto.propertyOwnerName).trim()) ||
     ownerOverride.nombreCompleto?.trim() ||
+    (finca.propietarioNombre && String(finca.propietarioNombre).trim()) ||
     "";
   const cedulaPropietario =
     (dto.propertyOwnerCedula && String(dto.propertyOwnerCedula).trim()) ||
     ownerOverride.cedula?.trim() ||
+    (finca.propietarioCedula && String(finca.propietarioCedula).trim()) ||
     "";
   const ciudadCedulaPropietario =
     (dto.propertyOwnerCity && String(dto.propertyOwnerCity).trim()) ||
@@ -889,11 +997,9 @@ export function buildContractWordValues(
     dto.securityDepositLabel,
     contractAdmin.securityDeposit ?? "$200.000",
   );
-  const depositoMascotaLabel = resolveContractMoneyLabel(
-    petCount > 0 ? petSurchargeRefundable : 0,
-    dto.petDepositLabel,
-    contractAdmin.petDeposit ?? "$100.000",
-  );
+  // Cláusula "por cada mascota": SIEMPRE el unitario $100.000 (no el total
+  // 2×100k=$200k, que antes salía mal como si fuera el valor unitario).
+  const depositoMascotaLabel = formatCopLabel(100_000) || "$100.000";
   const personasExtrasLabel = normalizeExtraPersonFeeLabel(
     (dto.extraPersonFeeLabel && String(dto.extraPersonFeeLabel).trim()) ||
       contractAdmin.extraPersonFee,

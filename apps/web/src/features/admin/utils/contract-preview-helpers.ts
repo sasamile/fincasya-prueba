@@ -58,7 +58,6 @@ type PreviewFormSlice = {
   clientLastName?: string;
   clientId: string;
   clientDocType?: string;
-  clientDocIssuedAt?: string;
   clientEmail: string;
   clientPhone: string;
   clientCity: string;
@@ -186,16 +185,20 @@ export function buildReservationPreviewFincaData(
     clienteApellidos: (form.clientLastName || "").trim().toUpperCase() || "—",
     clienteCedula: form.clientId.trim() || "—",
     tipoDocumento: (form.clientDocType || "CC").trim().toUpperCase(),
-    fechaExpedicion: form.clientDocIssuedAt?.trim() || "—",
-    fechaExpedicionCedula: form.clientDocIssuedAt?.trim() || "—",
+    // La fecha de expedición ya no se le pide a nadie (Adriana, 22-jul). Los
+    // marcadores siguen resolviendo, pero vacíos: si alguna plantilla vieja los
+    // usa, no imprime un "—" suelto.
+    fechaExpedicion: "",
+    fechaExpedicionCedula: "",
     ciudadCliente: form.clientCity.trim() || "—",
     clientCorreo: form.clientEmail.trim() || "—",
     clienteCelular: form.clientPhone.trim() || "—",
     direccionCliente: form.clientAddress.trim() || "—",
     nochesTexto: numberToSpanishTextCO(n, false),
     nochesNumero: String(n || 1),
-    diasTexto: numberToSpanishTextCO(Math.max(1, n), false),
-    diasNumero: String(Math.max(1, n)),
+    // DÍAS = NOCHES + 1: 2 noches (24 → 26 de julio) son 3 días.
+    diasTexto: numberToSpanishTextCO(Math.max(1, n) + 1, false),
+    diasNumero: String(Math.max(1, n) + 1),
     fechaLlegadaMini: formatSpanishContractStayDate(form.checkInDate) || "—",
     fechaSalidaMini: formatSpanishContractStayDate(form.checkOutDate) || "—",
     horaLlegada: form.checkInTime.trim() || "—",

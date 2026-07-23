@@ -244,9 +244,10 @@ async function buildPortalView(ctx: { db: any }, key: string) {
     paymentMedia: media,
     boldLink: booking.paymentPortalConfig?.boldLink ?? null,
     boldSurcharge: booking.paymentPortalConfig?.boldSurcharge ?? null,
-    // Default ON: solo se desactiva si el admin lo apaga explícitamente.
+    // Default APAGADO (Adriana, 22-jul): el soporte de pago va por WhatsApp;
+    // el cliente solo puede cargarlo en el portal si el asesor lo habilita.
     clientPaymentProofUploadEnabled:
-      booking.clientPaymentProofUploadEnabled !== false,
+      booking.clientPaymentProofUploadEnabled === true,
     receipts: (booking.paymentPortalReceipts ?? []).map((r) => ({
       id: r.id,
       bankAccountId: r.bankAccountId,

@@ -15,6 +15,7 @@ export async function POST(request: Request) {
       nombreCompleto?: string;
       cedula?: string;
       celular?: string;
+      celularAdicional?: string;
       correo?: string;
       city?: string;
       address?: string;
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
       nombreCompleto: body.nombreCompleto.trim(),
       cedula: body.cedula.trim(),
       celular: body.celular.trim(),
+      celularAdicional: body.celularAdicional?.trim() || undefined,
       correo: body.correo.trim(),
       city: body.city?.trim() || undefined,
       address: body.address?.trim() || undefined,

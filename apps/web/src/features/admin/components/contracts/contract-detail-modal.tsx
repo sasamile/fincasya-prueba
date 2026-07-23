@@ -10,9 +10,11 @@ import { es } from "date-fns/locale";
 import {
   Download,
   ExternalLink,
+  FileType,
   FileWarning,
   ImagePlus,
   Loader2,
+  PenLine,
   Trash2,
   User,
   X,
@@ -28,6 +30,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { resolveContractFile } from "@/features/admin/utils/contract-file-utils";
 import type { ContractPreviewTarget } from "@/features/admin/components/contracts/contract-preview-modal";
+import { ContractWordEditModal } from "@/features/admin/components/contracts/contract-word-edit-modal";
+import {
+  downloadBlob,
+  fetchContractDocxBlob,
+} from "@/features/admin/utils/rebuild-contract-docx";
 
 const ESTADOS: Record<string, { label: string; className: string }> = {
   borrador: { label: "Borrador", className: "bg-stone-100 text-stone-700" },
@@ -73,6 +80,8 @@ export function ContractDetailModal({
   const [deleting, setDeleting] = useState(false);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [removingPhotoUrl, setRemovingPhotoUrl] = useState<string | null>(null);
+  const [wordEditOpen, setWordEditOpen] = useState(false);
+  const [downloadingWord, setDownloadingWord] = useState(false);
 
   const data = useConvexQuery(
     api.contracts.getDetail,
@@ -197,6 +206,7 @@ export function ContractDetailModal({
   const confirmationFile = resolveContractFile(fileSource, "confirmation");
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto p-0 gap-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
@@ -406,8 +416,71 @@ export function ContractDetailModal({
                     className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 h-9 text-xs font-semibold hover:bg-muted transition"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    Descargar contrato
+                    Descargar PDF
                   </a>
+                </>
+              )}
+              {(c.propertyId || c.draftJson) && (
+                <>
+                  <button
+                    type="button"
+                    disabled={downloadingWord}
+                    onClick={() => {
+                      void (async () => {
+                        setDownloadingWord(true);
+                        try {
+                          const { blob, filename } = await fetchContractDocxBlob(
+                            {
+                              contractNumber: c.contractNumber,
+                              propertyId: c.propertyId
+                                ? String(c.propertyId)
+                                : undefined,
+                              propertyTitle: c.propertyTitle,
+                              propertyLocation: c.propertyLocation,
+                              clienteNombre: c.clienteNombre,
+                              clienteCedula: c.clienteCedula,
+                              clienteEmail: c.clienteEmail,
+                              clienteTelefono: c.clienteTelefono,
+                              clienteCiudad: c.clienteCiudad,
+                              clienteDireccion: c.clienteDireccion,
+                              valorTotal: c.valorTotal,
+                              fechaEntrada: c.fechaEntrada,
+                              fechaSalida: c.fechaSalida,
+                              draftJson: c.draftJson,
+                              origen: c.origen,
+                              updatedAt: c.updatedAt,
+                            },
+                          );
+                          downloadBlob(blob, filename);
+                          toast.success("Word descargado.");
+                        } catch (err) {
+                          toast.error(
+                            err instanceof Error
+                              ? err.message
+                              : "No se pudo descargar el Word.",
+                          );
+                        } finally {
+                          setDownloadingWord(false);
+                        }
+                      })();
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 h-9 text-xs font-semibold hover:bg-muted transition disabled:opacity-50"
+                  >
+                    {downloadingWord ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <FileType className="w-3.5 h-3.5" />
+                    )}
+                    Descargar Word
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWordEditOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 h-9 text-xs font-semibold hover:bg-muted transition"
+                  >
+                    <PenLine className="w-3.5 h-3.5" />
+                    Editar Word
+                  </button>
                 </>
               )}
               {confirmationFile.url && (
@@ -479,5 +552,33 @@ export function ContractDetailModal({
         </div>
       </DialogContent>
     </Dialog>
+
+    <ContractWordEditModal
+      contract={
+        c
+          ? {
+              contractNumber: c.contractNumber,
+              propertyId: c.propertyId ? String(c.propertyId) : undefined,
+              propertyTitle: c.propertyTitle,
+              propertyLocation: c.propertyLocation,
+              clienteNombre: c.clienteNombre,
+              clienteCedula: c.clienteCedula,
+              clienteEmail: c.clienteEmail,
+              clienteTelefono: c.clienteTelefono,
+              clienteCiudad: c.clienteCiudad,
+              clienteDireccion: c.clienteDireccion,
+              valorTotal: c.valorTotal,
+              fechaEntrada: c.fechaEntrada,
+              fechaSalida: c.fechaSalida,
+              draftJson: c.draftJson,
+              origen: c.origen,
+              updatedAt: c.updatedAt,
+            }
+          : null
+      }
+      open={wordEditOpen && !!c}
+      onClose={() => setWordEditOpen(false)}
+    />
+    </>
   );
 }

@@ -59,6 +59,23 @@ const FOLDERS: Record<string, { accept: (type: string, ext: string) => boolean; 
   },
 };
 
+/** Deja solo segmentos seguros: letras, números, guiones y guión bajo. */
+function sanitizeSubpath(raw: string): string {
+  return raw
+    .split('/')
+    .map((seg) =>
+      seg
+        .normalize('NFD')
+        .replace(/\p{M}/gu, '')
+        .replace(/[^\w-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, ''),
+    )
+    .filter((seg) => seg && seg !== '.' && seg !== '..')
+    .slice(0, 3)
+    .join('/');
+}
+
 export async function POST(req: NextRequest) {
   if (!BUCKET || !process.env.AWS_ACCESS_KEY_ID) {
     return NextResponse.json(
@@ -76,6 +93,13 @@ export async function POST(req: NextRequest) {
 
   const file = form.get('file');
   const folder = String(form.get('folder') ?? 'images');
+  /**
+   * Subcarpeta opcional dentro de la carpeta permitida. La usa el archivo de
+   * contratos: `documents/{codificación}/contratos`. Se sanea a conciencia —
+   * es entrada de usuario y termina en una ruta de S3, así que nada de `..`,
+   * barras iniciales ni caracteres raros.
+   */
+  const subpath = sanitizeSubpath(String(form.get('subpath') ?? ''));
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'Falta el archivo (campo "file")' }, { status: 400 });
@@ -126,7 +150,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const key = `${folder}/${randomUUID()}.${outExt}`;
+  const prefix = subpath ? `${folder}/${subpath}` : folder;
+  const key = `${prefix}/${randomUUID()}.${outExt}`;
 
   try {
     await s3.send(

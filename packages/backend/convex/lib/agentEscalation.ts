@@ -5,6 +5,22 @@ const PRICE_QUESTION =
 /** Respuesta que remite a la ficha sin dar cifra en COP. */
 const COP_PRICE = /\$\s*[\d.,]+|\d{1,3}(\.\d{3}){1,}/;
 
+/**
+ * El cliente lanza una CIFRA y pide confirmarla: "¿o sea que por los días
+ * 4.400.000?", "¿serían $8.800.000 en total?".
+ *
+ * Caso real (22-jul): la ficha decía $2.200.000 por noche, el cliente sumó bien
+ * sus 2 noches ($4.400.000) y preguntó; el bot tomó ESA cifra como si fuera el
+ * valor por noche, la multiplicó otra vez y le contestó $8.800.000. El doble.
+ * Las cuentas no las hace el bot: van a un Experto.
+ */
+const CLIENT_MONEY_AMOUNT =
+  /\$\s*\d[\d.,]*|\b\d{1,3}(?:\.\d{3})+\b|\b\d+(?:[.,]\d+)?\s*millon/i;
+
+export function isPriceMathRequest(text: string): boolean {
+  return CLIENT_MONEY_AMOUNT.test(text) && isClientQuestion(text);
+}
+
 export function isPriceQuestion(text: string): boolean {
   const t = text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
   return PRICE_QUESTION.test(t);
@@ -68,6 +84,13 @@ export function detectPriceLoopEscalation(
   catalogSent: boolean,
 ): string | null {
   if (!catalogSent) return null;
+
+  // El cliente pone una cifra sobre la mesa y pide confirmarla: PROHIBIDO que
+  // el bot haga la cuenta — se equivocó multiplicando el total del cliente.
+  if (isPriceMathRequest(lastUserContent)) {
+    return 'cliente pide confirmar un valor en pesos — las cuentas las hace un Experto';
+  }
+
   if (!isPriceQuestion(lastUserContent)) return null;
 
   const recentUser = history

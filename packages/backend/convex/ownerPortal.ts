@@ -116,7 +116,9 @@ export const getMyPanel = query({
         const guests = Array.isArray(b.checkinGuests) ? b.checkinGuests : [];
         const adultGuests = guests.filter((g) => !g.esMenor);
         const share = b.ownerPortalShare ?? {};
-        const showGuests = share.showGuestList !== false;
+        // Apagado por defecto: el propietario ve invitados solo si el asesor
+        // lo habilitó (Adriana, 22-jul).
+        const showGuests = share.showGuestList === true;
         const canViewGuests = showGuests && Boolean(b.ownerOfferAcceptedAt);
         bookings.push({
           id: String(b._id),

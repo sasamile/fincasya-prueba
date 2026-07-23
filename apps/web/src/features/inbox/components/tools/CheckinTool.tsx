@@ -437,8 +437,10 @@ export function CheckinTool({
   const requiresGuestList =
     selectedBooking?.property?.requiresGuestList !== false;
 
+  // Apagado por defecto (Adriana, 22-jul): compartir invitados con el
+  // propietario solo si el asesor lo habilita.
   const shareGuestList =
-    selectedBooking?.ownerPortalShare?.showGuestList !== false;
+    selectedBooking?.ownerPortalShare?.showGuestList === true;
 
   const guestCount = Array.isArray(selectedBooking?.checkinGuests)
     ? selectedBooking.checkinGuests.length
@@ -753,14 +755,14 @@ export function CheckinTool({
                     Cargar soportes de pago en el check-in
                   </p>
                   <p className="text-[10px] leading-snug text-muted-foreground">
-                    {selectedBooking.clientPaymentProofUploadEnabled !== false
+                    {selectedBooking.clientPaymentProofUploadEnabled === true
                       ? 'Activo: el turista ve y sube comprobantes en el portal.'
                       : 'Apagado: WhatsApp (sigue pudiendo ver soportes ya cargados).'}
                   </p>
                 </div>
                 <Switch
                   checked={
-                    selectedBooking.clientPaymentProofUploadEnabled !== false
+                    selectedBooking.clientPaymentProofUploadEnabled === true
                   }
                   onCheckedChange={(v) =>
                     void handleTogglePaymentProofUpload(v)

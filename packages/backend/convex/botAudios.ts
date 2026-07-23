@@ -12,12 +12,16 @@
  */
 import { v } from 'convex/values';
 import {
+  action,
   internalMutation,
   internalQuery,
   mutation,
   query,
 } from './_generated/server';
+import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
+import { sendWhatsappText } from './lib/ycloud';
+import { sendAudioToYcloud } from './lib/ycloud/senders';
 
 // ============ PANEL (CRUD) ============
 
@@ -243,5 +247,176 @@ export const recordSent = internalMutation({
       updatedAt: now,
     });
     await ctx.db.patch(conversationId, { lastMessageAt: now });
+  },
+});
+
+// ============ EXPERTO (inbox) ============
+
+const ADVISOR_SENDER_ID = 'panel-Experto';
+
+/** Datos mínimos para que el Experto envíe un caso por WhatsApp. */
+export const getSendPayload = internalQuery({
+  args: {
+    conversationId: v.id('conversations'),
+    audioId: v.id('botAudios'),
+  },
+  handler: async (ctx, { conversationId, audioId }) => {
+    const conversation = await ctx.db.get(conversationId);
+    if (!conversation) return null;
+    const contact = await ctx.db.get(conversation.contactId);
+    const phone = contact?.phone?.trim();
+    if (!phone) return null;
+    const audio = await ctx.db.get(audioId);
+    if (!audio) return null;
+    if (!audio.storageId && !audio.texto?.trim()) return null;
+    return {
+      phone,
+      titulo: audio.titulo,
+      situacion: audio.situacion,
+      storageId: audio.storageId ?? null,
+      mimeType: audio.mimeType ?? null,
+      filename: audio.filename ?? null,
+      texto: audio.texto?.trim() || null,
+      enabled: audio.enabled,
+    };
+  },
+});
+
+/**
+ * Persiste en el inbox el envío manual del Experto (cuenta como Experto,
+ * apaga el bot en ese chat).
+ */
+export const recordAdvisorSent = internalMutation({
+  args: {
+    conversationId: v.id('conversations'),
+    audioId: v.id('botAudios'),
+    audioSent: v.boolean(),
+    audioWamid: v.optional(v.string()),
+    textoSent: v.boolean(),
+    textoWamid: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    { conversationId, audioId, audioSent, audioWamid, textoSent, textoWamid },
+  ) => {
+    const audio = await ctx.db.get(audioId);
+    if (!audio) return;
+    const now = Date.now();
+    if (audioSent && audio.storageId) {
+      await ctx.db.insert('messages', {
+        conversationId,
+        sender: 'assistant',
+        content: `🎙️ ${audio.titulo}`,
+        type: 'audio',
+        mediaUrl: (await ctx.storage.getUrl(audio.storageId)) ?? undefined,
+        mediaFilename: audio.filename ?? undefined,
+        mediaMime: audio.mimeType ?? undefined,
+        wamid: audioWamid,
+        whatsappStatus: audioWamid ? 'sent' : undefined,
+        sentByUserId: ADVISOR_SENDER_ID,
+        metadata: {
+          source: 'advisor_bot_audio',
+          botAudioId: String(audioId),
+        },
+        createdAt: now,
+      });
+    }
+    if (textoSent && audio.texto) {
+      await ctx.db.insert('messages', {
+        conversationId,
+        sender: 'assistant',
+        content: audio.texto,
+        type: 'text',
+        wamid: textoWamid,
+        whatsappStatus: textoWamid ? 'sent' : undefined,
+        sentByUserId: ADVISOR_SENDER_ID,
+        metadata: {
+          source: 'advisor_bot_audio',
+          botAudioId: String(audioId),
+        },
+        createdAt: now + 1,
+      });
+    }
+    await ctx.db.patch(audioId, {
+      sentCount: (audio.sentCount ?? 0) + 1,
+      updatedAt: now,
+    });
+    await ctx.db.patch(conversationId, {
+      status: 'human',
+      lastMessageAt: now,
+      aiManualOverride: false,
+    });
+  },
+});
+
+/**
+ * Experto envía un caso de /admin/audios-bot al chat abierto:
+ * nota de voz (+ texto oficial si existe). Sin candado anti-repetición
+ * (el humano decide si reenviar).
+ */
+export const sendToConversation = action({
+  args: {
+    conversationId: v.id('conversations'),
+    audioId: v.id('botAudios'),
+    /** Si false, solo manda el audio (omite el texto oficial). Default: true. */
+    includeTexto: v.optional(v.boolean()),
+  },
+  handler: async (
+    ctx,
+    { conversationId, audioId, includeTexto },
+  ): Promise<{ ok: true; audioSent: boolean; textoSent: boolean }> => {
+    const payload = await ctx.runQuery(internal.botAudios.getSendPayload, {
+      conversationId,
+      audioId,
+    });
+    if (!payload) {
+      throw new Error(
+        'No se pudo enviar: falta el caso, el teléfono del cliente o el archivo.',
+      );
+    }
+
+    let audioSent = false;
+    let audioWamid: string | undefined;
+    if (payload.storageId) {
+      const blob = await ctx.storage.get(payload.storageId);
+      if (!blob) {
+        throw new Error('El archivo de audio ya no está en storage.');
+      }
+      const sent = await sendAudioToYcloud({
+        to: payload.phone,
+        audioBuffer: new Uint8Array(await blob.arrayBuffer()),
+        mimeType: payload.mimeType ?? 'audio/ogg',
+        filename: payload.filename ?? 'nota-de-voz.ogg',
+      });
+      audioSent = true;
+      audioWamid = sent.wamid;
+    }
+
+    let textoSent = false;
+    let textoWamid: string | undefined;
+    const wantTexto = includeTexto !== false && !!payload.texto;
+    if (wantTexto && payload.texto) {
+      const sent = await sendWhatsappText({
+        to: payload.phone,
+        text: payload.texto,
+      });
+      textoSent = true;
+      textoWamid = sent.wamid;
+    }
+
+    if (!audioSent && !textoSent) {
+      throw new Error('El caso no tiene audio ni texto para enviar.');
+    }
+
+    await ctx.runMutation(internal.botAudios.recordAdvisorSent, {
+      conversationId,
+      audioId,
+      audioSent,
+      audioWamid,
+      textoSent,
+      textoWamid,
+    });
+
+    return { ok: true, audioSent, textoSent };
   },
 });

@@ -664,3 +664,38 @@ html.dark[data-accent="green"] .admin {
   height: 0 !important;
 }
 
+/*
+ * SuperDoc: el PDF respeta w:jc both; la vista a veces pinta justify como left.
+ * Forzamos justificado en TODOS los párrafos del cuerpo (incl. el primero).
+ * No usar reglas por margin-left: SuperDoc pone margin en párrafos normales
+ * y eso dejaba el intro alineado a la izquierda.
+ * Amenidades cortas se ven igual justificadas (una línea no se estira).
+ */
+.superdoc-contract-surface .ProseMirror p,
+.superdoc-contract-surface .ProseMirror .sd-paragraph-content,
+#superdoc-contract-editor .ProseMirror p,
+#superdoc-contract-editor .ProseMirror .sd-paragraph-content,
+[id^="admin-superdoc-editor-"] .ProseMirror p,
+[id^="admin-superdoc-editor-"] .ProseMirror .sd-paragraph-content {
+  text-align: justify !important;
+  text-justify: inter-word;
+  -webkit-text-align-last: auto;
+  text-align-last: auto;
+}
+
+/* SuperDoc a veces pinta justify en spans de línea con left: forzamos. */
+.superdoc-contract-surface .ProseMirror p [style*="text-align"],
+#superdoc-contract-editor .ProseMirror p [style*="text-align"],
+[id^="admin-superdoc-editor-"] .ProseMirror p [style*="text-align"] {
+  text-align: inherit !important;
+}
+
+.superdoc-contract-surface .ProseMirror p[style*="text-align: center"],
+.superdoc-contract-surface .ProseMirror p[style*="text-align:center"],
+#superdoc-contract-editor .ProseMirror p[style*="text-align: center"],
+#superdoc-contract-editor .ProseMirror p[style*="text-align:center"],
+[id^="admin-superdoc-editor-"] .ProseMirror p[style*="text-align: center"],
+[id^="admin-superdoc-editor-"] .ProseMirror p[style*="text-align:center"] {
+  text-align: center !important;
+}
+

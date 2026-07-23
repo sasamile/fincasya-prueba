@@ -61,6 +61,16 @@ import {
 } from './lib/agentEscalation';
 import { detectPuenteFestivo, humanHolidayEs } from './lib/colombiaPublicHolidays';
 import {
+  catalogTier,
+  entraEnPrimerLote,
+  PRIMER_TIER_VECINO,
+  TIER_FAVORITA_EN_ZONA,
+  TIER_FAVORITA_VECINA,
+  TIER_RESTO_VECINA,
+  TIER_SEMANA_EN_ZONA,
+  TIER_SEMANA_VECINA,
+} from './lib/catalogTiers';
+import {
   capacityCeilForCupo,
   capacityCeilRelaxedForCupo,
   capacityPreferMaxForCupo,
@@ -828,49 +838,54 @@ export const toolCatalogPick = internalQuery({
       if (zoneKw.length === 0) return false;
       return propertyMatchesZone(location, departamentos, zoneKw);
     };
-    // Tiers (0 primero): fincas de la SEMANA en la zona pedida (o sin zona) →
-    // municipio/región pedida → favoritas → resto → fincas de la SEMANA de OTRAS
-    // zonas (cierran el lote como recomendación extra — decisión Vane 21-jul).
     const zonaGiven = zoneKw.length > 0;
-    const tierPickFirst = matches.filter(
-      (p) =>
-        esPick(p) &&
-        (!zonaGiven || inRequestedZone(p.location, p.departamentos)),
-    );
-    // Picks de la semana FUERA de la zona pedida: solo si son de la región
-    // vecina. Antes cerraban el lote con fincas de cualquier parte del país
+    // ORDEN DEL LOTE: la regla vive en lib/catalogTiers.ts (probada aparte).
+    // Los picks de la semana fuera de zona solo entran si son de la región
+    // vecina: antes cerraban el lote con fincas de cualquier parte del país
     // (quien pidió costa recibía Melgar y Villavicencio).
-    const tierPickLast = matches.filter(
-      (p) =>
-        esPick(p) &&
-        zonaGiven &&
-        !inRequestedZone(p.location, p.departamentos) &&
-        nearKw.length > 0 &&
-        propertyMatchesZone(p.location, p.departamentos, nearKw),
-    );
-    const noPick = matches.filter((p) => !esPick(p));
-    const tierExact = noPick.filter((p) =>
-      inRequestedZone(p.location, p.departamentos),
-    );
-    const rest = noPick.filter(
-      (p) => !inRequestedZone(p.location, p.departamentos),
-    );
-    const tierFav = rest.filter((p) => p.isFavorite === true);
-    const tierRest = rest.filter((p) => p.isFavorite !== true);
-    matches = [
-      ...seededShuffle(tierPickFirst, rotSeed),
-      ...seededShuffle(tierExact, rotSeed),
-      ...seededShuffle(tierFav, rotSeed),
-      ...seededShuffle(tierRest, rotSeed),
-      ...seededShuffle(tierPickLast, rotSeed),
-    ];
-    // Tier de cada finca (para ordenar la presentación sin romper los tiers).
+    const esVecina = (p: (typeof all)[number]) =>
+      nearKw.length > 0 && propertyMatchesZone(p.location, p.departamentos, nearKw);
+
     const tierIndex = new Map<string, number>();
-    for (const p of tierPickFirst) tierIndex.set(String(p._id), 0);
-    for (const p of tierExact) tierIndex.set(String(p._id), 1);
-    for (const p of tierFav) tierIndex.set(String(p._id), 2);
-    for (const p of tierRest) tierIndex.set(String(p._id), 3);
-    for (const p of tierPickLast) tierIndex.set(String(p._id), 4);
+    const clasificadas: typeof matches = [];
+    for (const p of matches) {
+      const enZona = inRequestedZone(p.location, p.departamentos);
+      if (zonaGiven && !enZona && !esVecina(p)) continue; // fuera de la región
+      const tier = catalogTier({
+        esPick: esPick(p),
+        enZona,
+        esFavorita: p.isFavorite === true,
+        zonaGiven,
+      });
+      tierIndex.set(String(p._id), tier);
+      clasificadas.push(p);
+    }
+
+    // PRIMER LOTE = SOLO FAVORITAS (Vane: "primero las favoritas y si piden
+    // más se le envía la otra"). Las no favoritas quedan para el siguiente
+    // envío de "más opciones".
+    const primerLote = exclude.size === 0;
+    const hayFavoritas = clasificadas.some((p) => {
+      const t = tierIndex.get(String(p._id));
+      return (
+        t === TIER_SEMANA_EN_ZONA ||
+        t === TIER_FAVORITA_EN_ZONA ||
+        t === TIER_FAVORITA_VECINA ||
+        t === TIER_SEMANA_VECINA
+      );
+    });
+
+    const porTier = new Map<number, typeof matches>();
+    for (const p of clasificadas) {
+      const tier = tierIndex.get(String(p._id)) ?? TIER_RESTO_VECINA;
+      if (primerLote && !entraEnPrimerLote(tier, hayFavoritas)) continue;
+      const bucket = porTier.get(tier);
+      if (bucket) bucket.push(p);
+      else porTier.set(tier, [p]);
+    }
+    matches = [...porTier.keys()]
+      .sort((a, b) => a - b)
+      .flatMap((tier) => seededShuffle(porTier.get(tier) ?? [], rotSeed));
 
     // ¿Filtramos por disponibilidad? Solo si vienen fechas válidas.
     const checkAvailability =
@@ -1001,10 +1016,10 @@ export const toolCatalogPick = internalQuery({
     }
 
     // LOTE FINAL: hasta 3 puestos GARANTIZADOS al cierre para fincas de la
-    // semana de OTRAS zonas (tier 4).
+    // semana de destinos VECINOS (tier 5).
     const MAX_PICKS_FUERA_DE_ZONA = 3;
     const pickFuera = candidatos
-      .filter((c) => c.tier === 4)
+      .filter((c) => c.tier === TIER_SEMANA_VECINA)
       .slice(0, MAX_PICKS_FUERA_DE_ZONA);
     const enPickFuera = new Set(pickFuera.map((c) => c.item.propertyId));
     const principal = candidatos.filter((c) => !enPickFuera.has(c.item.propertyId));
@@ -1076,9 +1091,11 @@ export const toolCatalogPick = internalQuery({
         }
       };
 
-      takeFromTier([0]); // 🥇 semana en zona
-      takeFromTier([1]); // 🥈 municipio pedido
-      takeFromTier([2, 3]); // favoritas + resto
+      takeFromTier([0]); // 🥇 fincas de la semana en la zona pedida
+      takeFromTier([1]); // 🥈 FAVORITAS de la zona pedida
+      takeFromTier([2]); // 🥉 resto de la zona pedida
+      takeFromTier([3]); // favoritas de destinos vecinos
+      takeFromTier([4]); // resto de destinos vecinos
 
       lote = chosen;
       repuesto = principal.filter((c) => !taken.has(c.item.propertyId));
@@ -1103,9 +1120,11 @@ export const toolCatalogPick = internalQuery({
       lote.sort((a, b) => a.tier - b.tier);
     }
     const items = [...lote, ...repuesto].map((c) => c.item);
-    // Con zona pedida, los tiers 2+ ya no son "cualquier parte del país" sino
-    // destinos de la misma región: si el lote los usó, el agente lo aclara.
-    const incluyeCercanas = zonaGiven && lote.some((c) => c.tier >= 2);
+    // Con zona pedida, los tiers 3+ son destinos VECINOS (misma región), no la
+    // zona exacta: si el lote los usó, el agente lo aclara. Los tiers 0–2 son
+    // la zona pedida (semana, favoritas y resto).
+    const incluyeCercanas =
+      zonaGiven && lote.some((c) => c.tier >= PRIMER_TIER_VECINO);
 
     console.log('[catalogo] embudo', {
       totalFincas: all.length,

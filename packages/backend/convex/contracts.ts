@@ -1,7 +1,9 @@
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
-import { internalMutation, mutation, query } from './_generated/server';
+import { internalMutation, mutation, query, type MutationCtx } from './_generated/server';
 import { internal } from './_generated/api';
+import { normalizeContractLookupQueryConvex } from './lib/contractLookup';
+import { enrichContactFromContractClient } from './contacts';
 
 /** Orden de avance del contrato; al fusionar, gana el estado más avanzado. */
 const ESTADO_RANK: Record<string, number> = {
@@ -10,8 +12,10 @@ const ESTADO_RANK: Record<string, number> = {
   expirado: 2,
   generado: 3,
   enviado: 4,
-  completado: 5,
-  pagado: 6,
+  /** El cliente devolvió el contrato firmado (lo valida la IA). */
+  firmado: 5,
+  completado: 6,
+  pagado: 7,
 };
 
 function rank(estado?: string): number {
@@ -32,6 +36,8 @@ type ContractFields = {
   clienteCedula?: string;
   clienteEmail?: string;
   clienteTelefono?: string;
+  /** Segundo número de contacto. Dato interno: NO sale en el contrato. */
+  clienteTelefonoAdicional?: string;
   clienteCiudad?: string;
   clienteDireccion?: string;
   firmanteNombre?: string;
@@ -154,9 +160,11 @@ function extractContractPdfFromMultimedia(
  * 2) si no hay match y hay conversationId, reutiliza el borrador/generado de
  *    esa conversación (evita duplicar al regenerar sin enviar)
  * Solo avanza el estado (nunca retrocede) vía ESTADO_RANK.
+ * Tras guardar, rellena en el lead/CRM solo los campos que falten
+ * (dirección, correo, número adicional, ciudad, etc.).
  */
 async function upsertContract(
-  ctx: any,
+  ctx: MutationCtx,
   fields: ContractFields,
 ): Promise<void> {
   const num = fields.contractNumber.trim();
@@ -166,7 +174,7 @@ async function upsertContract(
 
   let existing = await ctx.db
     .query('contracts')
-    .withIndex('by_contract_number', (q: any) =>
+    .withIndex('by_contract_number', (q) =>
       q.eq('contractNumber', num),
     )
     .first();
@@ -175,7 +183,7 @@ async function upsertContract(
   if (convId) {
     draftByConversation = await ctx.db
       .query('contracts')
-      .withIndex('by_conversation', (q: any) =>
+      .withIndex('by_conversation', (q) =>
         q.eq('conversationId', convId),
       )
       .first();
@@ -196,6 +204,19 @@ async function upsertContract(
   }
   if (convId) cleaned.conversationId = convId;
 
+  const syncLeadFromContract = async () => {
+    await enrichContactFromContractClient(ctx, {
+      conversationId: convId,
+      contractName: fields.clienteNombre,
+      contractCedula: fields.clienteCedula,
+      contractEmail: fields.clienteEmail,
+      contractPhone: fields.clienteTelefono,
+      contractPhoneAlt: fields.clienteTelefonoAdicional,
+      contractCity: fields.clienteCiudad,
+      contractAddress: fields.clienteDireccion,
+    });
+  };
+
   if (!existing) {
     const estado = fields.estado || 'borrador';
     await ctx.db.insert('contracts', {
@@ -215,6 +236,7 @@ async function upsertContract(
         /* contador opcional */
       }
     }
+    await syncLeadFromContract();
     return;
   }
 
@@ -230,6 +252,7 @@ async function upsertContract(
   };
 
   // Si el asesor tipó un CR real sobre un borrador INBOX-*, renombra la fila.
+  let redundantInboxDraftId: typeof existing._id | null = null;
   if (
     num !== existing.contractNumber &&
     isAutoInboxContractNumber(existing.contractNumber) &&
@@ -237,22 +260,39 @@ async function upsertContract(
   ) {
     const taken = await ctx.db
       .query('contracts')
-      .withIndex('by_contract_number', (q: any) =>
+      .withIndex('by_contract_number', (q) =>
         q.eq('contractNumber', num),
       )
       .first();
     if (!taken || taken._id === existing._id) {
       patch.contractNumber = num;
+    } else {
+      // Ese CR ya existe (el contrato real). El borrador INBOX que estábamos
+      // por actualizar es un DUPLICADO de la misma conversación: antes se
+      // quedaba como fila fantasma "Borrador" que la lista mostraba con el
+      // mismo código (Adriana, 22-jul). Aplicamos el patch al contrato real y
+      // borramos el borrador INBOX.
+      redundantInboxDraftId = existing._id;
+      existing = taken;
+      patch.estado =
+        fields.estado && rank(fields.estado) >= rank(taken.estado)
+          ? fields.estado
+          : taken.estado;
     }
   }
 
   await ctx.db.patch(existing._id, patch);
+
+  if (redundantInboxDraftId && redundantInboxDraftId !== existing._id) {
+    await ctx.db.delete(redundantInboxDraftId);
+  }
 
   // Si actualizamos por CR y quedó un borrador INBOX huérfano de la misma
   // conversación, elimínalo.
   if (
     draftByConversation &&
     draftByConversation._id !== existing._id &&
+    draftByConversation._id !== redundantInboxDraftId &&
     isAutoInboxContractNumber(draftByConversation.contractNumber)
   ) {
     const st = String(draftByConversation.estado ?? '').toLowerCase();
@@ -271,6 +311,8 @@ async function upsertContract(
       /* contador opcional */
     }
   }
+
+  await syncLeadFromContract();
 }
 
 export const upsert = mutation({
@@ -283,6 +325,7 @@ export const upsert = mutation({
     clienteCedula: v.optional(v.string()),
     clienteEmail: v.optional(v.string()),
     clienteTelefono: v.optional(v.string()),
+    clienteTelefonoAdicional: v.optional(v.string()),
     clienteCiudad: v.optional(v.string()),
     clienteDireccion: v.optional(v.string()),
     firmanteNombre: v.optional(v.string()),
@@ -318,6 +361,7 @@ export const upsertInternal = internalMutation({
     clienteCedula: v.optional(v.string()),
     clienteEmail: v.optional(v.string()),
     clienteTelefono: v.optional(v.string()),
+    clienteTelefonoAdicional: v.optional(v.string()),
     clienteCiudad: v.optional(v.string()),
     clienteDireccion: v.optional(v.string()),
     firmanteNombre: v.optional(v.string()),
@@ -357,6 +401,105 @@ export const updateStatus = mutation({
       updatedAt: Date.now(),
     });
     return { ok: true };
+  },
+});
+
+/** "YYYY-MM-DD" → ms epoch (mediodía, sin drift de zona). 0 si no parsea. */
+function ymdToMs(value?: string): number {
+  const raw = (value ?? '').trim();
+  if (!raw) return 0;
+  const ms = Date.parse(`${raw}T12:00:00-05:00`);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function num(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Contrato en forma de RESERVA, para "Confirmar pago".
+ *
+ * El buscador de Confirmar pago (api/bookings/by-contract) miraba solo en
+ * `bookings` y en los borradores del generador de admin. Los contratos hechos
+ * desde el INBOX viven únicamente en esta tabla, así que el asesor generaba el
+ * contrato, lo veía en la lista y al buscarlo le decía "No se encontró una
+ * reserva ni un borrador con ese contrato" (Adriana, 22-jul, contrato 2709).
+ *
+ * Los datos de la estadía salen de `draftJson`, que es el borrador completo
+ * tal como lo llenó el asesor.
+ */
+export const getBookingLikeByContractNumber = query({
+  args: { contractNumber: v.string() },
+  handler: async (ctx, args) => {
+    const raw = args.contractNumber.trim();
+    if (!raw) return null;
+    const normalized = normalizeContractLookupQueryConvex(raw);
+    const keys = [...new Set([normalized, raw].filter((k) => k.length > 0))];
+
+    let contract = null;
+    for (const key of keys) {
+      contract = await ctx.db
+        .query('contracts')
+        .withIndex('by_contract_number', (q) => q.eq('contractNumber', key))
+        .first();
+      if (contract) break;
+    }
+    if (!contract) return null;
+
+    let draft: Record<string, unknown> = {};
+    if (contract.draftJson) {
+      try {
+        const parsed = JSON.parse(contract.draftJson);
+        if (parsed && typeof parsed === 'object') {
+          draft = parsed as Record<string, unknown>;
+        }
+      } catch {
+        // Borrador ilegible: se responde igual con los campos del contrato.
+      }
+    }
+
+    const property = contract.propertyId
+      ? await ctx.db.get(contract.propertyId)
+      : null;
+    const str = (value: unknown): string =>
+      typeof value === 'string' ? value : '';
+
+    return {
+      _id: contract._id,
+      /** Marca de origen: la UI avisa que viene de un contrato, no de reserva. */
+      isContractRecord: true as const,
+      propertyId: contract.propertyId,
+      propertyTitle:
+        contract.propertyTitle ||
+        (property as { title?: string } | null)?.title ||
+        '',
+      propertyLocation:
+        contract.propertyLocation ||
+        (property as { location?: string } | null)?.location ||
+        '',
+      reference: contract.contractNumber,
+      nombreCompleto: contract.clienteNombre ?? '',
+      cedula: contract.clienteCedula ?? '',
+      correo: contract.clienteEmail ?? '',
+      celular: contract.clienteTelefono ?? '',
+      celularAdicional: contract.clienteTelefonoAdicional ?? '',
+      address: contract.clienteDireccion ?? '',
+      city: contract.clienteCiudad ?? '',
+      fechaEntrada: ymdToMs(contract.fechaEntrada),
+      fechaSalida: ymdToMs(contract.fechaSalida),
+      horaEntrada: str(draft.checkInTime) || undefined,
+      horaSalida: str(draft.checkOutTime) || undefined,
+      precioTotal: contract.valorTotal ?? num(draft.valorTotal),
+      numeroPersonas: num(draft.guests) || 1,
+      numeroNoches: num(draft.nights) || 1,
+      numeroMascotas: num(draft.petCount),
+      depositoMascotas: num(draft.petDeposit),
+      depositoGarantia: num(draft.refundableDeposit),
+      depositoAseo: num(draft.cleaningFee),
+      estado: contract.estado,
+      origen: contract.origen ?? '',
+    };
   },
 });
 
@@ -559,6 +702,44 @@ export const list = query({
           (c.propertyTitle ?? '').toLowerCase().includes(search),
       );
     }
+
+    // COLAPSA DUPLICADOS POR CR (Adriana, 22-jul): un mismo código puede tener
+    // el contrato real y un borrador INBOX fantasma que la lista mostraba con
+    // el mismo número. Se conserva el MÁS AVANZADO (mayor estado; a igualdad,
+    // el que ya tiene PDF y el más reciente). Los "Sin CR" no se agrupan: son
+    // contratos distintos que aún no tienen código.
+    const dedupKey = (c: (typeof all)[number]): string | null => {
+      const draftCode = extractDraftContractCode(c.draftJson);
+      const code =
+        (draftCode && !isAutoInboxContractNumber(draftCode) && draftCode) ||
+        (!isAutoInboxContractNumber(c.contractNumber) && c.contractNumber) ||
+        '';
+      return code ? code.trim().toLowerCase() : null;
+    };
+    const mejorPorCr = new Map<string, (typeof all)[number]>();
+    const deduped: typeof all = [];
+    for (const c of all) {
+      const key = dedupKey(c);
+      if (!key) {
+        deduped.push(c);
+        continue;
+      }
+      const prev = mejorPorCr.get(key);
+      if (!prev) {
+        mejorPorCr.set(key, c);
+        continue;
+      }
+      const gana =
+        rank(c.estado) !== rank(prev.estado)
+          ? rank(c.estado) > rank(prev.estado)
+          : Number(Boolean(c.pdfUrl)) !== Number(Boolean(prev.pdfUrl))
+            ? Boolean(c.pdfUrl)
+            : (c.updatedAt ?? 0) > (prev.updatedAt ?? 0);
+      if (gana) mejorPorCr.set(key, c);
+    }
+    all = [...deduped, ...mejorPorCr.values()].sort(
+      (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
+    );
 
     const counts: Record<string, number> = {};
     for (const c of all) counts[c.estado] = (counts[c.estado] ?? 0) + 1;

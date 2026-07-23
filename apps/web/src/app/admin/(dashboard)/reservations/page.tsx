@@ -2672,7 +2672,7 @@ export default function ReservationsPage() {
                     <DetailSection
                       icon={<User />}
                       title="Información del cliente"
-                      hint="Nombre, documento y contacto"
+                      hint="Nombre, documento, contactos y datos de origen"
                       defaultOpen
                     >
                       <div className="grid grid-cols-1 gap-5">
@@ -2681,7 +2681,7 @@ export default function ReservationsPage() {
                             Nombre Completo
                           </p>
                           <p className="text-sm font-medium text-foreground uppercase">
-                            {selectedBooking.nombreCompleto}
+                            {selectedBooking.nombreCompleto || "N/A"}
                           </p>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
@@ -2702,6 +2702,24 @@ export default function ReservationsPage() {
                             </p>
                           </div>
                         </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                              Celular adicional
+                            </p>
+                            <p className="text-sm font-medium text-foreground uppercase">
+                              {selectedBooking.celularAdicional || "—"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                              Fecha de nacimiento
+                            </p>
+                            <p className="text-sm font-medium text-foreground uppercase">
+                              {selectedBooking.fechaNacimiento || "—"}
+                            </p>
+                          </div>
+                        </div>
                         <div>
                           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
                             Correo Electrónico
@@ -2710,16 +2728,69 @@ export default function ReservationsPage() {
                             {selectedBooking.correo || "N/A"}
                           </p>
                         </div>
-                        {selectedBooking.city && (
+                        <div className="grid grid-cols-2 gap-4">
                           <div>
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
                               Ciudad
                             </p>
                             <p className="text-sm font-medium text-foreground uppercase">
-                              {selectedBooking.city}
+                              {selectedBooking.city || "—"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                              Código / CR
+                            </p>
+                            <p className="text-sm font-medium text-foreground uppercase">
+                              {selectedBooking.reference || "—"}
+                            </p>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                            Dirección
+                          </p>
+                          <p className="text-sm font-medium text-foreground uppercase">
+                            {selectedBooking.address || "—"}
+                          </p>
+                        </div>
+                        {(selectedBooking.purpose ||
+                          selectedBooking.groupType) && (
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                              Motivo / tipo de grupo
+                            </p>
+                            <p className="text-sm font-medium text-foreground uppercase">
+                              {selectedBooking.purpose ||
+                                selectedBooking.groupType}
                             </p>
                           </div>
                         )}
+                        {selectedBooking.observaciones?.trim() ? (
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                              Observaciones
+                            </p>
+                            <p className="text-sm font-medium text-foreground whitespace-pre-wrap">
+                              {selectedBooking.observaciones}
+                            </p>
+                          </div>
+                        ) : null}
+                        {selectedBooking.cedulaPhotoUrl ? (
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                              Foto cédula
+                            </p>
+                            <a
+                              href={selectedBooking.cedulaPhotoUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm font-semibold text-primary hover:underline"
+                            >
+                              Ver documento
+                            </a>
+                          </div>
+                        ) : null}
                       </div>
                     </DetailSection>
 

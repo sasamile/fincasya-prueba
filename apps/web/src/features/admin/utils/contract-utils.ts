@@ -258,8 +258,13 @@ export const GLOBAL_CONTRACT_TEMPLATE = `
 <p><strong>SÉPTIMA. -</strong> Para cuantas cuestiones se deriven de la interpretación y ejecución del presente contrato, ambas partes se someten a la jurisdicción de los Juzgados y Tribunales de Colombia, renunciando a su fuero propio.</p>
 <p>Y en prueba de conformidad, ambas partes firman el presente contrato, que se extiende por duplicado, quedando un ejemplar en poder de cada una de ellas.</p>
 
+<!--
+  La OCTAVA viaja PEGADA al bloque de firmas: la hoja final salía con la firma
+  sola y media página en blanco. Manteniéndolas juntas, la última hoja llega
+  con el texto de la cláusula y no queda desierta (Adriana, 22-jul).
+-->
+<div style="page-break-inside: avoid;">
 <p><strong>OCTAVA. -</strong> El cliente arrendador se hace responsable del comportamiento de sus acompañantes y exime de cualquier responsabilidad fiscal, penal o judicial al administrador de la finca y propietario por excesos de alcohol y/o estupefacientes, comportamientos violentos y/o eventualidades ocasionadas con mala conducta dentro de la finca.</p>
-
 
 <p>Firmado por las partes a los {{fechaGeneracion}}</p>
 
@@ -270,8 +275,6 @@ export const GLOBAL_CONTRACT_TEMPLATE = `
   <p style="margin-top: 0;">C.C. N° 81.720.077 de Chía (Cund)</p>
 </div>
 
-<p>&nbsp;</p>
-
 <div style="margin-top: 40px;">
   <p style="margin-bottom: 5px;"><strong>ARRENDATARIO</strong></p>
   <p style="margin-top: 0; margin-bottom: 5px;">__________________________</p>
@@ -280,6 +283,7 @@ export const GLOBAL_CONTRACT_TEMPLATE = `
   <p style="margin-top: 0; margin-bottom: 2px;">{{clientCorreo}}</p>
   <p style="margin-top: 0; margin-bottom: 2px;">{{clienteCelular}}</p>
   <p style="margin-top: 0;">{{direccionCliente}}</p>
+</div>
 </div>
 `;
 

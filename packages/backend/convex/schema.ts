@@ -26,6 +26,11 @@ export default defineSchema(
        * el paquete de datos del contrato (vía `contacts.upsertFromContractData`).
        */
       address: v.optional(v.string()),
+      /**
+       * Segundo teléfono de contacto (número adicional del contrato). Dato
+       * interno del CRM; no sustituye el teléfono de WhatsApp (`phone`).
+       */
+      phoneAlt: v.optional(v.string()),
       /** Lead: en seguimiento. Cliente: ya con reserva o relación comercial. */
       crmType: v.optional(v.union(v.literal('lead'), v.literal('client'))),
       lastReservationAt: v.optional(v.number()),
@@ -573,6 +578,8 @@ export default defineSchema(
       clienteCedula: v.optional(v.string()),
       clienteEmail: v.optional(v.string()),
       clienteTelefono: v.optional(v.string()),
+      /** Segundo número de contacto. Dato interno: NO sale en el contrato. */
+      clienteTelefonoAdicional: v.optional(v.string()),
       clienteCiudad: v.optional(v.string()),
       clienteDireccion: v.optional(v.string()),
       firmanteNombre: v.optional(v.string()),
@@ -607,6 +614,62 @@ export default defineSchema(
       .index('by_created', ['createdAt'])
       .index('by_property', ['propertyId'])
       .index('by_conversation', ['conversationId']),
+
+    /**
+     * ARCHIVO DE DOCUMENTOS POR CONTRATO (Adriana, 22-jul).
+     *
+     * Cada contrato es una CARPETA con el nombre de su codificación, y dentro
+     * dos subcarpetas: `contratos` y `confirmaciones`. En S3 se refleja igual:
+     * `documents/{codificación}/{contratos|confirmaciones}/archivo.pdf`.
+     *
+     * Un archivo se registra cuando se ENVÍA al cliente, no cuando se genera:
+     * generar es un borrador, enviar es el hecho que hay que dejar registrado.
+     *
+     * `tipo` dice qué es y `estado` en qué va:
+     *   contrato          → enviado | firmado | nulo
+     *   contrato_firmado  → el que devolvió el cliente (siempre `firmado`)
+     *   confirmacion      → CR de pago (siempre `enviado`)
+     */
+    contractDocuments: defineTable({
+      /** Codificación del contrato = nombre de la carpeta. */
+      contractNumber: v.string(),
+      tipo: v.union(
+        v.literal('contrato'),
+        /** El .docx editable del mismo contrato, por si hay que corregirlo. */
+        v.literal('contrato_word'),
+        v.literal('contrato_firmado'),
+        v.literal('confirmacion'),
+      ),
+      estado: v.union(
+        v.literal('enviado'),
+        v.literal('firmado'),
+        v.literal('nulo'),
+      ),
+      url: v.string(),
+      filename: v.string(),
+      /** Chat por el que salió (o por el que entró el firmado). */
+      conversationId: v.optional(v.string()),
+      /** Solo en confirmaciones: abono con el que se emitió el CR. */
+      montoAbonado: v.optional(v.number()),
+      /** Veredicto de la IA al validar el firmado que devolvió el cliente. */
+      validacionIa: v.optional(
+        v.object({
+          coincide: v.boolean(),
+          motivo: v.string(),
+          contratoDetectado: v.optional(v.string()),
+          nombreDetectado: v.optional(v.string()),
+          revisadaAt: v.number(),
+        }),
+      ),
+      /** Mensaje del inbox del que salió el documento entrante. */
+      messageId: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index('by_contract_number', ['contractNumber'])
+      .index('by_contract_and_tipo', ['contractNumber', 'tipo'])
+      .index('by_conversation', ['conversationId'])
+      .index('by_created', ['createdAt']),
 
     contractFillTokens: defineTable({
       token: v.string(),
@@ -965,7 +1028,12 @@ export default defineSchema(
       nombreCompleto: v.string(),
       cedula: v.string(),
       celular: v.string(),
+      /** Segundo número de contacto. Dato interno: NO sale en el contrato. */
+      celularAdicional: v.optional(v.string()),
       correo: v.string(),
+      /** Valor negociado con el propietario (cotización que se le envía). */
+      ownerNegotiatedAmount: v.optional(v.number()),
+      ownerNegotiatedAt: v.optional(v.number()),
       fechaEntrada: v.number(),
       fechaSalida: v.number(),
       horaEntrada: v.optional(v.string()), // Ej: "15:00"
@@ -2162,6 +2230,44 @@ export default defineSchema(
       .index('by_sale_link', ['saleLinkId'])
       .index('by_conversation', ['conversationId'])
       .index('by_created_at', ['createdAt']),
+
+    /**
+     * Gastos operativos y caja menor (libro de Reportes).
+     * - gasto: egreso del negocio (banco/Nequi/efectivo fuera de caja).
+     * - caja_entrada: fondeo de caja menor (NO es ingreso de negocio).
+     * - caja_salida: egreso pagado desde caja menor (sí suma a egresos).
+     */
+    operationalMovements: defineTable({
+      kind: v.union(
+        v.literal('gasto'),
+        v.literal('caja_entrada'),
+        v.literal('caja_salida'),
+      ),
+      /** Categoría libre o de lista (Aseo, Transporte, Insumos…). */
+      category: v.string(),
+      amount: v.number(),
+      /** Fecha contable YYYY-MM-DD (Bogotá). */
+      fecha: v.string(),
+      /** Timestamp ms (mediodía Bogotá) para índices/filtros. */
+      fechaMs: v.number(),
+      /** Medio de pago / entidad (Bancolombia, Efectivo, Nequi…). */
+      medio: v.optional(v.string()),
+      /** Beneficiario o proveedor. */
+      beneficiario: v.optional(v.string()),
+      notes: v.optional(v.string()),
+      /** Finca opcional (si el gasto se asocia a una propiedad). */
+      propertyId: v.optional(v.id('properties')),
+      propertyTitle: v.optional(v.string()),
+      createdBy: v.optional(v.string()),
+      createdByName: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+      /** Soft delete. */
+      deletedAt: v.optional(v.number()),
+    })
+      .index('by_fecha', ['fechaMs'])
+      .index('by_kind_fecha', ['kind', 'fechaMs'])
+      .index('by_created', ['createdAt']),
   },
   // Tablas importadas aun sin declarar (contracts, payments, reviews, ...)
   { strictTableNameTypes: false },

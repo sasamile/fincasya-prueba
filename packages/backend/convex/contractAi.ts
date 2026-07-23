@@ -2,11 +2,18 @@
  * Herramienta "Contrato IA" del inbox: analiza una conversación de WhatsApp y
  * extrae los datos para prellenar un contrato (finca, fechas, personas, precio,
  * datos del cliente). Usa el LLM (gpt-4.1) vía lib/openai.
+ *
+ * REGLA DURA: si el cliente seleccionó/respondió a una ficha del catálogo,
+ * ESA finca gana siempre — aunque antes haya escrito otro nombre (ej. "Tramontini").
  */
 import { v } from 'convex/values';
 import { action, internalQuery } from './_generated/server';
+import type { QueryCtx } from './_generated/server';
 import { internal } from './_generated/api';
+import type { Doc, Id } from './_generated/dataModel';
 import { chatCompletion } from './lib/openai';
+
+type FincaRef = { id: string; title: string };
 
 /** Contexto para la extracción: transcript, contacto y catálogo de fincas. */
 type ExtractionContext = {
@@ -26,7 +33,92 @@ type ExtractionContext = {
     capacity: number;
     priceBase: number;
   }>;
+  /**
+   * Finca elegida vía catálogo WhatsApp (tap / reply a ficha / order).
+   * Si está presente, el prefill DEBE usarla (prioridad sobre texto libre).
+   */
+  catalogSelectedFinca: FincaRef | null;
 };
+
+async function propertyFromRetailerId(
+  ctx: QueryCtx,
+  retailerId: string,
+): Promise<FincaRef | null> {
+  const rid = retailerId.trim();
+  if (!rid) return null;
+  const mapping = await ctx.db
+    .query('propertyWhatsAppCatalog')
+    .withIndex('by_retailer', (q) => q.eq('productRetailerId', rid))
+    .first();
+  if (mapping) {
+    const prop = await ctx.db.get(mapping.propertyId);
+    if (prop?.title) return { id: String(prop._id), title: prop.title };
+  }
+  // A veces el retailerId es el _id de la finca.
+  try {
+    const prop = await ctx.db.get(rid as Id<'properties'>);
+    if (prop?.title) return { id: String(prop._id), title: prop.title };
+  } catch {
+    /* id inválido */
+  }
+  return null;
+}
+
+function retailerFromMeta(
+  meta: { productRetailerId?: string } | null | undefined,
+): string {
+  return String(meta?.productRetailerId ?? '').trim();
+}
+
+function retailerFromContent(content: string): string {
+  const m = content.match(/product_retailer_id:\s*([^\s)\n]+)/i);
+  return m?.[1]?.trim() ?? '';
+}
+
+/**
+ * Resuelve la finca del catálogo que el cliente eligió (más reciente gana).
+ * Fuentes: metadata.productRetailerId, reply a ficha, lastReferredRetailerId.
+ */
+async function resolveCatalogSelectedFinca(
+  ctx: QueryCtx,
+  conversation: Doc<'conversations'>,
+  ordered: Doc<'messages'>[],
+): Promise<FincaRef | null> {
+  const byWamid = new Map<string, Doc<'messages'>>();
+  for (const m of ordered) {
+    if (m.wamid) byWamid.set(m.wamid, m);
+  }
+
+  // Del más reciente al más viejo: primera referencia a catálogo gana.
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const m = ordered[i]!;
+    if (m.deletedAt) continue;
+
+    let rid = retailerFromMeta(
+      m.metadata as { productRetailerId?: string } | null,
+    );
+    if (!rid) rid = retailerFromContent(m.content ?? '');
+
+    // Reply a una ficha ("Este me gusta" citando el producto).
+    if (!rid && m.sender === 'user' && m.replyToWamid) {
+      const parent = byWamid.get(m.replyToWamid);
+      if (parent) {
+        rid =
+          retailerFromMeta(
+            parent.metadata as { productRetailerId?: string } | null,
+          ) || retailerFromContent(parent.content ?? '');
+      }
+    }
+
+    if (!rid) continue;
+    const finca = await propertyFromRetailerId(ctx, rid);
+    if (finca) return finca;
+  }
+
+  const sticky = conversation.lastReferredRetailerId?.trim();
+  if (sticky) return await propertyFromRetailerId(ctx, sticky);
+  return null;
+}
 
 export const getExtractionContext = internalQuery({
   args: { conversationId: v.id('conversations') },
@@ -42,15 +134,30 @@ export const getExtractionContext = internalQuery({
         q.eq('conversationId', conversationId),
       )
       .order('desc')
-      .take(120);
-    const ordered = recent
-      .reverse()
-      .filter((m) => !m.deletedAt && (m.type ?? 'text') === 'text');
+      .take(160);
+    const ordered = recent.reverse().filter((m) => !m.deletedAt);
 
-    const messages = ordered.map((m) => ({
-      fromAdvisor: Boolean(m.sentByUserId),
-      content: m.content ?? '',
-    }));
+    const catalogSelectedFinca = await resolveCatalogSelectedFinca(
+      ctx,
+      conv,
+      ordered,
+    );
+
+    // Transcript: texto + fichas de catálogo (para que la IA vea la elección).
+    const messages = ordered
+      .filter((m) => {
+        const t = m.type ?? 'text';
+        return t === 'text' || t === 'product';
+      })
+      .map((m) => {
+        const isAdvisor = Boolean(m.sentByUserId) || m.sender === 'assistant';
+        let content = m.content ?? '';
+        if ((m.type ?? 'text') === 'product') {
+          content = content || '🏡 Ficha de catálogo';
+        }
+        return { fromAdvisor: isAdvisor, content };
+      })
+      .filter((m) => m.content.trim().length > 0);
 
     const properties = await ctx.db.query('properties').collect();
     const fincas = properties
@@ -76,6 +183,7 @@ export const getExtractionContext = internalQuery({
         : { name: '', phone: '', cedula: '', email: '', city: '' },
       messages,
       fincas,
+      catalogSelectedFinca,
     };
   },
 });
@@ -132,6 +240,11 @@ export const extractFromConversation = action({
       timeZone: 'America/Bogota',
     }).format(new Date());
 
+    const catalogPickHint = context.catalogSelectedFinca
+      ? `\n\nSELECCIÓN DEL CATÁLOGO (PRIORIDAD MÁXIMA): el cliente ya eligió la finca «${context.catalogSelectedFinca.title}» tocando/respondiendo una ficha. ` +
+        `Usa EXACTAMENTE ese título en fincaGuess. Ignora nombres de finca escritos antes en texto libre (ej. "Tramontini") si contradicen esta selección.`
+      : '';
+
     const system =
       'Eres un asistente que extrae los datos para un contrato de arriendo de ' +
       'finca a partir de una conversación de WhatsApp entre un ASESOR de FincasYa ' +
@@ -140,8 +253,10 @@ export const extractFromConversation = action({
       'string vacío o 0. Fechas en formato YYYY-MM-DD. La fecha de hoy (Colombia) ' +
       `es ${today}. Interpreta fechas relativas ("este finde", "el 15") en el ` +
       'año correcto. Precios en números enteros COP (sin puntos ni símbolos). ' +
-      'Para la finca, elige el título EXACTO del catálogo que mejor coincida con ' +
-      'lo hablado; ponlo en "fincaGuess".\n\n' +
+      'Para la finca, elige el título EXACTO del catálogo que mejor coincida. ' +
+      'REGLA: si el cliente respondió a una ficha ("Este me gusta", "esa", "me ' +
+      'interesa") o hay SELECCIÓN DEL CATÁLOGO, esa finca gana siempre sobre ' +
+      'cualquier nombre escrito antes en texto libre.\n\n' +
       'Esquema JSON:\n' +
       '{"fincaGuess": string, "contractCode": string, "checkIn": string, ' +
       '"checkOut": string, "guests": number, "pricePerNight": number, ' +
@@ -150,7 +265,8 @@ export const extractFromConversation = action({
       '"notes": string}';
 
     const user =
-      `CATÁLOGO DE FINCAS:\n${catalog || '(sin catálogo)'}\n\n` +
+      `CATÁLOGO DE FINCAS:\n${catalog || '(sin catálogo)'}` +
+      `${catalogPickHint}\n\n` +
       `DATOS DEL CONTACTO (WhatsApp): nombre="${context.contact.name}" ` +
       `tel="${context.contact.phone}" cedula="${context.contact.cedula}" ` +
       `correo="${context.contact.email}" ciudad="${context.contact.city}"\n\n` +
@@ -176,9 +292,9 @@ export const extractFromConversation = action({
       parsed = {};
     }
 
-    // Matchear la finca sugerida contra el catálogo real.
+    // Matchear la finca sugerida por el LLM contra el catálogo real.
     const guess = String(parsed.fincaGuess ?? '').trim();
-    let finca: { id: string; title: string } | null = null;
+    let finca: FincaRef | null = null;
     if (guess) {
       const g = normalize(guess);
       const match =
@@ -190,10 +306,18 @@ export const extractFromConversation = action({
       if (match) finca = { id: match.id, title: match.title };
     }
 
+    // PRIORIDAD DURA: selección del catálogo siempre gana (aunque el LLM
+    // prefiera un nombre escrito antes, ej. "Tramontini").
+    let fincaGuessOut = guess;
+    if (context.catalogSelectedFinca) {
+      finca = context.catalogSelectedFinca;
+      fincaGuessOut = context.catalogSelectedFinca.title;
+    }
+
     const c: Partial<ContractExtraction['client']> = parsed.client ?? {};
     return {
       finca,
-      fincaGuess: guess,
+      fincaGuess: fincaGuessOut,
       contractCode: String(parsed.contractCode ?? '').trim(),
       checkIn: String(parsed.checkIn ?? '').trim(),
       checkOut: String(parsed.checkOut ?? '').trim(),

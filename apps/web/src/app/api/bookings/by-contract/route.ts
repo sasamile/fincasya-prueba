@@ -5,9 +5,11 @@ export const runtime = "nodejs";
 
 /**
  * GET /api/bookings/by-contract?contractNumber=...
- * Busca primero una reserva real por número de contrato; si no existe, cae al
- * borrador (snapshot). Respuesta: el objeto (con isContractSnapshot en snapshots)
- * o { error } 404 si no hay nada.
+ * Busca en tres lugares, en orden: la reserva real, el borrador del generador
+ * de admin (snapshot) y, por último, la tabla de contratos — ahí viven los que
+ * se generan desde el INBOX, que antes no aparecían en «Confirmar pago».
+ * Respuesta: el objeto (marcado con isContractSnapshot o isContractRecord según
+ * de dónde salga) o { error } 404 si no hay nada.
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -32,6 +34,12 @@ export async function GET(request: Request) {
       { contractNumber },
     );
     if (snapshot) return NextResponse.json(snapshot);
+
+    const contract = await client.query(
+      api.contracts.getBookingLikeByContractNumber,
+      { contractNumber },
+    );
+    if (contract) return NextResponse.json(contract);
 
     return NextResponse.json(
       { error: "No se encontró una reserva ni un borrador con ese contrato." },

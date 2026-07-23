@@ -29,6 +29,7 @@ import {
   Star,
   Link2,
   FolderOpen,
+  Mail,
   Hash,
   Bell,
   History,
@@ -152,10 +153,18 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         href: "/admin/contract-link",
         icon: Link2,
       },
+      // Gestor de Contratos oculto (Adriana, 22-jul): las acciones de ver /
+      // editar / descargar viven ahora en Documentos, por carpeta. La ruta
+      // /admin/contracts sigue existiendo, solo no aparece en el menú.
       {
-        label: "Gestor de Contratos",
-        href: "/admin/contracts",
+        label: "Documentos",
+        href: "/admin/documentos",
         icon: FolderOpen,
+      },
+      {
+        label: "Cotización propietario",
+        href: "/admin/cotizacion-propietario",
+        icon: Mail,
       },
       {
         label: "Numeración CR",

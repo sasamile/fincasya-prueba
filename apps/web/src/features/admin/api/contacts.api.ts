@@ -28,6 +28,7 @@ export async function updateContact(
     email?: string;
     city?: string;
     address?: string;
+    phoneAlt?: string;
     fechaNacimiento?: string;
     crmType?: 'lead' | 'client';
   },

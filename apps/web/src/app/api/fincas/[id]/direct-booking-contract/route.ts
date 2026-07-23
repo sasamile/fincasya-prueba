@@ -29,39 +29,57 @@ function resolveContractNumber(dto: ContractDto, finca: ContractFinca): string {
 }
 
 let cachedTemplate: Buffer | null = null;
+let cachedTemplatePath: string | null = null;
+let cachedTemplateMtimeMs = -1;
 let cachedTemplatePromise: Promise<Buffer> | null = null;
 
 async function loadTemplate(): Promise<Buffer> {
-  if (cachedTemplate) return cachedTemplate;
-  if (cachedTemplatePromise) return cachedTemplatePromise;
+  const envPath = process.env.DEFAULT_CONTRACT_DOCX_PATH?.trim();
+  const candidates = [
+    envPath,
+    path.join(
+      process.cwd(),
+      "assets",
+      "contracts",
+      "default-contract-template.docx",
+    ),
+  ].filter(Boolean) as string[];
 
-  cachedTemplatePromise = (async () => {
-    const envPath = process.env.DEFAULT_CONTRACT_DOCX_PATH?.trim();
-    const candidates = [
-      envPath,
-      path.join(
-        process.cwd(),
-        "assets",
-        "contracts",
-        "default-contract-template.docx",
-      ),
-    ].filter(Boolean) as string[];
-    for (const p of candidates) {
-      try {
-        const buf = await fs.readFile(p);
-        if (buf.length >= 2 && buf.subarray(0, 2).toString() === "PK") {
-          cachedTemplate = buf;
-          return buf;
-        }
-      } catch {
-        /* siguiente */
+  for (const p of candidates) {
+    try {
+      const st = await fs.stat(p);
+      // Si el archivo cambió (edición en Word), invalidar caché.
+      if (
+        cachedTemplate &&
+        cachedTemplatePath === p &&
+        cachedTemplateMtimeMs === st.mtimeMs
+      ) {
+        return cachedTemplate;
       }
-    }
-    cachedTemplatePromise = null;
-    throw new Error("No se encontró la plantilla maestra del contrato (.docx).");
-  })();
+      if (cachedTemplatePromise && cachedTemplatePath === p) {
+        return cachedTemplatePromise;
+      }
 
-  return cachedTemplatePromise;
+      cachedTemplatePath = p;
+      cachedTemplatePromise = (async () => {
+        const buf = await fs.readFile(p);
+        if (buf.length < 2 || buf.subarray(0, 2).toString() !== "PK") {
+          throw new Error("Plantilla .docx inválida.");
+        }
+        cachedTemplate = buf;
+        cachedTemplateMtimeMs = st.mtimeMs;
+        cachedTemplatePromise = null;
+        return buf;
+      })();
+
+      return await cachedTemplatePromise;
+    } catch {
+      /* siguiente candidato */
+    }
+  }
+
+  cachedTemplatePromise = null;
+  throw new Error("No se encontró la plantilla maestra del contrato (.docx).");
 }
 
 /**
@@ -91,8 +109,11 @@ export async function POST(
   try {
     const client = getConvexHttpClient();
 
-    const [property, settingsPayload, template] = await Promise.all([
+    const [property, ownerInfo, settingsPayload, template] = await Promise.all([
       client.query(api.adminProperties.getById, { id: propertyId }),
+      client
+        .query(api.adminProperties.getOwnerInfo, { propertyId })
+        .catch(() => null),
       client
         .query(api.adminContractSettings.getGlobalPayload, {})
         .catch(() => null),
@@ -106,13 +127,36 @@ export async function POST(
       );
     }
 
+    const prop = property as {
+      title?: string;
+      location?: string;
+      capacity?: number;
+      features?: unknown[];
+      zoneOrder?: string[];
+      featuredIcons?: string[];
+      propietarioNombre?: string;
+      propietarioCedula?: string;
+    };
+    const owner = ownerInfo as {
+      propietarioNombre?: string;
+      propietarioCedula?: string;
+    } | null;
+
     const finca: ContractFinca = {
-      title: (property as { title?: string }).title,
-      location: (property as { location?: string }).location,
-      capacity: (property as { capacity?: number }).capacity,
-      features: (property as { features?: unknown[] }).features,
-      zoneOrder: (property as { zoneOrder?: string[] }).zoneOrder,
-      featuredIcons: (property as { featuredIcons?: string[] }).featuredIcons,
+      title: prop.title,
+      location: prop.location,
+      capacity: prop.capacity,
+      features: prop.features,
+      zoneOrder: prop.zoneOrder,
+      featuredIcons: prop.featuredIcons,
+      propietarioNombre:
+        owner?.propietarioNombre?.trim() ||
+        prop.propietarioNombre?.trim() ||
+        undefined,
+      propietarioCedula:
+        owner?.propietarioCedula?.trim() ||
+        prop.propietarioCedula?.trim() ||
+        undefined,
     };
 
     const contractNumber = resolveContractNumber(dto, finca);

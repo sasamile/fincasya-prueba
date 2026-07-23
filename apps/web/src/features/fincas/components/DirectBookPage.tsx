@@ -106,6 +106,8 @@ export function DirectBookPage({
   const [nombre, setNombre] = useState('');
   const [cedula, setCedula] = useState('');
   const [celular, setCelular] = useState('');
+  /** Segundo número de contacto. Dato interno: NO sale en el contrato. */
+  const [celularAdicional, setCelularAdicional] = useState('');
   const [correo, setCorreo] = useState('');
   const [city, setCity] = useState('');
   const [address, setAddress] = useState('');
@@ -471,6 +473,7 @@ export function DirectBookPage({
           nombreCompleto: nombre.trim(),
           cedula: cedula.trim(),
           celular: celular.trim(),
+          celularAdicional: celularAdicional.trim() || undefined,
           correo: correo.trim().toLowerCase(),
           city: city.trim(),
           address: address.trim(),
@@ -548,6 +551,16 @@ export function DirectBookPage({
           onChange={(e) => setCelular(e.target.value)}
           className="mt-1"
           required
+        />
+      </div>
+      <div>
+        <Label htmlFor="celularAdicional">Número adicional</Label>
+        <Input
+          id="celularAdicional"
+          value={celularAdicional}
+          onChange={(e) => setCelularAdicional(e.target.value)}
+          className="mt-1"
+          placeholder="Otro número de contacto"
         />
       </div>
       <div className="sm:col-span-2">

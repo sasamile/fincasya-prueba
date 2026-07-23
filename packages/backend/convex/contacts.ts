@@ -5,9 +5,14 @@ import {
   query,
   internalMutation,
   internalQuery,
+  type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
+
+function isBlank(value: string | undefined | null): boolean {
+  return !value || value.trim().length === 0;
+}
 
 const MAX_CONVERSATION_TAGS = 25;
 const MAX_TAG_LENGTH = 64;
@@ -282,6 +287,109 @@ export const upsertFromContractFillForm = internalMutation({
   },
 });
 
+/**
+ * Rellena en el lead/cliente SOLO lo que falta, con datos del contrato.
+ * No pisa valores que un asesor (o el propio lead) ya tenga.
+ * NO cambia el nombre del chat (`name` / `baseName`): el del contrato es
+ * solo para el Word; el del inbox lo define el asesor.
+ * Busca por contactId → conversación del inbox → teléfono → cédula.
+ */
+export async function enrichContactFromContractClient(
+  ctx: MutationCtx,
+  args: {
+    contactId?: Id<"contacts">;
+    conversationId?: string;
+    /** Ignorado a propósito: no se usa para renombrar el contacto del inbox. */
+    contractName?: string;
+    contractCedula?: string;
+    contractEmail?: string;
+    contractPhone?: string;
+    contractPhoneAlt?: string;
+    contractCity?: string;
+    contractAddress?: string;
+  },
+): Promise<{ updated: boolean; contactId: Id<"contacts"> | null; fields?: string[] }> {
+  let contactId: Id<"contacts"> | null = args.contactId ?? null;
+
+  const convRaw = args.conversationId?.trim();
+  if (!contactId && convRaw) {
+    try {
+      const conv = await ctx.db.get(convRaw as Id<"conversations">);
+      if (conv) contactId = conv.contactId;
+    } catch {
+      /* conversationId no es un Id válido */
+    }
+  }
+
+  if (!contactId && args.contractPhone) {
+    const byPhone = await findContactByPhone(ctx, args.contractPhone);
+    if (byPhone) contactId = byPhone._id;
+  }
+
+  if (!contactId && args.contractCedula?.trim()) {
+    const byCedula = await ctx.db
+      .query("contacts")
+      .withIndex("by_cedula", (q) =>
+        q.eq("cedula", args.contractCedula!.trim()),
+      )
+      .first();
+    if (byCedula) contactId = byCedula._id;
+  }
+
+  if (!contactId) return { updated: false, contactId: null };
+
+  const contact = await ctx.db.get(contactId);
+  if (!contact) return { updated: false, contactId: null };
+
+  const patch: Record<string, unknown> = {};
+
+  if (args.contractCedula?.trim() && isBlank(contact.cedula)) {
+    patch.cedula = args.contractCedula.trim();
+  }
+
+  if (args.contractEmail?.trim() && isBlank(contact.email)) {
+    patch.email = args.contractEmail.trim();
+  }
+
+  if (args.contractAddress?.trim() && isBlank(contact.address)) {
+    patch.address = args.contractAddress.trim();
+  }
+
+  if (args.contractCity?.trim() && isBlank(contact.city)) {
+    patch.city = args.contractCity.trim();
+  } else if (
+    args.contractAddress?.trim() &&
+    isBlank(contact.city) &&
+    !patch.city
+  ) {
+    const parts = args.contractAddress.split(",").map((p) => p.trim());
+    const last = parts[parts.length - 1];
+    if (last && last.length > 1 && last.length < 60) {
+      patch.city =
+        last.charAt(0).toUpperCase() + last.slice(1).toLowerCase();
+    }
+  }
+
+  if (args.contractPhoneAlt?.trim() && isBlank(contact.phoneAlt)) {
+    const alt =
+      normalizeContractPhone(args.contractPhoneAlt) ||
+      args.contractPhoneAlt.trim();
+    if (alt) patch.phoneAlt = alt;
+  }
+
+  if (contact.crmType !== "client" && contact.crmType !== "lead") {
+    patch.crmType = "lead" as const;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return { updated: false, contactId };
+  }
+
+  patch.updatedAt = Date.now();
+  await ctx.db.patch(contactId, patch);
+  return { updated: true, contactId, fields: Object.keys(patch) };
+}
+
 export const upsertFromContractData = internalMutation({
   args: {
     contactId: v.id("contacts"),
@@ -289,86 +397,19 @@ export const upsertFromContractData = internalMutation({
     contractCedula: v.optional(v.string()),
     contractEmail: v.optional(v.string()),
     contractAddress: v.optional(v.string()),
+    contractCity: v.optional(v.string()),
+    contractPhoneAlt: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const contact = await ctx.db.get(args.contactId);
-    if (!contact) return { updated: false };
-
-    const patch: Record<string, unknown> = {};
-
-    // cedula — solo si el contacto no tiene
-    if (
-      args.contractCedula &&
-      args.contractCedula.trim().length > 0 &&
-      (!contact.cedula || contact.cedula.trim().length === 0)
-    ) {
-      patch.cedula = args.contractCedula.trim();
-    }
-
-    // email — solo si el contacto no tiene
-    if (
-      args.contractEmail &&
-      args.contractEmail.trim().length > 0 &&
-      (!contact.email || contact.email.trim().length === 0)
-    ) {
-      patch.email = args.contractEmail.trim();
-    }
-
-    // address — solo si el contacto no tiene
-    if (
-      args.contractAddress &&
-      args.contractAddress.trim().length > 0 &&
-      (!contact.address || contact.address.trim().length === 0)
-    ) {
-      patch.address = args.contractAddress.trim();
-      // Parse city de la dirección: último segmento después de la última
-      // coma. Ej. "mz 26 cs 9, villavicencio" → "Villavicencio".
-      if (!contact.city || contact.city.trim().length === 0) {
-        const parts = args.contractAddress.split(",").map((p) => p.trim());
-        const last = parts[parts.length - 1];
-        if (last && last.length > 1 && last.length < 60) {
-          // Title-case suave: primera letra mayúscula del primer token
-          const titleCased =
-            last.charAt(0).toUpperCase() + last.slice(1).toLowerCase();
-          patch.city = titleCased;
-        }
-      }
-    }
-
-    // name — solo si el del contrato es MÁS COMPLETO
-    if (args.contractName && args.contractName.trim().length > 0) {
-      const incomingName = args.contractName.trim();
-      const currentName = (contact.baseName ?? contact.name ?? "").trim();
-      const incomingWords = incomingName.split(/\s+/).filter(Boolean).length;
-      const currentWords = currentName.split(/\s+/).filter(Boolean).length;
-      const incomingMoreComplete =
-        incomingWords >= 2 &&
-        (currentWords < 2 ||
-          currentName.toLowerCase() !== incomingName.toLowerCase());
-      if (incomingMoreComplete && currentName !== incomingName) {
-        patch.baseName = incomingName;
-        // Si hay dealLabel, reconstruimos el display name; si no, el name es
-        // directo el nombre del contrato.
-        if (contact.dealLabel && contact.dealLabel.length > 0) {
-          patch.name = `${incomingName} · ${contact.dealLabel}`;
-        } else {
-          patch.name = incomingName;
-        }
-      }
-    }
-
-    // crmType — sube a 'lead' si no es ya 'client'
-    if (contact.crmType !== "client" && contact.crmType !== "lead") {
-      patch.crmType = "lead" as const;
-    }
-
-    if (Object.keys(patch).length === 0) {
-      return { updated: false };
-    }
-
-    patch.updatedAt = Date.now();
-    await ctx.db.patch(args.contactId, patch);
-    return { updated: true, fields: Object.keys(patch) };
+    return enrichContactFromContractClient(ctx, {
+      contactId: args.contactId,
+      contractName: args.contractName,
+      contractCedula: args.contractCedula,
+      contractEmail: args.contractEmail,
+      contractAddress: args.contractAddress,
+      contractCity: args.contractCity,
+      contractPhoneAlt: args.contractPhoneAlt,
+    });
   },
 });
 
@@ -435,6 +476,7 @@ export const update = mutation({
     email: v.optional(v.string()),
     city: v.optional(v.string()),
     address: v.optional(v.string()),
+    phoneAlt: v.optional(v.string()),
     fechaNacimiento: v.optional(v.string()),
     crmType: v.optional(v.union(v.literal("lead"), v.literal("client"))),
   },
@@ -463,6 +505,10 @@ export const update = mutation({
     if (rest.address !== undefined) {
       const t = String(rest.address).trim();
       patch.address = t.length > 0 ? t : undefined;
+    }
+    if (rest.phoneAlt !== undefined) {
+      const t = String(rest.phoneAlt).trim();
+      patch.phoneAlt = t.length > 0 ? t : undefined;
     }
     if (rest.fechaNacimiento !== undefined) {
       const t = String(rest.fechaNacimiento).trim();

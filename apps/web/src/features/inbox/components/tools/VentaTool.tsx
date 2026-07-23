@@ -3,24 +3,33 @@
 /**
  * Herramienta "Links de venta" del rail: es POR ASESOR (no por chat). Lista
  * los links enviados con filtro por fecha (hoy por defecto), estado del
- * cliente, aviso si el número coincide con el chat abierto, copiar link y
- * creación (mismo formulario completo del panel admin).
+ * cliente, aviso si el número coincide con el chat abierto, copiar mensaje
+ * (texto oficial + 🔗) y creación. Con chat abierto, al crear envía el
+ * mensaje al cliente.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { useMutation } from 'convex/react';
+import { api } from '@fincasya/backend/convex/_generated/api';
 import {
   Copy,
   ExternalLink,
   Loader2,
   Plus,
   RefreshCcw,
+  Send,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { authClient } from '@/lib/auth-client';
 import {
   listSaleLinks,
   type SaleLink,
 } from '@/features/ventas/api/sale-links.api';
 import { CreateSaleLinkModal } from '@/features/ventas/components/create-sale-link-modal';
+import {
+  buildSaleLinkInviteMessage,
+  saleLinkPublicUrl,
+} from '@/features/ventas/lib/sale-link-invite-message';
 import type { ConversationRow } from '@/features/inbox/types';
 
 const input =
@@ -62,6 +71,12 @@ export function VentaTool({
   );
   const [showAll, setShowAll] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [sendingToken, setSendingToken] = useState<string | null>(null);
+
+  const sendMessage = useMutation(api.inbox.sendAdvisorMessage);
+  const { data: session } = authClient.useSession();
+  const actorId = session?.user?.id ? String(session.user.id) : undefined;
+  const actorName = session?.user?.name ? String(session.user.name) : undefined;
 
   const load = useCallback(async () => {
     try {
@@ -92,10 +107,37 @@ export function VentaTool({
     });
   }, [rows, dateFilter, showAll]);
 
-  function copyLink(token: string) {
-    const url = `${window.location.origin}/venta/${token}`;
-    void navigator.clipboard.writeText(url).catch(() => {});
-    toast.success('Link copiado.');
+  async function copyInvite(token: string) {
+    const url = saleLinkPublicUrl(token);
+    const text = buildSaleLinkInviteMessage(url);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Mensaje con link copiado.');
+    } catch {
+      toast.error('No se pudo copiar.');
+    }
+  }
+
+  async function sendInviteToChat(token: string) {
+    if (!conversation) {
+      toast.error('Abre un chat para enviar el mensaje.');
+      return;
+    }
+    setSendingToken(token);
+    try {
+      const url = saleLinkPublicUrl(token);
+      await sendMessage({
+        conversationId: conversation.conversationId,
+        content: buildSaleLinkInviteMessage(url),
+        actorId,
+        actorName,
+      });
+      toast.success('Mensaje con link enviado al chat.');
+    } catch {
+      toast.error('No se pudo enviar al chat.');
+    } finally {
+      setSendingToken(null);
+    }
   }
 
   return (
@@ -202,12 +244,27 @@ export function VentaTool({
                     </p>
                     <button
                       type="button"
-                      onClick={() => copyLink(l.token)}
-                      title="Copiar link"
+                      onClick={() => void copyInvite(l.token)}
+                      title="Copiar mensaje + link"
                       className="grid h-7 w-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-muted"
                     >
                       <Copy className="h-3.5 w-3.5" />
                     </button>
+                    {conversation ? (
+                      <button
+                        type="button"
+                        onClick={() => void sendInviteToChat(l.token)}
+                        disabled={sendingToken === l.token}
+                        title="Enviar mensaje al chat abierto"
+                        className="grid h-7 w-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-muted disabled:opacity-50"
+                      >
+                        {sendingToken === l.token ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    ) : null}
                     <a
                       href={`/venta/${l.token}`}
                       target="_blank"
@@ -229,9 +286,26 @@ export function VentaTool({
         open={showCreate}
         onOpenChange={setShowCreate}
         variant="inbox"
-        onCreated={() => {
+        onCreated={(created) => {
           setShowCreate(false);
           void load();
+          if (conversation) {
+            void (async () => {
+              try {
+                await sendMessage({
+                  conversationId: conversation.conversationId,
+                  content: buildSaleLinkInviteMessage(created.url),
+                  actorId,
+                  actorName,
+                });
+                toast.success('Mensaje con link enviado al chat.');
+              } catch {
+                toast.error(
+                  'Link creado y mensaje copiado, pero no se pudo enviar al chat.',
+                );
+              }
+            })();
+          }
         }}
       />
     </>
