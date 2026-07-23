@@ -653,6 +653,8 @@ export default defineSchema(
         v.literal('contrato_word'),
         v.literal('contrato_firmado'),
         v.literal('confirmacion'),
+        /** El .docx editable de la misma confirmación (CR). */
+        v.literal('confirmacion_word'),
       ),
       estado: v.union(
         v.literal('enviado'),

@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
     "puppeteer",
     "puppeteer-core",
     "@sparticuz/chromium",
+    "html-to-docx",
     "@ilovepdf/ilovepdf-nodejs",
     "@ilovepdf/ilovepdf-js-core",
     "heic-convert",

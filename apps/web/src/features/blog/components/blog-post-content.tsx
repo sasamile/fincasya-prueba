@@ -147,18 +147,29 @@ export function BlogPostContent({ id }: { id: number }) {
               <div>
                 <h3 className="text-lg font-bold">¿Te gustó este artículo?</h3>
                 <p className="text-sm text-muted-foreground">
-                  Escríbenos y te ayudamos a planear tu escapada.
+                  Compártelo o escríbenos y te ayudamos a planear tu escapada.
                 </p>
               </div>
-              <a
-                href={blog.ctaWhatsappUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 font-bold text-white transition-transform hover:scale-105"
-              >
-                <MessageCircle className="h-5 w-5" />
-                WhatsApp
-              </a>
+              <div className="flex flex-wrap items-center gap-2">
+                <BlogShareButton
+                  id={post.id}
+                  title={post.title}
+                  excerpt={post.excerpt}
+                  imageUrl={post.imageUrl}
+                  category={post.category}
+                  readTime={post.readTime}
+                  className="inline-flex h-11 items-center gap-2 rounded-lg border border-border bg-background px-5 text-sm font-bold text-foreground hover:bg-muted"
+                />
+                <a
+                  href={blog.ctaWhatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-6 font-bold text-white transition-transform hover:scale-105"
+                >
+                  <MessageCircle className="h-5 w-5" />
+                  WhatsApp
+                </a>
+              </div>
             </div>
           </motion.div>
         </div>

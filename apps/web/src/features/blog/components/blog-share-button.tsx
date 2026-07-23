@@ -17,7 +17,7 @@ import {
   FaLink,
   FaEllipsis,
 } from "react-icons/fa6";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 interface BlogShareButtonProps {
@@ -28,6 +28,14 @@ interface BlogShareButtonProps {
   category?: string;
   readTime?: number;
   className?: string;
+}
+
+function resolveShareOrigin(): string {
+  if (typeof window !== "undefined") {
+    const { origin } = window.location;
+    if (!/localhost|127\.0\.0\.1/i.test(origin)) return origin;
+  }
+  return "https://www.fincasya.com";
 }
 
 export function BlogShareButton({
@@ -42,18 +50,19 @@ export function BlogShareButton({
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const sharePath = `/blog/${id}`;
-  const shareUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}${sharePath}`
-      : `https://fincasya.com${sharePath}`;
-  const shareText = `Mira este artículo de FincasYa: ${title}`;
+  const shareUrl = useMemo(() => {
+    return `${resolveShareOrigin()}/blog/${id}`;
+  }, [id]);
+
+  const shareText = excerpt?.trim()
+    ? `${title}\n\n${excerpt.trim()}`
+    : `Mira este artículo de FincasYa: ${title}`;
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
-      toast.success("Copiado al portapapeles");
+      toast.success("Enlace copiado");
       setTimeout(() => setCopied(false), 2000);
     } catch {
       toast.error("Error al copiar");
@@ -62,14 +71,14 @@ export function BlogShareButton({
 
   const shareOptions = [
     {
-      name: "Copia el enlace",
+      name: copied ? "¡Copiado!" : "Copiar enlace",
       icon: <FaLink className="w-5 h-5" />,
       action: handleCopy,
     },
     {
       name: "WhatsApp",
       icon: <FaWhatsapp className="w-5 h-5 text-[#25D366]" />,
-      href: `https://wa.me/?text=${encodeURIComponent(shareText + " " + shareUrl)}`,
+      href: `https://wa.me/?text=${encodeURIComponent(`${shareText}\n\n${shareUrl}`)}`,
     },
     {
       name: "Facebook",
@@ -77,21 +86,21 @@ export function BlogShareButton({
       href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`,
     },
     {
-      name: "Twitter",
+      name: "Twitter / X",
       icon: <FaXTwitter className="w-5 h-5 text-black" />,
-      href: `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`,
+      href: `https://twitter.com/intent/tweet?text=${encodeURIComponent(title)}&url=${encodeURIComponent(shareUrl)}`,
     },
     {
-      name: "Correo electrónico",
+      name: "Correo",
       icon: <FaEnvelope className="w-5 h-5 text-gray-600" />,
-      href: `mailto:?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(shareText + "\n\n" + shareUrl)}`,
+      href: `mailto:?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(`${shareText}\n\n${shareUrl}`)}`,
     },
     {
       name: "Más opciones",
       icon: <FaEllipsis className="w-5 h-5 text-gray-700" />,
       action: () => {
         if (navigator.share) {
-          navigator.share({ title, text: shareText, url: shareUrl });
+          void navigator.share({ title, text: shareText, url: shareUrl });
         } else {
           void handleCopy();
         }
@@ -102,6 +111,7 @@ export function BlogShareButton({
   return (
     <>
       <Button
+        type="button"
         variant="outline"
         size="sm"
         className={
@@ -111,7 +121,7 @@ export function BlogShareButton({
         onClick={() => setIsOpen(true)}
       >
         <Share className="h-4 w-4" />
-        <span className="text-xs underline">Compartir</span>
+        <span className="text-xs underline sm:no-underline">Compartir</span>
       </Button>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -125,7 +135,7 @@ export function BlogShareButton({
           <div className="mb-5 flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-2xl border border-neutral-100 bg-neutral-50/50 p-3 sm:mb-6 sm:gap-4 sm:p-4">
             <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl shadow-sm sm:h-16 sm:w-16">
               <ImageWithBlur
-                src={imageUrl || "/placeholder.jpg"}
+                src={imageUrl || "/images/PHOTO-2026-07-23-11-02-24.jpg"}
                 alt={title}
                 fill
                 className="object-cover"
@@ -171,6 +181,7 @@ export function BlogShareButton({
               ) : (
                 <button
                   key={option.name}
+                  type="button"
                   onClick={option.action}
                   className="group flex w-full min-w-0 items-center gap-3 rounded-2xl border border-neutral-200 p-2.5 text-left transition-all hover:bg-neutral-50 active:scale-95 sm:p-3"
                 >
@@ -178,9 +189,7 @@ export function BlogShareButton({
                     {option.icon}
                   </div>
                   <span className="truncate text-[13px] font-semibold text-gray-700 sm:text-sm">
-                    {option.name === "Copia el enlace" && copied
-                      ? "¡Copiado!"
-                      : option.name}
+                    {option.name}
                   </span>
                 </button>
               ),

@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import {
   BadgeCheck,
   Eye,
+  FileDown,
   FileText,
   Loader2,
   MessageCircle,
@@ -179,6 +180,7 @@ export function ConfirmarReservaTool({
   const [modal, setModal] = useState<null | 'edit' | 'preview'>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [descargandoWord, setDescargandoWord] = useState(false);
   const previewBlobRef = useRef<{ blob: Blob; filename: string } | null>(null);
 
   const sendMessage = useMutation(api.inbox.sendAdvisorMessage);
@@ -257,52 +259,91 @@ export function ConfirmarReservaTool({
   }, [selected, rentAmount]);
 
   /**
+   * Arma el payload del CR con TODOS los campos editables del modal (el
+   * contrato solo sirve de precarga). Lo usan el PDF y el Word por igual.
+   */
+  function buildCrPayload(c: Contract) {
+    const draft = parseDraft(c.draftJson);
+    const total = parseCop(totalRaw) || c.valorTotal || 0;
+    const abono = parseCop(abonoRaw);
+    return {
+      contractNumber: c.contractNumber,
+      clientName: c.clienteNombre,
+      clientId: c.clienteCedula,
+      clientEmail: c.clienteEmail,
+      clientPhone: c.clienteTelefono,
+      clientAddress: c.clienteDireccion,
+      propertyName: c.propertyTitle,
+      propertyLocation: c.propertyLocation,
+      checkInDate: c.fechaEntrada,
+      checkOutDate: c.fechaSalida,
+      checkInTime: horaEntrada || '10:00 AM',
+      checkOutTime: horaSalida || '04:00 PM',
+      guests: Number(huespedes) || undefined,
+      nights: Number(noches) || undefined,
+      precioTotal: total,
+      rentAmount: parseCop(alquilerRaw) || undefined,
+      cleaningFee: parseCop(limpiezaRaw) || undefined,
+      refundableDeposit: parseCop(depositoRaw) || undefined,
+      petCount: Number(draft.petCount) || undefined,
+      depositoMascotas: parseCop(draft.petDeposit ?? '') || undefined,
+      depositAmount: abono || undefined,
+      depositDate: fechaAbono || undefined,
+      balanceAmount: Math.max(total - abono, 0) || undefined,
+      balanceDate: fechaSaldo || undefined,
+      paymentMethod: metodoPago,
+      groupType: tipoGrupo.trim() || GRUPO_DEFECTO,
+      purpose: proposito.trim() || undefined,
+      observaciones: observaciones.trim() || undefined,
+      paymentStatus:
+        abono >= total && total > 0 ? ('paid' as const) : ('pending' as const),
+    };
+  }
+
+  /**
    * Genera el PDF de la confirmación con TODOS los campos editables (SIN
    * subirlo). Se usa para la vista previa: el asesor lo revisa antes de enviar.
    */
   async function generarBlob(
     c: Contract,
   ): Promise<{ blob: Blob; filename: string }> {
-    const draft = parseDraft(c.draftJson);
-    // Todos los valores salen de los campos EDITABLES del modal; el contrato
-    // solo sirve de precarga.
-    const total = parseCop(totalRaw) || c.valorTotal || 0;
-    const abono = parseCop(abonoRaw);
     const { inboxService } = await import('@/features/inbox/api/inbox.api');
     return inboxService.generateReservationConfirmationPreview(
       conversation?.conversationId ?? '',
-      {
-        contractNumber: c.contractNumber,
-        clientName: c.clienteNombre,
-        clientId: c.clienteCedula,
-        clientEmail: c.clienteEmail,
-        clientPhone: c.clienteTelefono,
-        clientAddress: c.clienteDireccion,
-        propertyName: c.propertyTitle,
-        propertyLocation: c.propertyLocation,
-        checkInDate: c.fechaEntrada,
-        checkOutDate: c.fechaSalida,
-        checkInTime: horaEntrada || '10:00 AM',
-        checkOutTime: horaSalida || '04:00 PM',
-        guests: Number(huespedes) || undefined,
-        nights: Number(noches) || undefined,
-        precioTotal: total,
-        rentAmount: parseCop(alquilerRaw) || undefined,
-        cleaningFee: parseCop(limpiezaRaw) || undefined,
-        refundableDeposit: parseCop(depositoRaw) || undefined,
-        petCount: Number(draft.petCount) || undefined,
-        depositoMascotas: parseCop(draft.petDeposit ?? '') || undefined,
-        depositAmount: abono || undefined,
-        depositDate: fechaAbono || undefined,
-        balanceAmount: Math.max(total - abono, 0) || undefined,
-        balanceDate: fechaSaldo || undefined,
-        paymentMethod: metodoPago,
-        groupType: tipoGrupo.trim() || GRUPO_DEFECTO,
-        purpose: proposito.trim() || undefined,
-        observaciones: observaciones.trim() || undefined,
-        paymentStatus: abono >= total && total > 0 ? 'paid' : 'pending',
-      },
+      buildCrPayload(c),
     );
+  }
+
+  /** Genera el CR en Word (.docx) editable con los mismos campos del modal. */
+  async function generarWord(
+    c: Contract,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const { inboxService } = await import('@/features/inbox/api/inbox.api');
+    return inboxService.generateReservationConfirmationDocx(
+      conversation?.conversationId ?? '',
+      buildCrPayload(c),
+    );
+  }
+
+  /** Descarga el Word al equipo del asesor (sin enviarlo al cliente). */
+  async function descargarWord() {
+    if (!selected) return;
+    setDescargandoWord(true);
+    try {
+      const { blob, filename } = await generarWord(selected);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'No se pudo generar el Word.',
+      );
+    } finally {
+      setDescargandoWord(false);
+    }
   }
 
   /** Sube a la carpeta del contrato el blob YA revisado en la vista previa. */
@@ -310,9 +351,10 @@ export function ConfirmarReservaTool({
     c: Contract,
     blob: Blob,
     filename: string,
+    mime = 'application/pdf',
   ): Promise<string | null> {
     const fd = new FormData();
-    fd.append('file', new File([blob], filename, { type: 'application/pdf' }));
+    fd.append('file', new File([blob], filename, { type: mime }));
     fd.append('folder', 'documents');
     fd.append(
       'subpath',
@@ -377,6 +419,25 @@ export function ConfirmarReservaTool({
       const subido = await subirBlob(selected, revisado.blob, revisado.filename);
       if (subido) pdfUrl = subido;
 
+      // Word gemelo del CR: el equipo lo necesita para corregir cuando entra un
+      // cambio (Adriana, 23-jul). Se archiva junto al PDF; NO se envía al
+      // cliente (a él solo le llega el PDF). Si falla, el PDF igual sale.
+      let wordUrl: string | undefined;
+      let wordName: string | undefined;
+      try {
+        const word = await generarWord(selected);
+        wordName = word.filename;
+        const wordSubido = await subirBlob(
+          selected,
+          word.blob,
+          word.filename,
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        );
+        if (wordSubido) wordUrl = wordSubido;
+      } catch (err) {
+        console.error('[inbox] no se pudo generar el Word del CR', err);
+      }
+
       // Crea la RESERVA en el calendario (bloquea la finca esas fechas) y arma
       // el link de check-in. Idempotente: reenviar no duplica la reserva.
       let checkinUrl: string | undefined;
@@ -420,9 +481,27 @@ export function ConfirmarReservaTool({
           console.error('[inbox] no se pudo archivar la confirmación', err);
         }
       }
+      // El Word editable se archiva junto al PDF (no se envía al cliente).
+      if (wordUrl && wordName) {
+        try {
+          await registerDocument({
+            contractNumber: selected.contractNumber,
+            tipo: 'confirmacion_word',
+            estado: 'enviado',
+            url: wordUrl,
+            filename: wordName,
+            conversationId: conversation.conversationId,
+            montoAbonado: abono || undefined,
+          });
+        } catch (err) {
+          console.error('[inbox] no se pudo archivar el Word del CR', err);
+        }
+      }
       toast.success(
         pdfUrl
-          ? 'Confirmación enviada (mensaje + PDF) y archivada'
+          ? wordUrl
+            ? 'Confirmación enviada (PDF) y archivada en PDF + Word'
+            : 'Confirmación enviada (mensaje + PDF) y archivada'
           : 'Confirmación enviada en el chat',
       );
       cerrarModal();
@@ -747,6 +826,20 @@ export function ConfirmarReservaTool({
                   className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-background text-sm font-bold disabled:opacity-60"
                 >
                   <Pencil className="h-4 w-4" /> Editar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void descargarWord()}
+                  disabled={sending || descargandoWord}
+                  title="Descargar en Word (editable)"
+                  className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-sm font-bold text-blue-700 disabled:opacity-60"
+                >
+                  {descargandoWord ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileDown className="h-4 w-4" />
+                  )}
+                  Word
                 </button>
                 <button
                   type="button"

@@ -41,7 +41,12 @@ type Subcarpeta = "contratos" | "confirmaciones";
 
 type DocRow = {
   _id: Id<"contractDocuments">;
-  tipo: "contrato" | "contrato_word" | "contrato_firmado" | "confirmacion";
+  tipo:
+    | "contrato"
+    | "contrato_word"
+    | "contrato_firmado"
+    | "confirmacion"
+    | "confirmacion_word";
   estado: "enviado" | "firmado" | "nulo";
   url: string;
   filename: string;
@@ -140,8 +145,9 @@ function ArchivoRow({
   marcando: boolean;
   borrando: boolean;
 }) {
-  const esDocx = /\.docx$/i.test(doc.filename) || doc.tipo === "contrato_word";
-  const esWord = doc.tipo === "contrato_word";
+  const esWord =
+    doc.tipo === "contrato_word" || doc.tipo === "confirmacion_word";
+  const esDocx = /\.docx$/i.test(doc.filename) || esWord;
   // El Word es el editable de respaldo, no un contrato aparte: se marca así
   // para que nadie lo confunda con el que se le envió al cliente.
   const etiqueta = esWord
@@ -579,6 +585,12 @@ export function DocumentsExplorer() {
           contractNumber={carpeta}
           fileUrl={editando.url}
           filename={editando.filename}
+          kind={
+            editando.tipo === "confirmacion" ||
+            editando.tipo === "confirmacion_word"
+              ? "confirmacion"
+              : "contrato"
+          }
           onClose={() => setEditando(null)}
           onSaved={() => setEditando(null)}
         />

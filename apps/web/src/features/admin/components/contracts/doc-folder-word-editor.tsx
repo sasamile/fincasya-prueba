@@ -32,6 +32,7 @@ export function DocFolderWordEditor({
   fileUrl,
   filename,
   conversationId,
+  kind = 'contrato',
   onClose,
   onSaved,
 }: {
@@ -39,6 +40,8 @@ export function DocFolderWordEditor({
   fileUrl: string;
   filename: string;
   conversationId?: string;
+  /** Qué documento se edita: define la subcarpeta y el tipo al archivar. */
+  kind?: 'contrato' | 'confirmacion';
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -49,6 +52,12 @@ export function DocFolderWordEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const baseName = filename.replace(/\.docx$/i, '') || 'contrato';
+  // Contratos → subcarpeta `contratos` (tipos contrato/contrato_word).
+  // Confirmaciones (CR) → subcarpeta `confirmaciones` (confirmacion/_word).
+  const esConfirmacion = kind === 'confirmacion';
+  const subcarpeta = esConfirmacion ? 'confirmaciones' : 'contratos';
+  const tipoWord = esConfirmacion ? 'confirmacion_word' : 'contrato_word';
+  const tipoPdf = esConfirmacion ? 'confirmacion' : 'contrato';
 
   useEffect(() => {
     let cancelled = false;
@@ -116,7 +125,7 @@ export function DocFolderWordEditor({
     const fd = new FormData();
     fd.append('file', new File([blob], name, { type: blob.type }));
     fd.append('folder', 'documents');
-    fd.append('subpath', `${carpetaDeContrato(contractNumber)}/contratos`);
+    fd.append('subpath', `${carpetaDeContrato(contractNumber)}/${subcarpeta}`);
     const up = await fetch('/api/admin/upload', { method: 'POST', body: fd });
     const data = (await up.json().catch(() => ({}))) as { url?: string };
     return up.ok && data.url ? data.url : null;
@@ -145,7 +154,7 @@ export function DocFolderWordEditor({
       if (docxUrl) {
         await registerDocument({
           contractNumber,
-          tipo: 'contrato_word',
+          tipo: tipoWord,
           estado: 'enviado',
           url: docxUrl,
           filename: docxName,
@@ -175,7 +184,7 @@ export function DocFolderWordEditor({
         if (pdfUrl) {
           await registerDocument({
             contractNumber,
-            tipo: 'contrato',
+            tipo: tipoPdf,
             estado: 'enviado',
             url: pdfUrl,
             filename: pdfName,

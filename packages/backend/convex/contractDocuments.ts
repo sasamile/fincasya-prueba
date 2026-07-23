@@ -37,6 +37,8 @@ const tipoValidator = v.union(
   v.literal('contrato_word'),
   v.literal('contrato_firmado'),
   v.literal('confirmacion'),
+  /** El .docx editable de la misma confirmación (CR), por si hay un ajuste. */
+  v.literal('confirmacion_word'),
 );
 
 const estadoValidator = v.union(
@@ -153,7 +155,8 @@ export const listFolders = query({
         confirmaciones: 0,
         ultimoAt: 0,
       };
-      if (d.tipo === 'confirmacion') actual.confirmaciones += 1;
+      if (d.tipo === 'confirmacion' || d.tipo === 'confirmacion_word')
+        actual.confirmaciones += 1;
       else actual.contratos += 1;
       actual.ultimoAt = Math.max(actual.ultimoAt, d.createdAt);
       porCarpeta.set(d.contractNumber, actual);
@@ -333,10 +336,14 @@ export const listByContract = query({
     }
     docs.sort((a, b) => a.createdAt - b.createdAt);
 
+    // El PDF y el Word de la confirmación (CR) van juntos en `confirmaciones`;
+    // todo lo demás (contrato, su Word, el firmado) va en `contratos`.
+    const esConfirmacion = (t: string) =>
+      t === 'confirmacion' || t === 'confirmacion_word';
     return {
       carpeta: carpetaDeContrato(normalized),
-      contratos: docs.filter((d) => d.tipo !== 'confirmacion'),
-      confirmaciones: docs.filter((d) => d.tipo === 'confirmacion'),
+      contratos: docs.filter((d) => !esConfirmacion(d.tipo)),
+      confirmaciones: docs.filter((d) => esConfirmacion(d.tipo)),
     };
   },
 });

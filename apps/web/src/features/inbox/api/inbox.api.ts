@@ -348,6 +348,160 @@ function buildConfirmationHtml(p: ConfirmationPayload, logoDataUrl: string | nul
 </html>`;
 }
 
+/**
+ * CR en HTML con estilos INLINE, apto para html-to-docx (Word). Mismos datos
+ * que buildConfirmationHtml, pero sin <style>/clases ni fondos degradados (Word
+ * no los soporta) — bordes, sombreado y anchos van en cada celda para que el
+ * .docx salga como una tabla editable de verdad (Adriana/Vane, 23-jul).
+ */
+function buildConfirmationDocxHtml(
+  p: ConfirmationPayload,
+  logoDataUrl: string | null,
+): string {
+  const method = (p.paymentMethod ?? 'bancolombia').toLowerCase() as PaymentMethod;
+  const marks: Record<PaymentMethod, string> = {
+    bbva: '', bancolombia: '', davivienda: '', nequi: '', pse: '', tarjeta_credito: '',
+  };
+  if (method in marks) marks[method] = 'X';
+
+  const statusText = p.paymentStatus === 'paid' ? 'PAGADO' : 'PENDIENTE DE PAGO';
+  const totalAmount = Number(p.precioTotal ?? p.totalAmount ?? 0);
+  const rentAmount = Number(p.rentAmount ?? p.subtotal ?? 0);
+  const cleaningFee = Number(p.cleaningFee ?? 0);
+  const refundableDeposit = Number(
+    p.refundableDeposit ?? (Number(p.damageDeposit ?? 0) + Number(p.depositoMascotas ?? 0)),
+  );
+  const petCleaningFee = Number(p.petCleaningFee ?? 0);
+  const depositAmount = Number(p.depositAmount ?? 0);
+  const balanceAmount = Number(p.balanceAmount ?? 0);
+  const issueDate = p.issueDate || new Date().toISOString().split('T')[0];
+  const cleaningLabel =
+    petCleaningFee > 0
+      ? 'Valor Limpieza General (incluye aseo mascotas)'
+      : 'Valor Limpieza General';
+
+  // Estilos base de celda (Word). El sombreado va con bgcolor + inline.
+  const CELL = 'border:1px solid #000;padding:4px 8px;font-size:11px;vertical-align:middle;';
+  const peach = (extra = '') =>
+    `style="${CELL}background-color:#efbc9b;${extra}" bgcolor="#efbc9b"`;
+  const value = (extra = '') =>
+    `style="${CELL}background-color:#eaddd1;${extra}" bgcolor="#eaddd1"`;
+  const bank = (extra = '') => `style="${CELL}${extra}"`;
+  const mark = 'style="' + CELL + 'text-align:center;font-weight:700;" ';
+
+  const logoHtml = logoDataUrl
+    ? `<img src="${logoDataUrl}" alt="FINCASYA" width="200" style="max-width:200px;" />`
+    : `<span style="font-size:24px;font-weight:700;color:#e46f3d;">FincasYa</span>`;
+
+  return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8" /></head>
+<body style="font-family:Calibri, Arial, sans-serif;color:#000;">
+  <table style="width:100%;border-collapse:collapse;margin-bottom:8px;"><tr>
+    <td style="width:30%;border:none;">${logoHtml}</td>
+    <td style="width:45%;border:none;text-align:center;font-size:18px;color:#7a8288;">Confirmaci&oacute;n de Reserva N.&ordm; ${esc(p.contractNumber ?? '-')}</td>
+    <td style="width:25%;border:none;text-align:right;font-size:14px;font-weight:600;color:#7a8288;">3007984139</td>
+  </tr></table>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
+    <tr>
+      <td ${peach('width:18%;')}>NOMBRE</td>
+      <td ${value('width:46%;')}>${esc(p.clientName ?? '-')}</td>
+      <td ${peach('width:11%;')}>C. C.</td>
+      <td ${value('width:25%;')}>${esc(p.clientId ?? '-')}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Correo electr&oacute;nico</td>
+      <td ${value()}>${esc(p.clientEmail ?? '-')}</td>
+      <td ${peach()}>Fecha</td>
+      <td ${value()}>${esc(formatDateDisplay(issueDate))}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Tel de contacto</td>
+      <td ${value()}>${esc(p.clientPhone ?? '-')}</td>
+      <td ${peach()}>DIRECCI&Oacute;N</td>
+      <td ${value()}>${esc(p.clientAddress ?? '-')}</td>
+    </tr>
+  </table>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
+    <tr>
+      <td ${peach('width:18%;')}>Propiedad</td>
+      <td ${value('width:31%;')}>${esc(p.propertyName ?? '-')}</td>
+      <td colspan="2" ${value('width:32%;')}>Contrato: ${esc(p.contractNumber ?? '-')}</td>
+      <td rowspan="6" ${value('width:19%;vertical-align:top;font-size:10px;white-space:pre-wrap;')}>${esc(p.observaciones ?? '')}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Ubicaci&oacute;n</td>
+      <td colspan="3" ${value()}>${esc(p.propertyLocation ?? '-')}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Fecha de Ingreso</td>
+      <td ${value()}>${esc(formatDateLong(p.checkInDate))}</td>
+      <td ${peach('width:16%;')}>Fecha de Salida</td>
+      <td ${value('width:16%;')}>${esc(formatDateLong(p.checkOutDate))}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Chek In / Chek Out</td>
+      <td colspan="3" ${value()}>${esc(formatTimeDisplay(p.checkInTime))} / ${esc(formatTimeDisplay(p.checkOutTime))}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Hu&eacute;spedes</td>
+      <td ${value()}>${esc(String(p.guests ?? 1))}</td>
+      <td ${peach()}>Noches</td>
+      <td ${value()}>${esc(String(p.nights ?? 1).padStart(2, '0'))}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Tipo de grupo</td>
+      <td ${value()}>${esc((p.groupType ?? '').trim() || 'Descanso familiar')}</td>
+      <td colspan="2" ${peach()}>Prop&oacute;sito estancia</td>
+      <td ${value()}>${esc((p.purpose ?? '').trim() || '-')}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Valor Abono</td>
+      <td ${value()}>${esc(formatCurrency(depositAmount))}</td>
+      <td colspan="2" ${peach('text-align:right;')}>Valor Alquiler</td>
+      <td ${value()}>${esc(formatCurrency(rentAmount))}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Fecha Abono</td>
+      <td ${value()}>${esc(formatDateLong(p.depositDate))}</td>
+      <td colspan="2" ${peach('text-align:right;')}>${cleaningLabel}</td>
+      <td ${value()}>${esc(formatCurrency(cleaningFee))}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Valor Saldo</td>
+      <td ${value()}>${esc(formatCurrency(balanceAmount))}</td>
+      <td colspan="2" ${peach('text-align:right;')}>*Valor Dep&oacute;sito Reembolsable</td>
+      <td ${value()}>${esc(formatCurrency(refundableDeposit))}</td>
+    </tr>
+    <tr>
+      <td ${peach()}>Fecha Saldo</td>
+      <td ${value()}>${esc(formatDateLong(p.balanceDate))}</td>
+      <td colspan="2" ${peach('text-align:right;')}>Valor TOTAL</td>
+      <td ${value()}>${esc(formatCurrency(totalAmount))}</td>
+    </tr>
+  </table>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
+    <tr>
+      <td ${bank('width:10%;')}>BBVA</td><td ${mark}>${marks.bbva}</td>
+      <td ${bank('width:12%;')}>Bancolombia</td><td ${mark}>${marks.bancolombia}</td>
+      <td ${bank('width:12%;')}>Davivienda</td><td ${mark}>${marks.davivienda}</td>
+      <td ${bank('width:10%;')}>Nequi</td><td ${mark}>${marks.nequi}</td>
+      <td ${bank('width:8%;')}>PSE</td><td ${mark}>${marks.pse}</td>
+      <td ${bank('width:15%;')}>Tarjeta Cr&eacute;dito</td><td ${mark}>${marks.tarjeta_credito}</td>
+    </tr>
+    <tr>
+      <td colspan="12" style="${CELL}text-align:center;font-weight:700;">ESTADO DE PAGO: ${esc(statusText)}</td>
+    </tr>
+  </table>
+
+  <table style="width:100%;border-collapse:collapse;">
+    <tr><td style="${CELL}font-size:9px;text-align:justify;">${TERMS_TEXT}</td></tr>
+  </table>
+</body></html>`;
+}
+
 export const inboxService = {
   async generateReservationConfirmationPreview(
     _conversationId: string,
@@ -371,6 +525,45 @@ export const inboxService = {
 
     if (!res.ok) {
       let msg = `Error ${res.status} generando el PDF de confirmación.`;
+      try {
+        const err = (await res.json()) as { error?: string };
+        if (err?.error) msg = err.error;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(msg);
+    }
+
+    const blob = await res.blob();
+    return { blob, filename };
+  },
+
+  /**
+   * Mismo CR pero en Word (.docx) editable. El equipo guarda cada confirmación
+   * en los dos formatos porque siempre entra algún ajuste (Adriana, 23-jul).
+   */
+  async generateReservationConfirmationDocx(
+    _conversationId: string,
+    payload: unknown,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const p = (payload ?? {}) as ConfirmationPayload;
+
+    const logoDataUrl = await fetchLogoDataUrl();
+    const html = buildConfirmationDocxHtml(p, logoDataUrl);
+
+    const contractNum = (p.contractNumber ?? 'CONFIRMACION')
+      .replace(/[^\w\-]/g, '_')
+      .toUpperCase();
+    const filename = `CONFIRMACION_${contractNum}.docx`;
+
+    const res = await fetch('/api/fincas/html-to-docx', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html, filename }),
+    });
+
+    if (!res.ok) {
+      let msg = `Error ${res.status} generando el Word de confirmación.`;
       try {
         const err = (await res.json()) as { error?: string };
         if (err?.error) msg = err.error;
