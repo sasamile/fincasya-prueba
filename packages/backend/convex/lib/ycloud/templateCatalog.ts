@@ -41,7 +41,7 @@ export type CheckinTemplateKey =
   | "tourist_departure";
 
 /** Plantillas fuera del timeline de check-in (transaccionales / consentimiento). */
-export type ExtraTemplateKey = "data_consent";
+export type ExtraTemplateKey = "data_consent" | "reserva_confirmada_cr";
 
 /** Cualquier plantilla preaprobada conocida por el código. */
 export type TemplateKey = CheckinTemplateKey | ExtraTemplateKey;
@@ -59,6 +59,20 @@ export type TemplateDef = {
   bodyText: string;
   /** Encabezado fijo opcional (texto, sin variables). */
   header?: string;
+  /**
+   * Encabezado de DOCUMENTO (PDF adjunto en la misma burbuja del mensaje).
+   * El archivo es DINÁMICO: en el registro va una URL de ejemplo para que Meta
+   * apruebe, y al enviar se pasa el PDF real (ver `buildSendComponents`).
+   *
+   * Se usa para mandar la confirmación de reserva (CR) fuera de las 24 h:
+   * plantilla y PDF en UN SOLO mensaje (Santiago, 23-jul).
+   */
+  headerDocument?: {
+    /** URL de ejemplo para la aprobación de Meta. */
+    exampleUrl: string;
+    /** Nombre con el que el cliente ve el archivo. */
+    filename: string;
+  };
   footer?: string;
   /** Botón opcional (URL dinámica o respuesta rápida). */
   button?: TemplateButton;
@@ -91,6 +105,57 @@ export const EXTRA_TEMPLATES: Record<ExtraTemplateKey, TemplateDef> = {
       { type: "quick_reply", text: "No autorizo" },
     ],
     exampleParams: ["Santiago"],
+  },
+
+  /**
+   * RESERVA CONFIRMADA + CR (Santiago, 23-jul).
+   *
+   * Se envía cuando se aprueba el pago y el cliente está FUERA de la ventana
+   * de 24 h (dentro de la ventana va el mismo texto como mensaje libre). Todo
+   * en UN SOLO mensaje: el PDF de la confirmación va como encabezado de
+   * documento y el botón abre el check-in.
+   */
+  reserva_confirmada_cr: {
+    key: "reserva_confirmada_cr",
+    name: "reserva_confirmada_cr",
+    language: "es",
+    category: "UTILITY",
+    paramKeys: [
+      "nombre",
+      "codigoReserva",
+      "nombreFinca",
+      "fechaEntrada",
+      "fechaSalida",
+      "valorPagado",
+      "linkCheckin",
+    ],
+    bodyText:
+      "¡{{1}}, tu reserva quedó confirmada! ✅\n\n" +
+      "📄 Confirmación N.º {{2}}\n" +
+      "🏡 {{3}}\n" +
+      "📅 Entrada: {{4}} · Salida: {{5}}\n" +
+      "💰 Pago recibido: {{6}}\n\n" +
+      "Adjunta encontrarás tu confirmación de reserva. Para completar tu check-in y registrar a tus invitados, entra aquí: {{7}}",
+    headerDocument: {
+      exampleUrl: "https://fincasya.com/ejemplos/confirmacion-reserva.pdf",
+      filename: "Confirmacion-de-reserva.pdf",
+    },
+    footer: "FincasYa.com",
+    button: {
+      type: "url",
+      text: "Hacer mi check-in",
+      urlBase: "https://fincasya.com/checkin/",
+      exampleSuffix: "CR-1234",
+    },
+    exampleParams: [
+      "Sra. Juana Pérez",
+      "2711",
+      "CARMEN DE APICALÁ AMARANTA LUXURY 16PAX",
+      "07 DE AGOSTO DEL 2026",
+      "09 DE AGOSTO DEL 2026",
+      "$1.650.000",
+      "https://fincasya.com/checkin/CR-1234",
+    ],
   },
 };
 
@@ -297,7 +362,15 @@ export function buildRegisterPayload(
   wabaId: string,
 ): Record<string, unknown> {
   const components: Array<Record<string, unknown>> = [];
-  if (def.header) {
+  if (def.headerDocument) {
+    // Meta aprueba el FORMATO con un archivo de muestra; el PDF real viaja en
+    // cada envío.
+    components.push({
+      type: "HEADER",
+      format: "DOCUMENT",
+      example: { header_handle: [def.headerDocument.exampleUrl] },
+    });
+  } else if (def.header) {
     components.push({ type: "HEADER", format: "TEXT", text: def.header });
   }
   const bodyComponent: Record<string, unknown> = {
@@ -340,20 +413,44 @@ export function buildRegisterPayload(
 }
 
 /**
- * Construye los `components` para ENVIAR una plantilla que tiene botón (cuerpo
- * + botón URL dinámico). El sufijo dinámico del botón se deriva del valor de
- * `linkCheckin` en `bodyParams` (la parte después del último "/").
+ * Construye los `components` para ENVIAR una plantilla: encabezado de documento
+ * (PDF dinámico), cuerpo y botón URL dinámico. El sufijo del botón se deriva
+ * del valor de `linkCheckin` en `bodyParams` (la parte después del último "/").
  *
- * Devuelve `undefined` si la plantilla no tiene botón → el llamador debe usar
- * `bodyParams` como antes.
+ * Devuelve `undefined` si la plantilla no necesita components (sin botón ni
+ * documento) → el llamador usa `bodyParams` como antes.
  */
 export function buildSendComponents(
   def: TemplateDef,
   bodyParams: string[],
+  opts: {
+    /** PDF real de este envío (ej. el CR del cliente). */
+    headerDocumentUrl?: string;
+    /** Nombre del archivo; si falta, el de la definición. */
+    headerDocumentFilename?: string;
+  } = {},
 ): TemplateComponent[] | undefined {
-  if (!def.button) return undefined;
+  const conDocumento = Boolean(def.headerDocument && opts.headerDocumentUrl);
+  if (!def.button && !conDocumento) return undefined;
 
   const components: TemplateComponent[] = [];
+
+  if (conDocumento) {
+    components.push({
+      type: "header",
+      parameters: [
+        {
+          type: "document",
+          document: {
+            link: opts.headerDocumentUrl,
+            filename:
+              opts.headerDocumentFilename ?? def.headerDocument!.filename,
+          },
+        },
+      ],
+    });
+  }
+
   if (bodyParams.length > 0) {
     components.push({
       type: "body",
@@ -361,7 +458,7 @@ export function buildSendComponents(
     });
   }
 
-  if (def.button.type === "url") {
+  if (def.button?.type === "url") {
     const linkIdx = def.paramKeys.findIndex((k) =>
       k === "linkCheckin" || k === "linkAnfitrion",
     );
