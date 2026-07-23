@@ -29,6 +29,20 @@ function isServerless(): boolean {
   );
 }
 
+/**
+ * Chromium NO viaja dentro de la función: Next no rastrea la carpeta `bin` del
+ * paquete y en runtime fallaba con "The input directory
+ * /var/task/node_modules/.bun/@sparticuz+chromium@149.0.0/.../bin does not
+ * exist". Se descarga el pack oficial en el primer arranque en frío y queda
+ * cacheado en /tmp para las siguientes invocaciones.
+ *
+ * La versión DEBE coincidir con @sparticuz/chromium de package.json.
+ * Override por si algún día conviene servirlo desde nuestro propio bucket.
+ */
+const CHROMIUM_PACK_URL =
+  process.env.CHROMIUM_PACK_URL?.trim() ||
+  "https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.x64.tar";
+
 /** Camino serverless: Chromium empaquetado para Lambda, sin proceso hijo. */
 async function htmlToPdfInProcess(html: string): Promise<Buffer> {
   const [{ default: chromium }, { default: puppeteer }] = await Promise.all([
@@ -42,7 +56,7 @@ async function htmlToPdfInProcess(html: string): Promise<Buffer> {
 
   const browser = await puppeteer.launch({
     args: chromium.args,
-    executablePath: await chromium.executablePath(),
+    executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
     headless: true,
   });
 
