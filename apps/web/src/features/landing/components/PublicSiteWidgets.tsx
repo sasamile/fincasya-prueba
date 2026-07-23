@@ -19,8 +19,14 @@ export function PublicSiteWidgets() {
   return (
     <>
       <CookieConsentBanner />
-      <WhatsappFab />
-      <ChatAssistantWidget />
+      {/*
+        Stack inferior derecha: por encima de la barra móvil de ficha (~72px)
+        para no tapar «Disponibilidad». En desktop bajan un poco.
+      */}
+      <div className="fixed right-3 bottom-20 z-58 flex flex-col items-end gap-2 md:right-5 md:bottom-5">
+        <ChatAssistantWidget />
+        <WhatsappFab />
+      </div>
     </>
   );
 }

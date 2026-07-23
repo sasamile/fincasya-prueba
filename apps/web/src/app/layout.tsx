@@ -31,7 +31,25 @@ export const metadata: Metadata = {
         : 'https://fincasya.com'),
   ),
   ...homeOg,
-  icons: { icon: '/favicon.svg' },
+  applicationName: 'FincasYa',
+  manifest: '/site.webmanifest',
+  appleWebApp: {
+    capable: true,
+    title: 'FincasYa',
+    statusBarStyle: 'black-translucent',
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.png', sizes: '70x70', type: 'image/png' },
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+    shortcut: ['/apple-touch-icon.png'],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

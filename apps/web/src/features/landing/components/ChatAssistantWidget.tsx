@@ -241,7 +241,7 @@ export function ChatAssistantWidget() {
   }, [open, close]);
 
   return (
-    <>
+    <div className="relative">
       {open ? (
         <div
           className="fixed inset-0 z-55 bg-black/25 backdrop-blur-[2px]"
@@ -252,10 +252,10 @@ export function ChatAssistantWidget() {
 
       <div
         className={cn(
-          'fixed bottom-24 left-5 z-56 w-[min(100vw-2.5rem,380px)] transition-all duration-300 origin-bottom-left',
+          'absolute right-0 bottom-[calc(100%+0.75rem)] z-56 w-[min(100vw-2.5rem,380px)] origin-bottom-right transition-all duration-300',
           open
-            ? 'scale-100 opacity-100 pointer-events-auto'
-            : 'scale-95 opacity-0 pointer-events-none',
+            ? 'pointer-events-auto scale-100 opacity-100'
+            : 'pointer-events-none scale-95 opacity-0',
         )}
         role="dialog"
         aria-label="Asistente FincasYa"
@@ -301,18 +301,15 @@ export function ChatAssistantWidget() {
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? 'Cerrar asistente' : 'Abrir asistente FincasYa'}
         aria-expanded={open}
-        className={cn(
-          'fixed bottom-5 left-5 z-56 flex h-14 w-14 items-center justify-center rounded-full shadow-xl transition-transform hover:scale-105',
-          'bg-[#1a5c2e]',
-        )}
+        className="flex h-11 w-11 items-center justify-center rounded-full bg-[#1a5c2e] shadow-lg transition-transform hover:scale-105"
       >
         {open ? (
-          <X className="h-6 w-6 text-white" />
+          <X className="h-5 w-5 text-white" />
         ) : (
-          <img src="/favicon2.png" alt="" className="h-8 w-8 object-contain" />
+          <img src="/favicon2.png" alt="" className="h-6 w-6 object-contain" />
         )}
       </button>
-    </>
+    </div>
   );
 }
 

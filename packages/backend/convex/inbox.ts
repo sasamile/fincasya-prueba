@@ -1398,6 +1398,8 @@ export type CatalogPropertyRow = {
    * false = precio de la temporada pasada en `temporadaGlobalId`.
    */
   priceIsDesde: boolean;
+  /** false = oculta en la web pública; el experto igual puede enviarla a mano. */
+  webVisible: boolean;
 };
 
 /** Lista las fincas del catálogo Meta por defecto para el modal "Enviar catálogo". */
@@ -1419,7 +1421,9 @@ export const listCatalogProperties = query({
     const props = await ctx.db.query('properties').collect();
     const rows: CatalogPropertyRow[] = [];
     for (const p of props) {
-      if (p.visible === false) continue;
+      // Incluir también las ocultas en web (`visible: false`): el Experto debe
+      // poder buscarlas y enviarlas a mano aunque no estén en el catálogo público.
+      const webVisible = p.visible !== false;
 
       const slug = p.slug?.trim() || null;
       const inWhatsAppCatalog = p.visibleInWhatsAppCatalog !== false;
@@ -1476,6 +1480,7 @@ export const listCatalogProperties = query({
         inWhatsAppCatalog,
         webSendable: Boolean(slug && imageUrl),
         sendable,
+        webVisible,
       });
     }
 

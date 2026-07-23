@@ -12,7 +12,7 @@ import { Link2, Search, Store, X, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { propertyMatchesSearchQuery } from '@/lib/property/property-search';
+import { propertyMatchesSearchQuery, propertySearchRelevanceScore } from '@/lib/property/property-search';
 import { catalogCache } from '@/lib/queryCache';
 import { LoadingArea } from '@/components/ui/spinner';
 import { AutoCatalogModal } from '@/features/inbox/components/AutoCatalogModal';
@@ -108,6 +108,9 @@ function CatalogListRow({
               avisa que el bot no la ofrece sola. */}
           {p.sendable && !p.inWhatsAppCatalog && (
             <span className="text-amber-600"> · el bot no la envía</span>
+          )}
+          {p.webVisible === false && (
+            <span className="font-semibold text-amber-600"> · oculta en web</span>
           )}
           {alreadySent && (
             <span className="font-semibold text-sky-600"> · ✓ ya enviada en este chat</span>
@@ -239,14 +242,26 @@ export function CatalogModal({
 
   const filtered = useMemo(() => {
     if (!properties) return [];
-    const q = search.trim().toLowerCase();
-    return properties.filter((p) => {
+    const q = search.trim();
+    const rows = properties.filter((p) => {
       // OJO: NO se filtra por `inWhatsAppCatalog`. Ese toggle solo le dice al
       // BOT que no la ofrezca sola; el Experto sí puede enviarla a mano si el
       // cliente la pide (la ficha lleva el aviso "el bot no la envía").
       if (dept !== 'Todos' && p.departamento !== dept) return false;
       return matchesSearch(p, q);
     });
+    if (!q) return rows;
+    return [...rows].sort(
+      (a, b) =>
+        propertySearchRelevanceScore(
+          { title: b.title, location: b.location, code: b.code },
+          q,
+        ) -
+        propertySearchRelevanceScore(
+          { title: a.title, location: a.location, code: a.code },
+          q,
+        ),
+    );
   }, [properties, search, dept, mode]);
 
   function toggle(id: string, sendable: boolean) {

@@ -72,6 +72,16 @@ function haystackMatchesNormalizedQuery(haystack: string, q: string): boolean {
   return false;
 }
 
+function tokenMatchesHaystack(haystack: string, token: string): boolean {
+  if (!haystack || !token) return false;
+  if (haystack.includes(token)) return true;
+  if (containsWholeSearchToken(haystack, token)) return true;
+  if (token.length >= SEARCH_SUGGESTION_MIN_CHARS) {
+    return haystack.split(/\s+/).some((word) => word.startsWith(token));
+  }
+  return false;
+}
+
 /** ¿La finca coincide con el término de búsqueda? */
 export function propertyMatchesSearchQuery(
   property: PropertySearchFields,
@@ -83,13 +93,16 @@ export function propertyMatchesSearchQuery(
 
   const haystacks = propertySearchHaystacks(property, fields);
 
+  // Frase completa (ej. "restrepo home" tal cual en el título)
   if (haystacks.some((h) => haystackMatchesNormalizedQuery(h, q))) return true;
 
   const tokens = q.split(/\s+/).filter((w) => w.length >= 2);
   if (tokens.length === 0) return false;
 
-  return haystacks.some((h) =>
-    tokens.some((token) => containsWholeSearchToken(h, token)),
+  // AND: todas las palabras deben aparecer (en título, ubicación o código).
+  // Antes era OR y "restrepo home" devolvía cualquier finca con "home".
+  return tokens.every((token) =>
+    haystacks.some((h) => tokenMatchesHaystack(h, token)),
   );
 }
 
@@ -181,7 +194,7 @@ export function propertyMatchesSearchWithCapacity(
 
   const matchesText =
     textTerms.length === 0 ||
-    textTerms.some((term) => propertyMatchesSearchQuery(property, term, fields));
+    propertyMatchesSearchQuery(property, textTerms.join(" "), fields);
 
   return matchesCapacity && matchesText;
 }
