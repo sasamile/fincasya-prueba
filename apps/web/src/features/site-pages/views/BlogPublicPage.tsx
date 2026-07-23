@@ -52,7 +52,7 @@ export function BlogPublicPage() {
     <PublicMarketingShell>
       <PublicBlackHero title={content.heroTitle} subtitle={content.heroSubtitle} />
 
-      <section className="sticky top-16 z-40 border-b bg-white/50 py-4 backdrop-blur-md">
+      <section className="sticky top-16 z-40 border-b border-neutral-200/70 bg-white/50 py-4 backdrop-blur-md">
         <div className="container mx-auto px-6">
           <div className="scrollbar-hide flex gap-2 overflow-x-auto pb-2">
             {(content.categories ?? []).map((category) => (
@@ -80,7 +80,7 @@ export function BlogPublicPage() {
               <motion.div key={post.id} {...fadeInUp} transition={{ delay: i * 0.1 }}>
                 <Link
                   href={`/blog/${post.id}`}
-                  className="group block cursor-pointer overflow-hidden rounded-xl border bg-card shadow-sm transition-all hover:border-primary/30 hover:shadow-lg"
+                  className="group block cursor-pointer overflow-hidden rounded-xl bg-card shadow-sm transition-all hover:shadow-lg"
                 >
                   <div className="relative aspect-video bg-linear-to-br from-secondary to-secondary/50">
                     <BlogFeaturedMedia
