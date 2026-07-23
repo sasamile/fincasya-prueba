@@ -168,7 +168,15 @@ export function ReportesGastosCaja({ start, end }: Props) {
   };
 
   const saldo = caja?.saldo ?? 0;
-  const cajaRows = caja?.rows ?? [];
+  // La query devuelve las filas sin tipar; se les da forma para el render.
+  const cajaRows = (caja?.rows ?? []) as Array<{
+    id: string;
+    kind: string;
+    category?: string;
+    fecha?: string;
+    beneficiario?: string;
+    amount: number;
+  }>;
   const gastoRows = gastos ?? [];
   const loading = caja === undefined || gastos === undefined;
 
