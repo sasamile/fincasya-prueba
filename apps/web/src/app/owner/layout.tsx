@@ -119,7 +119,13 @@ export default function OwnerLayout({
             <img
               src="/dark-logo.svg"
               alt="FincasYa"
-              className="h-8 w-auto shrink-0 object-contain"
+              className="h-8 w-auto shrink-0 object-contain dark:hidden"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/light-logo.svg"
+              alt="FincasYa"
+              className="hidden h-8 w-auto shrink-0 object-contain dark:block"
             />
             <div className="min-w-0 border-l border-border pl-3">
               <p className="truncate text-sm font-semibold leading-tight">

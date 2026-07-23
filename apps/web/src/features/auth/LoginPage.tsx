@@ -34,7 +34,16 @@ export function LoginPage() {
     <div className="landing flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-3xl border border-border bg-card p-8 shadow-2xl">
         <div className="mb-6 flex flex-col items-center text-center">
-          <img src="/dark-logo.svg" alt="FincasYa" className="mb-4 h-12 w-auto object-contain" />
+          <img
+            src="/dark-logo.svg"
+            alt="FincasYa"
+            className="mb-4 h-12 w-auto object-contain dark:hidden"
+          />
+          <img
+            src="/light-logo.svg"
+            alt="FincasYa"
+            className="mb-4 hidden h-12 w-auto object-contain dark:block"
+          />
           <h1 className="text-lg font-semibold text-foreground">Panel de operadores</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Ingresa con tu cuenta para continuar

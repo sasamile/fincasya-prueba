@@ -77,11 +77,17 @@ export function AdminLoginForm() {
   return (
     <div className="w-full max-w-md border border-border/40 bg-card/80 backdrop-blur-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-500 rounded-xl pb-10">
       <div className="space-y-4 pb-4 pt-8 text-center px-6">
-        <div className="mx-auto flex items-center justify-center mb-2">
+        <div className="mx-auto mb-2 flex items-center justify-center">
+          {/* dark-logo = negro (fondos claros); light-logo = blanco (dark mode) */}
           <img
             src="/dark-logo.svg"
             alt="FincasYa Logo"
-            className="w-auto h-32 object-contain"
+            className="h-32 w-auto object-contain dark:hidden"
+          />
+          <img
+            src="/light-logo.svg"
+            alt="FincasYa Logo"
+            className="hidden h-32 w-auto object-contain dark:block"
           />
         </div>
         <div className="space-y-2 -mt-6">
