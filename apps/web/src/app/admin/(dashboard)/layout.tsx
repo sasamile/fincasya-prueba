@@ -206,8 +206,7 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
       { label: "Usuarios", href: "/admin/users", icon: Users },
       { label: "Clientes", href: "/admin/customers", icon: Users },
       { label: "Propietarios", href: "/admin/propietarios", icon: Home },
-      // CRM oculto del menú; la ruta /admin/crm sigue existiendo.
-      // { label: "CRM", href: "/admin/crm", icon: Sparkles },
+      { label: "CRM", href: "/admin/crm", icon: Sparkles },
       { label: "Roles y Permisos", href: "/admin/roles", icon: ShieldCheck },
       { label: "Habeas Data", href: "/admin/habeas-data", icon: ShieldCheck },
       {

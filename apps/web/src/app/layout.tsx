@@ -6,7 +6,7 @@ import { Toaster as SonnerToaster } from 'sonner';
 import { ConsentBootstrap } from '@/features/legal/components/consent-bootstrap';
 import { SiteVisitTracker } from '@/features/landing/components/SiteVisitTracker';
 import { MetaPixel, MetaPixelRouteTracker } from '@/lib/meta-pixel';
-import { buildOgMetadata, getPublicSiteOrigin } from '@/lib/og-image';
+import { buildOgMetadata, PRODUCTION_SITE_ORIGIN } from '@/lib/og-image';
 import { Providers } from './providers';
 import './globals.css';
 
@@ -24,8 +24,9 @@ const homeOg = buildOgMetadata({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(getPublicSiteOrigin()),
   ...homeOg,
+  // Después del spread: evita “metadataBase specified more than once”.
+  metadataBase: new URL(PRODUCTION_SITE_ORIGIN),
   applicationName: 'FincasYa',
   manifest: '/site.webmanifest',
   appleWebApp: {

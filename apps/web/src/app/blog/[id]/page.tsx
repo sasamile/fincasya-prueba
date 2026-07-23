@@ -54,7 +54,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: `${post.title} | FincasYa`,
     description,
     path: `/blog/${post.id}`,
-    imageUrl: post.imageUrl || null,
+    // Siempre la imagen del post; nunca el logo de marca.
+    imageUrl: post.imageUrl?.trim() || null,
   });
 
   return {

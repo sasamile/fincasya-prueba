@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Image from "next/image";
 import { FileText } from "lucide-react";
 import { resolvePostFeaturedMedia } from "@/features/blog/utils/blog-media-utils";
 import { BlogPdfPreview } from "@/features/blog/components/blog-pdf-preview";
@@ -14,12 +15,40 @@ type BlogFeaturedMediaProps = {
   category: string;
   className?: string;
   imageClassName?: string;
+  /** Primera imagen visible (LCP): precarga con prioridad alta. */
+  priority?: boolean;
 };
 
 function looksLikeUuidFileName(name: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(pdf|docx?)$/i.test(
     name.trim(),
   );
+}
+
+/** Rutas locales o hosts ya permitidos en next.config → next/image. */
+function canOptimizeImage(url: string): boolean {
+  if (url.startsWith("/")) return true;
+  try {
+    const host = new URL(url).hostname;
+    return (
+      host.endsWith(".convex.cloud") ||
+      host.endsWith(".amazonaws.com") ||
+      host === "lh3.googleusercontent.com" ||
+      host === "ui-avatars.com"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Preferir WebP local cuando exista el par optimizado. */
+function preferLocalWebp(url: string): string {
+  if (url === "/images/PHOTO-2026-07-23-11-02-24.jpg") {
+    return "/images/PHOTO-2026-07-23-11-02-24.webp";
+  }
+  const dsc = url.match(/^\/images\/(DSC09\d+)\.jpg\.jpeg$/i);
+  if (dsc) return `/images/${dsc[1]}.webp`;
+  return url;
 }
 
 export function BlogFeaturedMedia({
@@ -29,6 +58,7 @@ export function BlogFeaturedMedia({
   category,
   className,
   imageClassName,
+  priority = false,
 }: BlogFeaturedMediaProps) {
   const media = useMemo(
     () => resolvePostFeaturedMedia(imageUrl, contentHtml),
@@ -36,10 +66,34 @@ export function BlogFeaturedMedia({
   );
 
   if (media?.type === "image") {
+    const src = preferLocalWebp(media.url);
+    const optimized = canOptimizeImage(src);
+
+    if (optimized) {
+      return (
+        <div className={cn("relative h-full w-full", className)}>
+          <Image
+            src={src}
+            alt={title}
+            fill
+            sizes="(max-width: 768px) 100vw, 896px"
+            quality={75}
+            priority={priority}
+            fetchPriority={priority ? "high" : "auto"}
+            className={cn("object-cover", imageClassName)}
+          />
+        </div>
+      );
+    }
+
     return (
+      // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={media.url}
+        src={src}
         alt={title}
+        loading={priority ? "eager" : "lazy"}
+        fetchPriority={priority ? "high" : "auto"}
+        decoding="async"
         className={cn("h-full w-full object-cover", imageClassName, className)}
       />
     );

@@ -135,7 +135,7 @@ export function BlogShareButton({
           <div className="mb-5 flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-2xl border border-neutral-100 bg-neutral-50/50 p-3 sm:mb-6 sm:gap-4 sm:p-4">
             <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl shadow-sm sm:h-16 sm:w-16">
               <ImageWithBlur
-                src={imageUrl || "/images/PHOTO-2026-07-23-11-02-24.jpg"}
+                src={imageUrl || "/images/PHOTO-2026-07-23-11-02-24.webp"}
                 alt={title}
                 fill
                 className="object-cover"

@@ -211,12 +211,12 @@ body {
 }
 
 /*
- * Fondo del área de chat: wallpaper tipo WhatsApp (doodle.png).
+ * Fondo del área de chat: wallpaper tipo WhatsApp (doodle.webp ~17KB).
  */
 .chat-bg {
   background-color: #161717;
   object-fit: cover;
-  background-image: url("/doodle.png");
+  background-image: url("/doodle.webp");
   background-position: top left;
   background-size: cover;
 }

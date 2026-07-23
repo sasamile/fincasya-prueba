@@ -1,56 +1,98 @@
 /**
  * Open Graph para WhatsApp / crawlers.
- * WhatsApp es estricto: falla con WebP, PNG raros, imágenes grandes o URLs relativas.
- * Siempre convertimos a JPEG 800×418 vía images.weserv.nl.
+ * WhatsApp es estricto: falla con WebP, PNG raros, o cuando `og:url` no
+ * coincide con el dominio del link compartido (www.fincasya.com).
  *
- * Importante: `og:url` y `metadataBase` NUNCA deben ser un hostname
- * `*.vercel.app` cuando el link compartido es www.fincasya.com — WhatsApp
- * descarta la preview si el dominio no coincide.
+ * Regla: `og:url` / canonical SIEMPRE usan el dominio público en deploys
+ * remotos — nunca `*.vercel.app`.
  */
 
 /** Dominio canónico público (links / OG / WhatsApp). */
 export const PRODUCTION_SITE_ORIGIN = "https://www.fincasya.com";
 
-/** En prod hoy existe el PNG 1200×630; el JPG se desplegará junto. */
-const DEFAULT_OG_IMAGE = "https://www.fincasya.com/icons/fincasya-link-logo.png";
+/** JPG cuadrado de marca — WhatsApp prefiera JPEG sobre PNG. */
+const DEFAULT_OG_IMAGE = `${PRODUCTION_SITE_ORIGIN}/icons/fincasya-link-logo.jpg`;
 
 function isEphemeralHost(url: string): boolean {
   return /localhost|127\.0\.0\.1|\.vercel\.app/i.test(url);
 }
 
-export function getPublicSiteOrigin(): string {
-  const env =
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    process.env.NEXT_PUBLIC_SITE_URL?.trim();
-  if (env && !isEphemeralHost(env)) {
-    return env.replace(/\/$/, "");
+function tryParseHttpOrigin(raw: string | undefined | null): string | null {
+  const value = raw?.trim();
+  if (!value || isEphemeralHost(value)) return null;
+  try {
+    const url = new URL(value.includes("://") ? value : `https://${value}`);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.origin;
+  } catch {
+    return null;
   }
-
-  // Producción en Vercel: el hostname interno es *.vercel.app; el dominio
-  // real (custom) es el que debe ir en og:url / canonical.
-  if (process.env.VERCEL_ENV === "production") {
-    return PRODUCTION_SITE_ORIGIN;
-  }
-
-  const vercel = process.env.VERCEL_URL?.trim();
-  if (vercel) {
-    // Solo previews / branch deploys: ahí sí tiene sentido el URL de Vercel.
-    return vercel.startsWith("http")
-      ? vercel.replace(/\/$/, "")
-      : `https://${vercel}`;
-  }
-
-  return PRODUCTION_SITE_ORIGIN;
 }
 
-export function buildOgImageUrl(imageUrl: string | null | undefined): string {
-  const absoluteImageUrl = imageUrl
-    ? imageUrl.startsWith("http")
-      ? imageUrl
-      : `${PRODUCTION_SITE_ORIGIN}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`
-    : DEFAULT_OG_IMAGE;
+function isLocalDev(): boolean {
+  return (
+    process.env.NODE_ENV === "development" ||
+    process.env.VERCEL_ENV === "development"
+  );
+}
 
-  return `https://images.weserv.nl/?url=${encodeURIComponent(absoluteImageUrl)}&w=800&h=418&fit=cover&output=jpg&q=75`;
+/**
+ * Origen para og:url / canonical.
+ * En local: localhost. En cualquier deploy remoto: siempre www.fincasya.com
+ * (aunque Vercel sirva el sitio desde un hostname *.vercel.app).
+ */
+export function getPublicSiteOrigin(): string {
+  if (isLocalDev()) {
+    return (
+      tryParseHttpOrigin(
+        process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL,
+      ) ?? "http://localhost:3789"
+    );
+  }
+
+  return (
+    tryParseHttpOrigin(process.env.NEXT_PUBLIC_SITE_URL) ??
+    PRODUCTION_SITE_ORIGIN
+  );
+}
+
+/** Absoluta en el dominio público; WebP → JPG para crawlers. */
+export function toAbsolutePublicImageUrl(
+  imageUrl: string | null | undefined,
+): string {
+  if (!imageUrl?.trim()) return DEFAULT_OG_IMAGE;
+
+  let pathOrUrl = imageUrl.trim();
+  // Preferir JPEG del banner del blog (OG / WhatsApp no siempre abre WebP).
+  if (pathOrUrl.endsWith(".webp")) {
+    pathOrUrl = pathOrUrl.replace(/\.webp$/i, ".jpg");
+  }
+  // Par local DSC: si alguien guardó .webp en Convex, OG usa el jpeg legacy
+  // solo si no hay jpg; los DSC tienen .jpg.jpeg — no aplica aquí.
+
+  if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
+    try {
+      const u = new URL(pathOrUrl);
+      if (isEphemeralHost(u.origin)) {
+        return `${PRODUCTION_SITE_ORIGIN}${u.pathname}${u.search}`;
+      }
+      return pathOrUrl;
+    } catch {
+      return DEFAULT_OG_IMAGE;
+    }
+  }
+
+  const path = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
+  return `${PRODUCTION_SITE_ORIGIN}${path}`;
+}
+
+/**
+ * URL de imagen OG.
+ * Misma origen que el link (www.fincasya.com) — más fiable en WhatsApp
+ * que proxies de terceros.
+ */
+export function buildOgImageUrl(imageUrl: string | null | undefined): string {
+  return toAbsolutePublicImageUrl(imageUrl);
 }
 
 export function buildOgMetadata(args: {
@@ -70,7 +112,6 @@ export function buildOgMetadata(args: {
   return {
     title: args.title,
     description,
-    metadataBase: new URL(origin),
     ...(args.noIndex ? { robots: { index: false, follow: false } } : {}),
     alternates: {
       canonical: pageUrl,
@@ -84,8 +125,8 @@ export function buildOgMetadata(args: {
         {
           url: optimizedImageUrl,
           secureUrl: optimizedImageUrl,
-          width: 800,
-          height: 418,
+          width: 1200,
+          height: 630,
           alt: args.title,
           type: "image/jpeg",
         },

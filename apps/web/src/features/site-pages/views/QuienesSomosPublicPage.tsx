@@ -40,6 +40,13 @@ function normalizeStringList(
   return value.trim() ? [value] : fallback;
 }
 
+/** DSC locales: usar WebP comprimido si el admin aún apunta al JPEG pesado. */
+function preferCarouselWebp(url: string): string {
+  const dsc = url.match(/^\/images\/(DSC09\d+)\.jpg\.jpeg$/i);
+  if (dsc) return `/images/${dsc[1]}.webp`;
+  return url;
+}
+
 /** Convex puede devolver objetivos/politicas como string o string[] (schema legacy). */
 type QuienesSomosRaw = Omit<Partial<QuienesSomosData>, 'objetivos' | 'politicas'> & {
   _creationTime?: number;
@@ -65,9 +72,11 @@ export function QuienesSomosPublicPage() {
   const content = useMemo(() => mergeContent(raw), [raw]);
   const [currentImage, setCurrentImage] = useState(0);
 
-  const images = content.carouselImages?.length
-    ? content.carouselImages
-    : QUIENES_SOMOS_DEFAULT.carouselImages;
+  const images = (
+    content.carouselImages?.length
+      ? content.carouselImages
+      : QUIENES_SOMOS_DEFAULT.carouselImages
+  ).map(preferCarouselWebp);
 
   useEffect(() => {
     if (isLoading) return;

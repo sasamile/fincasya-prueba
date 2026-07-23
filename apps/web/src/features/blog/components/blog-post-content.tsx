@@ -135,6 +135,7 @@ export function BlogPostContent({ id }: { id: number }) {
                 title={post.title}
                 category={post.category}
                 className="h-full w-full"
+                priority
               />
             </div>
 

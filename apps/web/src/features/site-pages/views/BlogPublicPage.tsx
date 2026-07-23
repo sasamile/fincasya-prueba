@@ -90,6 +90,7 @@ export function BlogPublicPage() {
                       category={post.category}
                       className="absolute inset-0 h-full w-full"
                       imageClassName="absolute inset-0"
+                      priority={i === 0}
                     />
                     <span className="absolute left-4 top-4 rounded-full bg-primary/90 px-3 py-1 text-xs font-semibold text-white">
                       {post.category}
