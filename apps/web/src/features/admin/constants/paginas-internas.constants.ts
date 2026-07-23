@@ -80,8 +80,26 @@ export const BLOG_DEFAULT = {
   heroSubtitle:
     "Consejos, guías y destinos para tu próxima escapada. Descubre los mejores lugares para descansar en Colombia.",
   enabled: true,
-  categories: ["Todos", "Destinos", "Consejos", "Experiencias", "Tendencias"],
+  categories: ["Todos", "Novedades", "Destinos", "Consejos", "Experiencias", "Tendencias"],
   posts: [
+    {
+      id: 7,
+      category: "Novedades",
+      title: "Hoy FincasYa da un paso gigante con inteligencia artificial",
+      excerpt:
+        "Seguimos construyendo el futuro de nuestra empresa con IA supervisada y software propio, para una mejor experiencia de clientes y propietarios.",
+      imageUrl: "/apple-touch-icon.png",
+      date: "23 de julio, 2026",
+      readTime: 3,
+      active: true,
+      content: `
+<p><strong>Hoy FincasYa.com da un paso gigante.</strong></p>
+<p>Después de mucho trabajo, aprendizaje y cientos de horas de desarrollo, seguimos construyendo el futuro de nuestra empresa de la mano de la <strong>inteligencia artificial supervisada</strong> y de un <strong>software propio</strong> diseñado para ofrecer una mejor experiencia a nuestros clientes y propietarios.</p>
+<p>La tecnología nunca reemplazará el valor de las personas, pero bien utilizada nos permite ser más rápidos, más seguros y brindar un servicio cada vez mejor.</p>
+<p>Muy agradecido con todo el equipo que hace esto posible. Lo mejor aún está por venir.</p>
+<p class="text-sm text-muted-foreground">#FincasYa #InteligenciaArtificial #Innovación #Tecnología #Emprendimiento #Turismo #Software #Colombia</p>
+      `.trim(),
+    },
     {
       id: 1,
       category: "Destinos",

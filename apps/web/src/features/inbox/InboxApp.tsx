@@ -278,10 +278,18 @@ export default function App() {
       });
       return;
     }
-    const match = conversations.find((c) => {
+    const phoneMatches = (c: ConversationRow) => {
       const cd = c.phone.replace(/\D/g, '');
+      if (cd.length < 7) return false;
       return cd.endsWith(d.slice(-10)) || d.endsWith(cd.slice(-10));
-    });
+    };
+    // Incluir chat ya abierto y resultados de búsqueda: la lista paginada
+    // puede no tener el contacto aunque el operador ya lo esté viendo.
+    const match =
+      (selected && phoneMatches(selected) ? selected : null) ??
+      conversations.find(phoneMatches) ??
+      searchResults?.find(phoneMatches) ??
+      null;
     if (match) {
       openConversation(match);
       return;

@@ -40,17 +40,27 @@ export function BlogPdfPreview({ url, fileName, className }: BlogPdfPreviewProps
     return (
       <div
         className={cn(
-          "flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 p-6 text-center",
+          "relative flex aspect-video w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-xl bg-[#111] p-6 text-center",
           className,
         )}
       >
-        <FileText className="h-10 w-10 text-red-500/80" />
-        <p className="text-sm font-semibold text-foreground">{fileName}</p>
+        <div
+          className="pointer-events-none absolute inset-0 opacity-40"
+          style={{
+            background:
+              "radial-gradient(ellipse at 30% 20%, rgba(254,74,25,0.4), transparent 55%)",
+          }}
+        />
+        <FileText className="relative z-10 h-10 w-10 text-primary" />
+        <p className="relative z-10 line-clamp-2 max-w-sm text-sm font-semibold text-white">
+          {fileName}
+        </p>
         <a
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline"
+          onClick={(e) => e.stopPropagation()}
+          className="relative z-10 inline-flex items-center gap-1.5 rounded-lg bg-white/95 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-white"
         >
           Abrir PDF
           <ExternalLink className="h-3.5 w-3.5" />

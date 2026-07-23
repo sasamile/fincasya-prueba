@@ -817,7 +817,19 @@ export function ConfirmarReservaTool({
                   type="button"
                   onClick={() => {
                     setSelectedId(c._id);
-                    if (c.clienteTelefono) onOpenChat?.(c.clienteTelefono);
+                    // Solo cambiar de chat si el contrato es de otro número.
+                    // Si ya estamos en el correcto, no llamar openChatByPhone
+                    // (evita el toast falso cuando el chat no está en la página
+                    // cargada de la lista o vino de búsqueda).
+                    if (
+                      c.clienteTelefono &&
+                      !(
+                        conversation &&
+                        phonesMatch(conversation.phone, c.clienteTelefono)
+                      )
+                    ) {
+                      void onOpenChat?.(c.clienteTelefono);
+                    }
                   }}
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-xl border p-2.5 text-left transition',
