@@ -9,7 +9,7 @@
  * placeholder — o sea, la lógica queda LISTA pero sin exponerse al público.
  */
 import { v } from 'convex/values';
-import { mutation, query } from './_generated/server';
+import { internalMutation, mutation, query } from './_generated/server';
 import type { QueryCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
@@ -60,6 +60,37 @@ export const setEnabled = mutation({
       updatedAt: now,
       updatedByUserId: by,
     });
+  },
+});
+
+/**
+ * Mismo kill-switch pero SIN sesión de admin: para encenderlo/apagarlo desde la
+ * CLI (`convex run webChat:setEnabledFromCli '{"enabled":true}'`) cuando nadie
+ * puede entrar al panel. Es internal: no la expone el cliente.
+ */
+export const setEnabledFromCli = internalMutation({
+  args: { enabled: v.boolean() },
+  handler: async (ctx, { enabled }) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query('webChatSettings')
+      .withIndex('by_scope', (q) => q.eq('scope', 'global'))
+      .unique();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        enabled,
+        updatedAt: now,
+        updatedByUserId: 'cli',
+      });
+      return { enabled };
+    }
+    await ctx.db.insert('webChatSettings', {
+      scope: 'global',
+      enabled,
+      updatedAt: now,
+      updatedByUserId: 'cli',
+    });
+    return { enabled };
   },
 });
 

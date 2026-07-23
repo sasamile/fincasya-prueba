@@ -7,6 +7,7 @@ import { api } from '@fincasya/backend/convex/_generated/api';
 import {
   Bot,
   Facebook,
+  Globe,
   Instagram,
   Loader2,
   Plus,
@@ -165,6 +166,31 @@ export default function SocialCrmApp() {
   const { can } = useRolePermissions(user?.role, user?.id);
   const puedeToggleBot = can('action_bot_toggle');
 
+  // Switch del CHAT WEB del landing (Santiago, 23-jul). Aparte del de Meta y
+  // del de WhatsApp: apagado, el widget público muestra el placeholder.
+  const webChatStatus = useQuery(api.webChat.getStatus, {}) as
+    | { enabled: boolean }
+    | undefined;
+  const setWebChat = useMutation(api.webChat.setEnabled);
+  const [togglingWebChat, setTogglingWebChat] = useState(false);
+  const webChatEnabled = webChatStatus?.enabled ?? false;
+
+  async function toggleWebChat(on: boolean) {
+    setTogglingWebChat(true);
+    try {
+      await setWebChat({ enabled: on });
+      toast.success(
+        on
+          ? 'Chat web encendido en la página pública.'
+          : 'Chat web apagado: el widget invita a WhatsApp.',
+      );
+    } catch {
+      toast.error('No se pudo cambiar el chat web.');
+    } finally {
+      setTogglingWebChat(false);
+    }
+  }
+
   async function toggleMetaBot(on: boolean) {
     setTogglingBot(true);
     try {
@@ -207,6 +233,32 @@ export default function SocialCrmApp() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {/* Chat web del landing: switch propio. Apagado, el widget
+                público solo invita a hablar por WhatsApp. */}
+            {puedeToggleBot ? (
+              <label
+                className="border-border/80 flex items-center gap-2 rounded-lg border px-2.5 py-1.5"
+                title={
+                  webChatEnabled
+                    ? 'Chat web ON: el widget de la página pública responde con el bot.'
+                    : 'Chat web OFF: el widget solo invita a escribir por WhatsApp.'
+                }
+              >
+                <Globe
+                  className={cn(
+                    'h-3.5 w-3.5',
+                    webChatEnabled ? 'text-primary' : 'text-muted-foreground',
+                  )}
+                />
+                <span className="text-[11px] font-semibold">Chat web</span>
+                <Switch
+                  checked={webChatEnabled}
+                  onCheckedChange={(on) => void toggleWebChat(on)}
+                  disabled={togglingWebChat || webChatStatus === undefined}
+                  className="data-[state=checked]:bg-emerald-600"
+                />
+              </label>
+            ) : null}
             {/* Bot de Meta: switch APARTE del de WhatsApp (Adriana, 22-jul).
                 Arranca apagado; con él encendido el mismo agente del inbox
                 responde los DMs con fichas web. */}
