@@ -61,22 +61,30 @@ describe('orden del lote', () => {
   });
 });
 
-describe('primer lote: solo favoritas', () => {
-  test('lo no favorito espera al siguiente envío', () => {
-    expect(entraEnPrimerLote(TIER_RESTO_EN_ZONA, true)).toBe(false);
-    expect(entraEnPrimerLote(TIER_RESTO_VECINA, true)).toBe(false);
+describe('primer lote: favoritas primero', () => {
+  const MUCHAS = 10; // suficientes favoritas para llenar el lote
+
+  test('con favoritas de sobra, lo no favorito espera al siguiente envío', () => {
+    expect(entraEnPrimerLote(TIER_RESTO_EN_ZONA, MUCHAS)).toBe(false);
+    expect(entraEnPrimerLote(TIER_RESTO_VECINA, MUCHAS)).toBe(false);
   });
 
   test('favoritas y fincas de la semana sí entran', () => {
-    expect(entraEnPrimerLote(TIER_SEMANA_EN_ZONA, true)).toBe(true);
-    expect(entraEnPrimerLote(TIER_FAVORITA_EN_ZONA, true)).toBe(true);
-    expect(entraEnPrimerLote(TIER_FAVORITA_VECINA, true)).toBe(true);
-    expect(entraEnPrimerLote(TIER_SEMANA_VECINA, true)).toBe(true);
+    expect(entraEnPrimerLote(TIER_SEMANA_EN_ZONA, MUCHAS)).toBe(true);
+    expect(entraEnPrimerLote(TIER_FAVORITA_EN_ZONA, MUCHAS)).toBe(true);
+    expect(entraEnPrimerLote(TIER_FAVORITA_VECINA, MUCHAS)).toBe(true);
+    expect(entraEnPrimerLote(TIER_SEMANA_VECINA, MUCHAS)).toBe(true);
   });
 
-  test('sin ninguna favorita disponible se manda lo que haya', () => {
-    // Nunca dejar al cliente sin opciones por falta de favoritas.
-    expect(entraEnPrimerLote(TIER_RESTO_EN_ZONA, false)).toBe(true);
-    expect(entraEnPrimerLote(TIER_RESTO_VECINA, false)).toBe(true);
+  test('sin ninguna favorita se manda lo que haya', () => {
+    expect(entraEnPrimerLote(TIER_RESTO_EN_ZONA, 0)).toBe(true);
+    expect(entraEnPrimerLote(TIER_RESTO_VECINA, 0)).toBe(true);
+  });
+
+  test('con POCAS favoritas se completa el lote con el resto', () => {
+    // Caso real (Adriana, 22-jul): grupo de 4 personas, solo 2 favoritas
+    // chicas disponibles → al cliente le llegaban 2 fichas y nada más.
+    expect(entraEnPrimerLote(TIER_RESTO_EN_ZONA, 2)).toBe(true);
+    expect(entraEnPrimerLote(TIER_RESTO_VECINA, 2)).toBe(true);
   });
 });

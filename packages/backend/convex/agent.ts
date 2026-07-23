@@ -865,7 +865,9 @@ export const toolCatalogPick = internalQuery({
     // más se le envía la otra"). Las no favoritas quedan para el siguiente
     // envío de "más opciones".
     const primerLote = exclude.size === 0;
-    const hayFavoritas = clasificadas.some((p) => {
+    // Cuántas favoritas/semana hay realmente disponibles: si son pocas, el
+    // primer lote se completa con el resto en vez de mandar 2 fichas sueltas.
+    const favoritasDisponibles = clasificadas.filter((p) => {
       const t = tierIndex.get(String(p._id));
       return (
         t === TIER_SEMANA_EN_ZONA ||
@@ -873,12 +875,13 @@ export const toolCatalogPick = internalQuery({
         t === TIER_FAVORITA_VECINA ||
         t === TIER_SEMANA_VECINA
       );
-    });
+    }).length;
 
     const porTier = new Map<number, typeof matches>();
     for (const p of clasificadas) {
       const tier = tierIndex.get(String(p._id)) ?? TIER_RESTO_VECINA;
-      if (primerLote && !entraEnPrimerLote(tier, hayFavoritas)) continue;
+      if (primerLote && !entraEnPrimerLote(tier, favoritasDisponibles))
+        continue;
       const bucket = porTier.get(tier);
       if (bucket) bucket.push(p);
       else porTier.set(tier, [p]);

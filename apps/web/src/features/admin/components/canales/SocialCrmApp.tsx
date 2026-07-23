@@ -16,6 +16,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/features/auth/store/auth.store';
+import { useRolePermissions } from '@/features/admin/hooks/use-role-permissions';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -158,6 +160,10 @@ export default function SocialCrmApp() {
   const setMetaBot = useMutation(api.agentSettings.setMetaBotEnabled);
   const [togglingBot, setTogglingBot] = useState(false);
   const metaBotEnabled = agentSettings?.metaBotEnabled ?? false;
+  // Prender/apagar el bot es un poder aparte: no cualquiera lo tiene.
+  const { user } = useAuthStore();
+  const { can } = useRolePermissions(user?.role, user?.id);
+  const puedeToggleBot = can('action_bot_toggle');
 
   async function toggleMetaBot(on: boolean) {
     setTogglingBot(true);
@@ -204,7 +210,7 @@ export default function SocialCrmApp() {
             {/* Bot de Meta: switch APARTE del de WhatsApp (Adriana, 22-jul).
                 Arranca apagado; con él encendido el mismo agente del inbox
                 responde los DMs con fichas web. */}
-            {view === 'inbox' ? (
+            {view === 'inbox' && puedeToggleBot ? (
               <label
                 className="border-border/80 flex items-center gap-2 rounded-lg border px-2.5 py-1.5"
                 title={

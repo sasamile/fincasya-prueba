@@ -48,15 +48,25 @@ export function catalogTier(input: CatalogTierInput): number {
 }
 
 /**
+ * Mínimo de fichas que debe llevar el primer envío. Si las favoritas
+ * disponibles no llegan a esto, se completa con el resto (Adriana, 22-jul: a
+ * un grupo de 4 le llegaron SOLO 2 opciones porque no había más favoritas
+ * chicas). Mejor un lote decente que dos fichas sueltas.
+ */
+export const MIN_FICHAS_PRIMER_LOTE = 6;
+
+/**
  * ¿Este tier entra en el PRIMER envío de catálogo?
  *
- * Vane: "primero las favoritas y si piden más se le envía la otra". En el
- * primer lote solo salen fincas de la semana y favoritas; las demás esperan al
- * siguiente "más opciones". Si no hay ninguna favorita disponible se mandan
- * igual — antes que dejar al cliente sin nada.
+ * Vane: "primero las favoritas y si piden más se le envía la otra". El primer
+ * lote privilegia fincas de la semana y favoritas — pero solo se restringe a
+ * ellas si alcanzan para llenar un lote decente.
  */
-export function entraEnPrimerLote(tier: number, hayFavoritas: boolean): boolean {
-  if (!hayFavoritas) return true;
+export function entraEnPrimerLote(
+  tier: number,
+  favoritasDisponibles: number,
+): boolean {
+  if (favoritasDisponibles < MIN_FICHAS_PRIMER_LOTE) return true;
   return (
     tier === TIER_SEMANA_EN_ZONA ||
     tier === TIER_FAVORITA_EN_ZONA ||

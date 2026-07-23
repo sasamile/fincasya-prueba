@@ -53,9 +53,75 @@ export const MODULES = [
   },
   { value: 'automations', label: 'Automatizaciones', group: 'Contenido' },
   { value: 'reports', label: 'Reportes', group: 'Contenido' },
+  { value: 'documents', label: 'Documentos', group: 'Reservas y contratos' },
+  {
+    value: 'owner_quotes',
+    label: 'Cotización al propietario',
+    group: 'Reservas y contratos',
+  },
+  {
+    value: 'company_accounts',
+    label: 'Cuentas empresa / links',
+    group: 'Reservas y contratos',
+  },
+
+  // ── ACCIONES CRÍTICAS (Adriana, 22-jul) ──────────────────────────────────
+  // No son pantallas: son poderes que NO cualquiera debe tener. Se otorgan
+  // marcando "Ver" en la fila; el resto de columnas no aplica.
+  {
+    value: 'action_bot_toggle',
+    label: 'Prender / apagar el bot',
+    group: 'Acciones críticas',
+  },
+  {
+    value: 'action_delete_contract',
+    label: 'Eliminar contratos y documentos',
+    group: 'Acciones críticas',
+  },
+  {
+    value: 'action_delete_booking',
+    label: 'Eliminar reservas',
+    group: 'Acciones críticas',
+  },
+  {
+    value: 'action_cancel_booking',
+    label: 'Cancelar reservas',
+    group: 'Acciones críticas',
+  },
+  {
+    value: 'action_owner_payout',
+    label: 'Registrar pagos al propietario',
+    group: 'Acciones críticas',
+  },
+  {
+    value: 'action_deposit_return',
+    label: 'Devolver depósitos',
+    group: 'Acciones críticas',
+  },
   /** Compat con matrices antiguas (features/plantillas/contenidos). */
   { value: 'catalogs', label: 'Catálogos (legacy)', group: 'Contenido' },
 ] as const;
+
+/**
+ * Módulos que representan una ACCIÓN, no una pantalla. En la matriz solo tiene
+ * sentido la columna "Ver" (= tiene el poder); crear/editar/eliminar no aplican.
+ */
+export const ACTION_MODULES = new Set<string>([
+  'action_bot_toggle',
+  'action_delete_contract',
+  'action_delete_booking',
+  'action_cancel_booking',
+  'action_owner_payout',
+  'action_deposit_return',
+]);
+
+/** ¿El usuario tiene concedida esta acción crítica? */
+export function tieneAccion(
+  permissions: Record<string, string[]> | undefined,
+  accion: string,
+): boolean {
+  return Boolean(permissions?.[accion]?.includes('read'));
+}
 
 export type PermissionAction = (typeof ACTIONS)[number]['value'];
 

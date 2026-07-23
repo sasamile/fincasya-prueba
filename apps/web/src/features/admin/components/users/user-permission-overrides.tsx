@@ -41,6 +41,9 @@ export function UserPermissionOverrides({
     setDirty(false);
   }, [data]);
 
+  /** Filas que son un poder, no una pantalla (solo columna Ver). */
+  const esAccionCritica = (value: string) => value.startsWith("action_");
+
   const groups = useMemo(() => {
     if (!data) return [];
     const order: string[] = [];
@@ -211,6 +214,11 @@ export function UserPermissionOverrides({
                         {mod.label}
                       </span>
                       {data.actions.map((action) => {
+                        // Acciones críticas: solo la columna VER tiene sentido
+                        // (= tiene el poder). Las demás quedan vacías.
+                        if (esAccionCritica(mod.value) && action.value !== "read") {
+                          return <span key={action.value} />;
+                        }
                         const state = cellState(
                           row.grants,
                           row.denies,
