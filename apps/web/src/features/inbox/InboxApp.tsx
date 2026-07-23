@@ -495,7 +495,7 @@ export default function App() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={showArchived ? 'Buscar en archivados' : 'Buscar un chat o iniciar uno nuevo'}
-              className="h-9 rounded-full border-transparent bg-input pl-11 text-[13px]"
+              className="h-9 rounded-full border-transparent bg-input pl-11 text-base md:text-[13px]"
             />
           </div>
         </div>
