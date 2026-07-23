@@ -13,10 +13,26 @@ const nextConfig: NextConfig = {
     "@ilovepdf/ilovepdf-js-core",
     "heic-convert",
   ],
-  /** Incluye el script fallback DOCX→PDF en las funciones serverless. */
+  /**
+   * Archivos que Next NO rastrea solo (se leen con fs en runtime) y sin los
+   * cuales la función serverless falla: el script fallback DOCX→PDF y las
+   * plantillas .docx maestras (contrato y CR).
+   */
   outputFileTracingIncludes: {
     "/api/fincas/contract-docx-to-pdf": ["./scripts/docx-to-pdf.mjs"],
-    "/api/fincas/[id]/direct-booking-contract": ["./scripts/docx-to-pdf.mjs"],
+    "/api/fincas/[id]/direct-booking-contract": [
+      "./scripts/docx-to-pdf.mjs",
+      "./assets/contracts/default-contract-template.docx",
+    ],
+    "/api/fincas/cr-docx": ["./assets/contracts/default-cr-template.docx"],
+    "/api/fincas/cr-pdf": [
+      "./assets/contracts/default-cr-template.docx",
+      "./scripts/docx-to-pdf.mjs",
+    ],
+    "/api/sale-links/[token]/generate-cr": [
+      "./assets/contracts/default-cr-template.docx",
+      "./scripts/docx-to-pdf.mjs",
+    ],
   },
   images: {
     formats: ['image/webp'],

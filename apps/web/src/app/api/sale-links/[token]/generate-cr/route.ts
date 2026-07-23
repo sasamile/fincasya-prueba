@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { getConvexHttpClient, api } from "@/lib/convex-server";
-import { htmlToPdf } from "@/lib/server/html-to-pdf";
+import { type ReservationConfirmationData } from "@/lib/server/reservation-confirmation-html";
 import {
-  buildReservationConfirmationHtml,
-  type ReservationConfirmationData,
-} from "@/lib/server/reservation-confirmation-html";
+  buildCrTemplateValues,
+  fillCrDocx,
+  loadCrTemplate,
+} from "@/lib/server/cr-docx";
+import { convertDocxToPdfDetailed } from "@/lib/server/docx-to-pdf";
 import { computeConfirmationFinancials } from "@/lib/server/confirmation-financials";
 
 export const runtime = "nodejs";
@@ -29,17 +29,6 @@ function formatGroupTypeLabel(raw: unknown): string {
   if (v === "AMIGOS") return "Amigos";
   if (v === "EMPRESA") return "Empresa";
   return String(raw).trim();
-}
-
-/** Logo de FincasYa como data URL (para que puppeteer lo renderice offline). */
-async function loadLogoDataUrl(): Promise<string | undefined> {
-  try {
-    const p = path.join(process.cwd(), "public", "fincas-ya-logo.png");
-    const buf = await fs.readFile(p);
-    return `data:image/png;base64,${buf.toString("base64")}`;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -141,12 +130,14 @@ export async function POST(
         ).trim() || "Descanso",
     };
 
-    const logoDataUrl = await loadLogoDataUrl();
-    const html = buildReservationConfirmationHtml(data, { logoDataUrl });
-    const pdf = await htmlToPdf(html);
+    // TODOS los CR salen de la plantilla oficial .docx (Santiago, 23-jul):
+    // plantilla → docx → PDF, igual que el CR del inbox.
+    const template = await loadCrTemplate();
+    const docx = fillCrDocx(template, buildCrTemplateValues(data));
+    const { pdf, error: pdfError } = await convertDocxToPdfDetailed(docx);
     if (!pdf?.length) {
       return NextResponse.json(
-        { error: "No se pudo generar la confirmación." },
+        { error: pdfError || "No se pudo generar la confirmación." },
         { status: 502 },
       );
     }

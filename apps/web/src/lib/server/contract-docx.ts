@@ -333,7 +333,7 @@ function escapeWordTemplateValue(rawVal: string): string {
   return v;
 }
 
-function applyWordTemplateReplacements(
+export function applyWordTemplateReplacements(
   xml: string,
   values: Record<string, string>,
 ): string {

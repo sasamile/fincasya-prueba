@@ -502,36 +502,46 @@ function buildConfirmationDocxHtml(
 </body></html>`;
 }
 
+/** Nombre base del archivo del CR a partir del código del contrato. */
+function crFilename(p: ConfirmationPayload, ext: 'pdf' | 'docx'): string {
+  const contractNum = (p.contractNumber ?? 'CONFIRMACION')
+    .replace(/[^\w\-]/g, '_')
+    .toUpperCase();
+  return `CONFIRMACION_${contractNum}.${ext}`;
+}
+
+/** Mensaje de error del endpoint (o uno genérico). */
+async function errorDeRespuesta(res: Response, fallback: string) {
+  try {
+    const err = (await res.json()) as { error?: string };
+    if (err?.error) return new Error(err.error);
+  } catch {
+    /* ignore */
+  }
+  return new Error(`${fallback} (error ${res.status})`);
+}
+
 export const inboxService = {
+  /**
+   * PDF del CR. Sale de la PLANTILLA OFICIAL .docx del equipo (Santiago,
+   * 23-jul), igual que el contrato — antes se dibujaba con HTML aparte y no
+   * coincidía con el diseño.
+   */
   async generateReservationConfirmationPreview(
     _conversationId: string,
     payload: unknown,
   ): Promise<{ blob: Blob; filename: string }> {
     const p = (payload ?? {}) as ConfirmationPayload;
+    const filename = crFilename(p, 'pdf');
 
-    const logoDataUrl = await fetchLogoDataUrl();
-    const html = buildConfirmationHtml(p, logoDataUrl);
-
-    const contractNum = (p.contractNumber ?? 'CONFIRMACION')
-      .replace(/[^\w\-]/g, '_')
-      .toUpperCase();
-    const filename = `CONFIRMACION_${contractNum}.pdf`;
-
-    const res = await fetch('/api/fincas/html-to-pdf', {
+    const res = await fetch('/api/fincas/cr-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ html, filename }),
+      body: JSON.stringify(p),
     });
 
     if (!res.ok) {
-      let msg = `Error ${res.status} generando el PDF de confirmación.`;
-      try {
-        const err = (await res.json()) as { error?: string };
-        if (err?.error) msg = err.error;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(msg);
+      throw await errorDeRespuesta(res, 'No se pudo generar el PDF del CR');
     }
 
     const blob = await res.blob();
@@ -547,30 +557,16 @@ export const inboxService = {
     payload: unknown,
   ): Promise<{ blob: Blob; filename: string }> {
     const p = (payload ?? {}) as ConfirmationPayload;
+    const filename = crFilename(p, 'docx');
 
-    const logoDataUrl = await fetchLogoDataUrl();
-    const html = buildConfirmationDocxHtml(p, logoDataUrl);
-
-    const contractNum = (p.contractNumber ?? 'CONFIRMACION')
-      .replace(/[^\w\-]/g, '_')
-      .toUpperCase();
-    const filename = `CONFIRMACION_${contractNum}.docx`;
-
-    const res = await fetch('/api/fincas/html-to-docx', {
+    const res = await fetch('/api/fincas/cr-docx', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ html, filename }),
+      body: JSON.stringify(p),
     });
 
     if (!res.ok) {
-      let msg = `Error ${res.status} generando el Word de confirmación.`;
-      try {
-        const err = (await res.json()) as { error?: string };
-        if (err?.error) msg = err.error;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(msg);
+      throw await errorDeRespuesta(res, 'No se pudo generar el Word del CR');
     }
 
     const blob = await res.blob();

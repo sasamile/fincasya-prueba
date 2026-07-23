@@ -14,6 +14,13 @@ import {
   ArrowDownRight,
   ChevronRight,
   Image as ImageIcon,
+  MessageSquare,
+  Percent,
+  Inbox,
+  FileText,
+  Sparkles,
+  Plus,
+  Activity,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -29,11 +36,12 @@ import {
   PieChart,
   Pie,
 } from 'recharts';
-import { format, subMonths } from 'date-fns';
+import { format, formatDistanceToNow, subMonths } from 'date-fns';
 import { es } from 'date-fns/locale';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 
 interface BookingRow {
   _id: string;
@@ -54,6 +62,39 @@ interface PropertyRow {
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
+const QUICK_ACTIONS = [
+  {
+    label: 'Inbox',
+    href: '/admin/inbox',
+    icon: Inbox,
+    hint: 'Chats y IA',
+  },
+  {
+    label: 'Reservas',
+    href: '/admin/reservations',
+    icon: CalendarCheck2,
+    hint: 'Ver calendario',
+  },
+  {
+    label: 'Contratos',
+    href: '/admin/contracts',
+    icon: FileText,
+    hint: 'Documentos',
+  },
+  {
+    label: 'CRM',
+    href: '/admin/crm',
+    icon: Sparkles,
+    hint: 'Oportunidades',
+  },
+  {
+    label: 'Nueva finca',
+    href: '/admin/properties/new',
+    icon: Plus,
+    hint: 'Alta rápida',
+  },
+] as const;
+
 export function AdminDashboardPage() {
   const router = useRouter();
   const now = new Date();
@@ -64,6 +105,7 @@ export function AdminDashboardPage() {
   const prevMonthStr = format(prevMonth, 'MM');
   const prevYearStr = format(prevMonth, 'yyyy');
 
+  const executive = useConvexQuery(api.adminDashboard.executiveStats, {});
   const propertiesRaw = useConvexQuery(api.adminProperties.listAll, {});
   const currentBookingsRaw = useConvexQuery(api.bookings.list, {
     month: currentMonthStr,
@@ -78,7 +120,9 @@ export function AdminDashboardPage() {
   const isLoadingProps = propertiesRaw === undefined;
   const isLoadingCurrent = currentBookingsRaw === undefined;
   const isLoadingPrev = previousBookingsRaw === undefined;
-  const isLoading = isLoadingProps || isLoadingCurrent || isLoadingPrev;
+  const isLoadingExec = executive === undefined;
+  const isLoading =
+    isLoadingProps || isLoadingCurrent || isLoadingPrev || isLoadingExec;
 
   const properties: PropertyRow[] =
     propertiesRaw?.map((p) => ({
@@ -116,47 +160,37 @@ export function AdminDashboardPage() {
       precioTotal: b.precioTotal ?? 0,
     })) ?? [];
 
-  const currentRevenue = currentBookings.reduce(
-    (sum, b) => sum + (b.precioTotal || 0),
-    0,
-  );
-  const prevRevenue = previousBookings.reduce(
-    (sum, b) => sum + (b.precioTotal || 0),
-    0,
-  );
+  const currentRevenue =
+    executive?.totalSales ??
+    currentBookings.reduce((sum, b) => sum + (b.precioTotal || 0), 0);
+  const prevRevenue =
+    executive?.prevSales ??
+    previousBookings.reduce((sum, b) => sum + (b.precioTotal || 0), 0);
 
   const revenueGrowth =
-    prevRevenue > 0
+    executive?.salesGrowth ??
+    (prevRevenue > 0
       ? ((currentRevenue - prevRevenue) / prevRevenue) * 100
       : currentRevenue > 0
         ? 100
-        : 0;
+        : 0);
 
   const activeReservations = currentBookings.filter(
     (b) => b.status === 'CONFIRMED' || b.status === 'PAID',
   ).length;
   const totalProperties = properties.length;
 
-  const revenueTrendData = [
-    {
-      name: format(subMonths(now, 5), 'MMM', { locale: es }),
-      revenue: prevRevenue * 0.8,
-    },
-    {
-      name: format(subMonths(now, 4), 'MMM', { locale: es }),
-      revenue: prevRevenue * 1.2,
-    },
-    {
-      name: format(subMonths(now, 3), 'MMM', { locale: es }),
-      revenue: prevRevenue * 0.9,
-    },
-    {
-      name: format(subMonths(now, 2), 'MMM', { locale: es }),
-      revenue: prevRevenue * 1.1,
-    },
-    { name: 'Mes Pasado', revenue: prevRevenue },
-    { name: 'Mes Actual', revenue: currentRevenue },
-  ];
+  const revenueTrendData =
+    executive?.salesByMonth?.map((m) => ({
+      name: m.name,
+      revenue: m.revenue,
+      bookings: m.bookings,
+    })) ?? [
+      { name: 'Mes pasado', revenue: prevRevenue, bookings: 0 },
+      { name: 'Mes actual', revenue: currentRevenue, bookings: 0 },
+    ];
+
+  const hasRevenueTrend = revenueTrendData.some((d) => d.revenue > 0);
 
   const seasonCounts = currentBookings.reduce<Record<string, number>>(
     (acc, b) => {
@@ -188,15 +222,19 @@ export function AdminDashboardPage() {
 
   if (isLoading) return <DashboardSkeleton />;
 
+  const activeAiChats = executive?.activeAiChats ?? 0;
+  const conversionRate = executive?.conversionRate ?? 0;
+  const recentActivity = executive?.recentActivity ?? [];
+
   return (
     <div className="p-4 md:p-8 space-y-8 animate-in fade-in duration-700">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">
-            Resumen de Analíticas
+            Tablero de Control
           </h1>
           <p className="text-muted-foreground text-sm font-medium mt-1">
-            Visualiza el rendimiento de tus fincas en tiempo real.
+            Radiografía financiera y operativa en tiempo real.
           </p>
         </div>
         <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 border border-primary/20 rounded-2xl w-fit">
@@ -207,16 +245,60 @@ export function AdminDashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
         <StatsCard
-          title="Ingresos Mensuales"
+          title="Ventas Totales"
           value={formatCurrency(currentRevenue)}
           change={revenueGrowth}
           icon={DollarSign}
           trend={revenueGrowth >= 0 ? 'up' : 'down'}
-          description="Mes anterior"
+          description={`${executive?.soldBookingsThisMonth ?? activeReservations} reservas vendidas`}
           changeIsPercent
         />
+        <StatsCard
+          title="Chats Activos (IA)"
+          value={activeAiChats.toString()}
+          icon={MessageSquare}
+          description={`${executive?.humanChats ?? 0} en humano · ${executive?.chatsTouchedThisMonth ?? 0} este mes`}
+        />
+        <StatsCard
+          title="Tasa de Conversión"
+          value={`${conversionRate.toFixed(1)}%`}
+          icon={Percent}
+          description={`${executive?.soldBookingsThisMonth ?? 0} ventas / ${executive?.chatsTouchedThisMonth ?? 0} chats`}
+        />
+      </div>
+
+      <div className="bg-background border border-border rounded-2xl p-4 md:p-5">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Acciones rápidas
+          </p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 md:gap-3">
+          {QUICK_ACTIONS.map((action) => (
+            <Link
+              key={action.href}
+              href={action.href}
+              className="group flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3 transition-colors hover:bg-muted/40 hover:border-primary/30"
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <action.icon className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 text-left">
+                <p className="truncate text-sm font-semibold text-foreground">
+                  {action.label}
+                </p>
+                <p className="truncate text-[10px] text-muted-foreground">
+                  {action.hint}
+                </p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
         <StatsCard
           title="Reservas Activas"
           value={activeReservations.toString()}
@@ -235,89 +317,186 @@ export function AdminDashboardPage() {
         </VisitStatsErrorBoundary>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-background border border-border rounded-[32px] p-6 md:p-8 shadow-sm hover:shadow-xl hover:shadow-primary/5 transition-all duration-500">
-          <div className="flex items-center justify-between mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+        <div className="lg:col-span-2 bg-muted/30 border border-border rounded-2xl p-5 md:p-6 flex flex-col min-h-0">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-lg font-bold text-foreground">
-                Tendencia de Ingresos
+                Tendencia de ingresos
               </h3>
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest mt-1">
-                Últimos 6 meses
+              <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                Últimos 6 meses · reservas confirmadas
               </p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-primary" />
+            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+              <TrendingUp className="w-4 h-4 text-primary" />
             </div>
           </div>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={revenueTrendData}>
-                <defs>
-                  <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                    <stop
-                      offset="5%"
-                      stopColor="var(--primary)"
-                      stopOpacity={0.1}
-                    />
-                    <stop
-                      offset="95%"
-                      stopColor="var(--primary)"
-                      stopOpacity={0}
-                    />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  vertical={false}
-                  stroke="var(--border)"
+
+          {hasRevenueTrend ? (
+            <div className="h-56 w-full">
+              <ResponsiveContainer width="100%" height={224}>
+                <BarChart
+                  data={revenueTrendData}
+                  margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke="var(--border)"
+                  />
+                  <XAxis
+                    dataKey="name"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      fill: 'var(--muted-foreground)',
+                    }}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    width={48}
+                    tick={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      fill: 'var(--muted-foreground)',
+                    }}
+                    tickFormatter={(val) =>
+                      val >= 1_000_000
+                        ? `$${(val / 1_000_000).toFixed(1)}M`
+                        : val >= 1000
+                          ? `$${(val / 1000).toFixed(0)}k`
+                          : `$${val}`
+                    }
+                  />
+                  <Tooltip
+                    formatter={(val: number) => formatCurrency(val)}
+                    labelFormatter={(label) => String(label)}
+                    contentStyle={{
+                      borderRadius: '12px',
+                      border: '1px solid var(--border)',
+                      backgroundColor: 'var(--background)',
+                    }}
+                    itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
+                  />
+                  <Bar
+                    dataKey="revenue"
+                    fill="var(--primary)"
+                    radius={[6, 6, 0, 0]}
+                    maxBarSize={40}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex flex-1 flex-col gap-3 rounded-xl border border-dashed border-border bg-background/60 p-4">
+              <p className="text-sm text-muted-foreground">
+                Aún no hay ventas confirmadas en los últimos 6 meses. Mientras
+                tanto, el pulso operativo:
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <MiniStat
+                  label="IA activa"
+                  value={String(activeAiChats)}
+                  icon={MessageSquare}
                 />
-                <XAxis
-                  dataKey="name"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    fill: 'var(--muted-foreground)',
-                  }}
-                  dy={10}
+                <MiniStat
+                  label="En humano"
+                  value={String(executive?.humanChats ?? 0)}
+                  icon={Inbox}
                 />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    fill: 'var(--muted-foreground)',
-                  }}
-                  tickFormatter={(val) =>
-                    `$ ${(val / 1000000).toFixed(1).replace('.', ',')}M`
-                  }
+                <MiniStat
+                  label="Conversión"
+                  value={`${conversionRate.toFixed(1)}%`}
+                  icon={Percent}
                 />
-                <Tooltip
-                  formatter={(val: number) => formatCurrency(val)}
-                  contentStyle={{
-                    borderRadius: '16px',
-                    border: '1px solid var(--border)',
-                    backgroundColor: 'var(--background)',
-                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                  }}
-                  itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
+                <MiniStat
+                  label="Reservas mes"
+                  value={String(activeReservations)}
+                  icon={CalendarCheck2}
                 />
-                <Area
-                  type="monotone"
-                  dataKey="revenue"
-                  stroke="var(--primary)"
-                  strokeWidth={4}
-                  fillOpacity={1}
-                  fill="url(#colorRev)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+              </div>
+            </div>
+          )}
         </div>
 
+        <div className="bg-muted/30 border border-border rounded-2xl p-5 md:p-6 shadow-sm flex flex-col h-[380px] lg:h-auto lg:min-h-[280px]">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-base md:text-lg font-bold text-foreground">
+                Actividad reciente
+              </h3>
+              <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground mt-1">
+                Feed en vivo
+              </p>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-background border border-border">
+              <Activity className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </div>
+          <div className="flex-1 space-y-2 overflow-y-auto pr-1 min-h-0">
+            {recentActivity.length > 0 ? (
+              recentActivity.map((item) => (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  className="flex items-start gap-3 rounded-xl border border-border/60 bg-background px-3 py-2.5 transition-colors hover:bg-background/80"
+                >
+                  <div
+                    className={cn(
+                      'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                      item.kind === 'booking' &&
+                        'bg-emerald-500/10 text-emerald-600',
+                      item.kind === 'chat' && 'bg-sky-500/10 text-sky-600',
+                      item.kind === 'contract' &&
+                        'bg-amber-500/10 text-amber-600',
+                    )}
+                  >
+                    {item.kind === 'booking' ? (
+                      <CalendarCheck2 className="h-3.5 w-3.5" />
+                    ) : item.kind === 'chat' ? (
+                      <MessageSquare className="h-3.5 w-3.5" />
+                    ) : (
+                      <FileText className="h-3.5 w-3.5" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 text-left">
+                    <p className="truncate text-sm font-semibold text-foreground">
+                      {item.title}
+                    </p>
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {item.subtitle}
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground/80">
+                      {formatDistanceToNow(new Date(item.at), {
+                        addSuffix: true,
+                        locale: es,
+                      })}
+                    </p>
+                  </div>
+                  {item.amount != null && item.amount > 0 ? (
+                    <p className="shrink-0 text-xs font-bold text-foreground">
+                      {formatCurrency(item.amount)}
+                    </p>
+                  ) : null}
+                </Link>
+              ))
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center py-10 text-center opacity-40">
+                <Activity className="mb-2 h-10 w-10" />
+                <p className="text-xs font-bold uppercase tracking-widest">
+                  Sin actividad reciente
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="bg-background border border-border rounded-[32px] p-6 md:p-8 shadow-sm hover:shadow-xl hover:shadow-primary/5 transition-all duration-500">
           <div className="flex items-center justify-between mb-8">
             <h3 className="text-lg font-bold text-foreground">
@@ -380,10 +559,8 @@ export function AdminDashboardPage() {
             ))}
           </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-6">
-        <div className="bg-background border border-border rounded-[32px] p-5 md:p-8 shadow-sm flex flex-col h-[500px]">
+        <div className="lg:col-span-2 bg-background border border-border rounded-[32px] p-5 md:p-8 shadow-sm flex flex-col h-[500px]">
           <div className="flex items-center justify-between mb-6 md:mb-8">
             <h3 className="text-base md:text-lg font-bold text-foreground">
               Fincas con Mayores Ingresos
@@ -443,8 +620,10 @@ export function AdminDashboardPage() {
             )}
           </div>
         </div>
+      </div>
 
-        <div className="bg-background border border-border rounded-[32px] p-5 md:p-8 shadow-sm text-left flex flex-col h-[500px]">
+      <div className="grid grid-cols-1 gap-6 pb-6">
+        <div className="bg-background border border-border rounded-[32px] p-5 md:p-8 shadow-sm text-left flex flex-col max-h-[500px]">
           <div className="flex items-center justify-between mb-6 md:mb-8">
             <h3 className="text-base md:text-lg font-bold text-foreground text-left">
               Reservas Recientes
@@ -511,17 +690,19 @@ export function AdminDashboardPage() {
                     <p className="text-sm md:text-base font-bold text-foreground">
                       {formatCurrency(booking.precioTotal)}
                     </p>
-                    <button
+                    <Button
                       type="button"
+                      variant="link"
+                      size="sm"
                       onClick={() =>
                         router.push(
                           `/admin/reservations?bookingId=${booking._id}`,
                         )
                       }
-                      className="text-[9px] font-bold text-primary uppercase tracking-widest opacity-80 hover:underline"
+                      className="h-auto p-0 text-[9px] font-bold text-primary uppercase tracking-widest"
                     >
                       Detalle
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))
@@ -652,14 +833,16 @@ function StatsCard({
                 'flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold',
                 trend === 'up'
                   ? 'bg-emerald-500/10 text-emerald-500'
-                  : 'bg-red-500/10 text-red-500',
+                  : trend === 'down'
+                    ? 'bg-red-500/10 text-red-500'
+                    : 'bg-muted text-muted-foreground',
               )}
             >
               {trend === 'up' ? (
                 <ArrowUpRight className="w-3 h-3" />
-              ) : (
+              ) : trend === 'down' ? (
                 <ArrowDownRight className="w-3 h-3" />
-              )}
+              ) : null}
               {changeIsPercent
                 ? `${Math.abs(change).toFixed(1)}%`
                 : Math.abs(change).toLocaleString('es-CO')}
@@ -683,11 +866,12 @@ function DashboardSkeleton() {
         <Skeleton className="h-10 w-64" />
         <Skeleton className="h-4 w-48" />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[1, 2, 3, 4].map((i) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {[1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-32 rounded-[32px]" />
         ))}
       </div>
+      <Skeleton className="h-24 rounded-2xl" />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Skeleton className="lg:col-span-2 h-[450px] rounded-[32px]" />
         <Skeleton className="h-[450px] rounded-[32px]" />

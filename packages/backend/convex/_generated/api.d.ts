@@ -12,6 +12,7 @@ import type * as admin from "../admin.js";
 import type * as adminContacts from "../adminContacts.js";
 import type * as adminContractSettings from "../adminContractSettings.js";
 import type * as adminContractSnapshots from "../adminContractSnapshots.js";
+import type * as adminDashboard from "../adminDashboard.js";
 import type * as adminProperties from "../adminProperties.js";
 import type * as adminSessionLogs from "../adminSessionLogs.js";
 import type * as advisorDocuments from "../advisorDocuments.js";
@@ -152,6 +153,7 @@ declare const fullApi: ApiFromModules<{
   adminContacts: typeof adminContacts;
   adminContractSettings: typeof adminContractSettings;
   adminContractSnapshots: typeof adminContractSnapshots;
+  adminDashboard: typeof adminDashboard;
   adminProperties: typeof adminProperties;
   adminSessionLogs: typeof adminSessionLogs;
   advisorDocuments: typeof advisorDocuments;
