@@ -18,6 +18,7 @@ import { verifyCedulaPhoto, decideCedulaVerdict } from './lib/cedulaAi';
 import { verifyPaymentReceiptPhoto } from './lib/receiptAi';
 import { verifySignedContractPhoto } from './lib/signedContractAi';
 import { getPublicSiteOrigin } from './lib/publicSiteUrl';
+import { seCruzan } from './lib/dateOverlap';
 
 function bogotaYmd(ms: number): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -273,6 +274,71 @@ async function assertContractCodeAvailable(
   return code;
 }
 
+/** dd/mm/aaaa para los mensajes de error del asesor. */
+function fechaCorta(ms: number): string {
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(ms));
+}
+
+/**
+ * UNA FINCA, UNAS FECHAS, UN SOLO LINK (Santiago, 23-jul).
+ *
+ * Se creó un segundo link de venta para la MISMA finca y las MISMAS fechas que
+ * uno que ya tenía el pago aprobado. El sistema dejó crearlo, pero al entregar
+ * la confirmación y el check-in reventaba con "fechas ocupadas" — porque la
+ * primera reserva ya había bloqueado el calendario. Ahora el choque se detecta
+ * al CREAR el link, no al final del proceso.
+ *
+ * Bloquea contra dos fuentes:
+ *  1. otros links de venta vivos (no cancelados) de esa finca que se crucen;
+ *  2. el calendario real (`propertyAvailability`: reservas y bloqueos manuales).
+ */
+async function assertFechasLibres(
+  ctx: MutationCtx,
+  propertyId: Id<'properties'>,
+  checkIn: number,
+  checkOut: number,
+  excludeId?: Id<'saleLinks'>,
+  /** Reserva propia del link: su bloqueo de calendario no cuenta como choque. */
+  excludeBookingId?: Id<'bookings'>,
+) {
+  if (!(checkOut > checkIn)) return;
+
+  const links = await ctx.db
+    .query('saleLinks')
+    .withIndex('by_property', (q) => q.eq('propertyId', propertyId))
+    .collect();
+
+  for (const l of links) {
+    if (l._id === excludeId) continue;
+    if (l.status === 'cancelled') continue; // uno cancelado libera las fechas
+    if (!seCruzan(checkIn, checkOut, l.checkIn, l.checkOut)) continue;
+    const quien = l.createdByName?.trim();
+    throw new Error(
+      `Esa finca ya tiene el link ${l.contractCode ?? ''} para el ${fechaCorta(l.checkIn)} → ${fechaCorta(l.checkOut)}` +
+        (quien ? ` (lo creó ${quien})` : '') +
+        `. No se puede crear otro para las mismas fechas: si ese link ya tiene el pago aprobado, la confirmación y el check-in fallarían por fechas ocupadas. Cancela el link anterior o ajusta las fechas.`,
+    );
+  }
+
+  const bloqueos = await ctx.db
+    .query('propertyAvailability')
+    .withIndex('by_property', (q) => q.eq('propertyId', propertyId))
+    .collect();
+
+  for (const b of bloqueos) {
+    if (excludeBookingId && b.bookingId === excludeBookingId) continue;
+    if (!seCruzan(checkIn, checkOut, b.fechaEntrada, b.fechaSalida)) continue;
+    throw new Error(
+      `Esa finca ya está ocupada del ${fechaCorta(b.fechaEntrada)} al ${fechaCorta(b.fechaSalida)} (reserva o bloqueo en el calendario). No se puede crear el link para esas fechas.`,
+    );
+  }
+}
+
 async function resolveBookingReference(
   ctx: { db: QueryCtx['db'] },
   link: Doc<'saleLinks'>,
@@ -463,6 +529,7 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const { contractCode: rawContractCode, ...rest } = args;
     const contractCode = await assertContractCodeAvailable(ctx, rawContractCode);
+    await assertFechasLibres(ctx, args.propertyId, args.checkIn, args.checkOut);
     const token = generateToken();
     const now = Date.now();
     const advance =
@@ -674,6 +741,24 @@ export const update = mutation({
   handler: async (ctx, { id, ...patch }) => {
     const existing = await ctx.db.get(id);
     if (!existing) throw new Error('Sale link not found');
+
+    // Mismo candado que al crear: si mueven finca o fechas, revalidar que no
+    // choquen con otro link vivo ni con el calendario (se excluye a sí mismo).
+    const cambiaFechas =
+      patch.propertyId !== undefined ||
+      patch.checkIn !== undefined ||
+      patch.checkOut !== undefined;
+    if (cambiaFechas) {
+      await assertFechasLibres(
+        ctx,
+        patch.propertyId ?? existing.propertyId,
+        patch.checkIn ?? existing.checkIn,
+        patch.checkOut ?? existing.checkOut,
+        id,
+        existing.bookingId,
+      );
+    }
+
     await ctx.db.patch(id, { ...patch, updatedAt: Date.now() });
 
     // Si ya hay booking, sincroniza flags de check-in al portal /checkin.
