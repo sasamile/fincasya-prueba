@@ -58,8 +58,17 @@ type Movimiento = {
   ingreso: number;
   egreso: number;
   observaciones: string;
+  /** A quién corresponde el movimiento (cliente o propietario según la fila). */
   nombre: string;
   cedula: string;
+  // DESGLOSE para la contadora (Adriana, 22-jul): cada fila dice SIEMPRE de
+  // qué reserva es, quién es el cliente y quién el propietario — antes
+  // `nombre` era uno u otro y no se sabía cuál.
+  reserva: string;
+  cliente: string;
+  clienteCedula: string;
+  propietario: string;
+  propietarioCedula: string;
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -112,6 +121,11 @@ export const getMovimientos = query({
         observaciones: p.notes ?? p.reference ?? booking?.reference ?? '',
         nombre: booking?.nombreCompleto ?? '',
         cedula: booking?.cedula ?? '',
+        reserva: booking?.reference ?? '',
+        cliente: booking?.nombreCompleto ?? '',
+        clienteCedula: booking?.cedula ?? '',
+        propietario: property?.propietarioNombre ?? '',
+        propietarioCedula: property?.propietarioCedula ?? '',
       });
     }
 
@@ -136,6 +150,11 @@ export const getMovimientos = query({
           observaciones: b.reference ? `Reserva ${b.reference}` : '',
           nombre: property?.propietarioNombre ?? '',
           cedula: property?.propietarioCedula ?? '',
+          reserva: b.reference ?? '',
+          cliente: b.nombreCompleto ?? '',
+          clienteCedula: b.cedula ?? '',
+          propietario: property?.propietarioNombre ?? '',
+          propietarioCedula: property?.propietarioCedula ?? '',
         });
       }
 
@@ -154,6 +173,11 @@ export const getMovimientos = query({
             observaciones: dev.observaciones ?? '',
             nombre: b.nombreCompleto ?? '',
             cedula: b.cedula ?? '',
+            reserva: b.reference ?? '',
+            cliente: b.nombreCompleto ?? '',
+            clienteCedula: b.cedula ?? '',
+            propietario: property?.propietarioNombre ?? '',
+            propietarioCedula: property?.propietarioCedula ?? '',
           });
         }
       }
@@ -184,6 +208,12 @@ export const getMovimientos = query({
         observaciones: m.notes ?? '',
         nombre: m.beneficiario ?? m.createdByName ?? '',
         cedula: '',
+        // Gasto operativo: no cuelga de una reserva ni de un propietario.
+        reserva: '',
+        cliente: '',
+        clienteCedula: '',
+        propietario: '',
+        propietarioCedula: '',
       });
     }
 
@@ -211,6 +241,142 @@ export type TerceroExport = {
   telefono: string;
   correo: string;
 };
+
+/**
+ * DESGLOSE POR RESERVA para la contadora (Adriana, 22-jul).
+ *
+ * Una fila por reserva con TODO lo que necesita entender el negocio de esa
+ * reserva: quién es el cliente, quién el propietario, cuánto pagó el turista,
+ * cuánto se le reconoció y se le pagó al propietario, cuánto se devolvió, y
+ * cuánto quedó para FincasYa.
+ *
+ *   Ganancia FincasYa = cobrado al cliente − pagado al propietario − devuelto
+ *
+ * Se cuenta por la fecha de ENTRADA de la reserva, que es como se cierra el mes.
+ */
+type FilaReserva = {
+  reserva: string;
+  finca: string;
+  ubicacion: string;
+  fechaEntrada: string;
+  fechaSalida: string;
+  noches: number;
+  personas: number;
+  cliente: string;
+  clienteCedula: string;
+  clienteTelefono: string;
+  propietario: string;
+  propietarioCedula: string;
+  valorReserva: number;
+  cobradoCliente: number;
+  reembolsadoCliente: number;
+  acordadoPropietario: number;
+  pagadoPropietario: number;
+  saldoPropietario: number;
+  devolucionDeposito: number;
+  gananciaFincasya: number;
+  estado: string;
+};
+
+export const getDesglosePorReserva = query({
+  args: { start: v.number(), end: v.number() },
+  handler: async (ctx, args) => {
+    if (!(await isAccounting(ctx))) return { rows: [], totals: null };
+
+    const bookings = await ctx.db.query('bookings').collect();
+    const propertyCache = new Map<string, Doc<'properties'> | null>();
+    const getProperty = async (id: Id<'properties'>) => {
+      const key = String(id);
+      if (propertyCache.has(key)) return propertyCache.get(key) ?? null;
+      const p = await ctx.db.get(id);
+      propertyCache.set(key, p);
+      return p;
+    };
+
+    const rows: FilaReserva[] = [];
+    for (const b of bookings) {
+      const entrada = Number(b.fechaEntrada) || 0;
+      if (entrada < args.start || entrada >= args.end) continue;
+      if (String(b.status ?? '').toUpperCase() === 'CANCELLED') continue;
+
+      const property = await getProperty(b.propertyId);
+
+      // Lo que el turista efectivamente pagó (pagos menos reembolsos).
+      const payments = await ctx.db
+        .query('payments')
+        .withIndex('by_booking', (q) => q.eq('bookingId', b._id))
+        .collect();
+      let cobrado = 0;
+      let reembolsado = 0;
+      for (const p of payments) {
+        const monto = Number(p.amount) || 0;
+        const estado = String(p.status ?? '').toUpperCase();
+        if (estado && estado !== 'PAID' && estado !== 'APPROVED') continue;
+        if (p.type === 'REEMBOLSO') reembolsado += monto;
+        else cobrado += monto;
+      }
+
+      // Propietario: lo acordado/cotizado y lo realmente pagado.
+      const acordadoPropietario =
+        Number(b.ownerPayout?.valorAcordado) ||
+        Number(b.ownerNegotiatedAmount) ||
+        0;
+      const pagadoPropietario = (b.ownerPayout?.abonos ?? []).reduce(
+        (sum, a) => sum + (Number(a.amount) || 0),
+        0,
+      );
+      const devolucionDeposito = Number(b.depositReturn?.devolucion?.valor) || 0;
+
+      const cobradoNeto = cobrado - reembolsado;
+      const gananciaFincasya =
+        cobradoNeto - pagadoPropietario - devolucionDeposito;
+
+      rows.push({
+        reserva: b.reference ?? '',
+        finca: property?.title ?? '',
+        ubicacion: property?.location ?? '',
+        fechaEntrada: bogotaDate(entrada),
+        fechaSalida: b.fechaSalida ? bogotaDate(Number(b.fechaSalida)) : '',
+        noches: Number(b.numeroNoches) || 0,
+        personas: Number(b.numeroPersonas) || 0,
+        cliente: b.nombreCompleto ?? '',
+        clienteCedula: b.cedula ?? '',
+        clienteTelefono: b.celular ?? '',
+        propietario: property?.propietarioNombre ?? '',
+        propietarioCedula: property?.propietarioCedula ?? '',
+        valorReserva: Number(b.precioTotal) || 0,
+        cobradoCliente: cobrado,
+        reembolsadoCliente: reembolsado,
+        acordadoPropietario,
+        pagadoPropietario,
+        saldoPropietario: Math.max(acordadoPropietario - pagadoPropietario, 0),
+        devolucionDeposito,
+        gananciaFincasya,
+        estado: b.status ?? '',
+      });
+    }
+
+    rows.sort((a, b) => a.fechaEntrada.localeCompare(b.fechaEntrada));
+
+    const suma = (k: keyof FilaReserva) =>
+      rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+
+    return {
+      rows,
+      totals: {
+        reservas: rows.length,
+        valorReserva: suma('valorReserva'),
+        cobradoCliente: suma('cobradoCliente'),
+        reembolsadoCliente: suma('reembolsadoCliente'),
+        acordadoPropietario: suma('acordadoPropietario'),
+        pagadoPropietario: suma('pagadoPropietario'),
+        saldoPropietario: suma('saldoPropietario'),
+        devolucionDeposito: suma('devolucionDeposito'),
+        gananciaFincasya: suma('gananciaFincasya'),
+      },
+    };
+  },
+});
 
 export const getTercerosConReserva = query({
   args: {},

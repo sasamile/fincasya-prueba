@@ -163,6 +163,18 @@ export function ConfirmarReservaTool({
   const [fechaSaldo, setFechaSaldo] = useState('');
   const [metodoPago, setMetodoPago] = useState<string>('bancolombia');
   const [tipoGrupo, setTipoGrupo] = useState(GRUPO_DEFECTO);
+  const [proposito, setProposito] = useState('');
+  const [huespedes, setHuespedes] = useState('');
+  const [noches, setNoches] = useState('');
+  const [horaEntrada, setHoraEntrada] = useState('');
+  const [horaSalida, setHoraSalida] = useState('');
+  const [alquilerRaw, setAlquilerRaw] = useState('');
+  const [limpiezaRaw, setLimpiezaRaw] = useState('');
+  const [depositoRaw, setDepositoRaw] = useState('');
+  const [totalRaw, setTotalRaw] = useState('');
+  const [observaciones, setObservaciones] = useState('');
+  /** Campos ya precargados para el contrato elegido (no repisar lo tecleado). */
+  const precargadoRef = useRef<string | null>(null);
   /** Modal a pantalla completa: 'edit' (ajustar números) o 'preview' (ver PDF). */
   const [modal, setModal] = useState<null | 'edit' | 'preview'>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -190,6 +202,12 @@ export function ConfirmarReservaTool({
     if (matches.length === 1) return matches[0];
     return null;
   }, [selectedId, matches]);
+
+  // El CR se emite contra la ÚLTIMA versión del contrato (Adriana, 22-jul).
+  const ultimaVersion = useQuery(
+    api.contractDocuments.getLatestContractVersion,
+    selected ? { contractNumber: selected.contractNumber } : 'skip',
+  );
 
   const chatMatchesSelected =
     Boolean(conversation) &&
@@ -219,6 +237,25 @@ export function ConfirmarReservaTool({
     return Math.max(total - cleaning - deposit, 0);
   }, [selected]);
 
+  // Precarga los campos del CR con lo que trae el contrato. Solo la primera vez
+  // por contrato: si el asesor ya corrigió algo, no se le repisa.
+  useEffect(() => {
+    if (!selected) return;
+    if (precargadoRef.current === String(selected._id)) return;
+    precargadoRef.current = String(selected._id);
+    const draft = parseDraft(selected.draftJson);
+    setHuespedes(String(draft.guests ?? '') || '');
+    setNoches(String(draft.nights ?? '') || '');
+    setHoraEntrada(draft.checkInTime || '10:00 AM');
+    setHoraSalida(draft.checkOutTime || '04:00 PM');
+    setAlquilerRaw(rentAmount > 0 ? String(rentAmount) : '');
+    setLimpiezaRaw(String(parseCop(draft.cleaningFee ?? '') || ''));
+    setDepositoRaw(String(parseCop(draft.refundableDeposit ?? '') || ''));
+    setTotalRaw(String(selected.valorTotal ?? '') || '');
+    setProposito('');
+    setObservaciones('');
+  }, [selected, rentAmount]);
+
   /**
    * Genera el PDF de la confirmación con TODOS los campos editables (SIN
    * subirlo). Se usa para la vista previa: el asesor lo revisa antes de enviar.
@@ -227,7 +264,9 @@ export function ConfirmarReservaTool({
     c: Contract,
   ): Promise<{ blob: Blob; filename: string }> {
     const draft = parseDraft(c.draftJson);
-    const total = c.valorTotal ?? 0;
+    // Todos los valores salen de los campos EDITABLES del modal; el contrato
+    // solo sirve de precarga.
+    const total = parseCop(totalRaw) || c.valorTotal || 0;
     const abono = parseCop(abonoRaw);
     const { inboxService } = await import('@/features/inbox/api/inbox.api');
     return inboxService.generateReservationConfirmationPreview(
@@ -243,14 +282,14 @@ export function ConfirmarReservaTool({
         propertyLocation: c.propertyLocation,
         checkInDate: c.fechaEntrada,
         checkOutDate: c.fechaSalida,
-        checkInTime: draft.checkInTime || '10:00 AM',
-        checkOutTime: draft.checkOutTime || '04:00 PM',
-        guests: Number(draft.guests) || undefined,
-        nights: Number(draft.nights) || undefined,
+        checkInTime: horaEntrada || '10:00 AM',
+        checkOutTime: horaSalida || '04:00 PM',
+        guests: Number(huespedes) || undefined,
+        nights: Number(noches) || undefined,
         precioTotal: total,
-        rentAmount: rentAmount || undefined,
-        cleaningFee: parseCop(draft.cleaningFee ?? '') || undefined,
-        refundableDeposit: parseCop(draft.refundableDeposit ?? '') || undefined,
+        rentAmount: parseCop(alquilerRaw) || undefined,
+        cleaningFee: parseCop(limpiezaRaw) || undefined,
+        refundableDeposit: parseCop(depositoRaw) || undefined,
         petCount: Number(draft.petCount) || undefined,
         depositoMascotas: parseCop(draft.petDeposit ?? '') || undefined,
         depositAmount: abono || undefined,
@@ -259,6 +298,8 @@ export function ConfirmarReservaTool({
         balanceDate: fechaSaldo || undefined,
         paymentMethod: metodoPago,
         groupType: tipoGrupo.trim() || GRUPO_DEFECTO,
+        purpose: proposito.trim() || undefined,
+        observaciones: observaciones.trim() || undefined,
         paymentStatus: abono >= total && total > 0 ? 'paid' : 'pending',
       },
     );
@@ -327,17 +368,14 @@ export function ConfirmarReservaTool({
 
       // Si el contrato ya trae CR hecho, se usa ese. Si no, se envía EL MISMO
       // PDF que el asesor aprobó en la vista previa (o se genera si no lo vio).
-      let pdfUrl = selected.confirmationPdfUrl;
-      let pdfName =
-        selected.confirmationPdfFilename ??
-        `Confirmacion-${selected.contractNumber.replace(/\s+/g, '-')}.pdf`;
-      if (!pdfUrl) {
-        const revisado =
-          previewBlobRef.current ?? (await generarBlob(selected));
-        pdfName = revisado.filename;
-        const url = await subirBlob(selected, revisado.blob, revisado.filename);
-        if (url) pdfUrl = url;
-      }
+      // SIEMPRE se envía el CR recién armado con los campos del modal — nunca
+      // el PDF viejo del contrato (Adriana, 22-jul): al hacer un segundo CR
+      // salía el primero, sin las correcciones.
+      const revisado = previewBlobRef.current ?? (await generarBlob(selected));
+      const pdfName = revisado.filename;
+      let pdfUrl: string | undefined;
+      const subido = await subirBlob(selected, revisado.blob, revisado.filename);
+      if (subido) pdfUrl = subido;
 
       // Crea la RESERVA en el calendario (bloquea la finca esas fechas) y arma
       // el link de check-in. Idempotente: reenviar no duplica la reserva.
@@ -402,7 +440,24 @@ export function ConfirmarReservaTool({
   useEffect(() => {
     limpiarPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [abonoRaw, fechaAbono, fechaSaldo, metodoPago, tipoGrupo, selectedId]);
+  }, [
+    abonoRaw,
+    fechaAbono,
+    fechaSaldo,
+    metodoPago,
+    tipoGrupo,
+    proposito,
+    huespedes,
+    noches,
+    horaEntrada,
+    horaSalida,
+    alquilerRaw,
+    limpiezaRaw,
+    depositoRaw,
+    totalRaw,
+    observaciones,
+    selectedId,
+  ]);
 
   // Suelta el objectURL del PDF al desmontar.
   useEffect(() => {
@@ -434,6 +489,9 @@ export function ConfirmarReservaTool({
                   {modal === 'edit'
                     ? 'Ajusta los datos antes de generar'
                     : 'Revísala antes de enviarla al cliente'}
+                  {ultimaVersion?.version
+                    ? ` · sobre contrato v${ultimaVersion.version}`
+                    : ''}
                 </p>
               </div>
               <button
@@ -522,6 +580,136 @@ export function ConfirmarReservaTool({
                       className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary/50"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                    Propósito de la estancia
+                  </label>
+                  <input
+                    value={proposito}
+                    onChange={(e) => setProposito(e.target.value)}
+                    placeholder="Ej. Descanso, cumpleaños…"
+                    className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary/50"
+                  />
+                </div>
+
+                {/* Estadía */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                      Huéspedes
+                    </label>
+                    <input
+                      inputMode="numeric"
+                      value={huespedes}
+                      onChange={(e) =>
+                        setHuespedes(e.target.value.replace(/[^\d]/g, ''))
+                      }
+                      className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                      Noches
+                    </label>
+                    <input
+                      inputMode="numeric"
+                      value={noches}
+                      onChange={(e) =>
+                        setNoches(e.target.value.replace(/[^\d]/g, ''))
+                      }
+                      className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                      Hora de entrada
+                    </label>
+                    <input
+                      value={horaEntrada}
+                      onChange={(e) => setHoraEntrada(e.target.value)}
+                      placeholder="10:00 AM"
+                      className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                      Hora de salida
+                    </label>
+                    <input
+                      value={horaSalida}
+                      onChange={(e) => setHoraSalida(e.target.value)}
+                      placeholder="04:00 PM"
+                      className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary/50"
+                    />
+                  </div>
+                </div>
+
+                {/* Valores del CR — todos editables */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                      Valor alquiler
+                    </label>
+                    <div className="mt-1">
+                      <CopMoneyInput
+                        value={alquilerRaw}
+                        onChange={setAlquilerRaw}
+                        className="h-11 rounded-xl border-border bg-background text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                      Limpieza general
+                    </label>
+                    <div className="mt-1">
+                      <CopMoneyInput
+                        value={limpiezaRaw}
+                        onChange={setLimpiezaRaw}
+                        className="h-11 rounded-xl border-border bg-background text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                      Depósito reembolsable
+                    </label>
+                    <div className="mt-1">
+                      <CopMoneyInput
+                        value={depositoRaw}
+                        onChange={setDepositoRaw}
+                        className="h-11 rounded-xl border-border bg-background text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                      Valor TOTAL
+                    </label>
+                    <div className="mt-1">
+                      <CopMoneyInput
+                        value={totalRaw}
+                        onChange={setTotalRaw}
+                        className="h-11 rounded-xl border-border bg-background text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recuadro grande del CR */}
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                    Observaciones (recuadro del CR)
+                  </label>
+                  <textarea
+                    value={observaciones}
+                    onChange={(e) => setObservaciones(e.target.value)}
+                    rows={4}
+                    placeholder="Texto o cifras que van en el recuadro grande…"
+                    className="mt-1 w-full rounded-xl border border-border bg-background p-3 text-sm outline-none focus:border-primary/50"
+                  />
                 </div>
 
                 {/* Calculados: no se editan, se muestran para revisar */}
@@ -722,33 +910,20 @@ export function ConfirmarReservaTool({
             ) : null}
           </div>
 
-          {/* Si el CR se genera aquí, primero se ve; si ya viene hecho, se
-              manda directo. */}
-          {selected.confirmationPdfUrl ? (
-            <button
-              type="button"
-              disabled={!canSend || sending}
-              onClick={() => void handleSend()}
-              className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-            >
-              {sending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-              Enviar confirmación en este chat
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={!canSend}
-              onClick={abrirEditor}
-              className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-            >
-              <Pencil className="h-4 w-4" />
-              Preparar y enviar confirmación
-            </button>
-          )}
+          {/* SIEMPRE pasa por el modal (Adriana, 22-jul): antes, si el contrato
+              ya tenía un CR, el botón enviaba de una y reusaba el PDF viejo —
+              sin dejar revisar ni corregir. Cada CR se arma y se revisa. */}
+          <button
+            type="button"
+            disabled={!canSend}
+            onClick={abrirEditor}
+            className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+          >
+            <Pencil className="h-4 w-4" />
+            {selected.confirmationPdfUrl
+              ? 'Preparar y enviar nueva confirmación'
+              : 'Preparar y enviar confirmación'}
+          </button>
         </section>
       )}
 

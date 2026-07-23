@@ -18,6 +18,8 @@ export type MetaConnection = {
   autoReplyComments?: boolean;
   autoReplyMessage?: string;
   autoReplyTemplateId?: string;
+  autoReplyInstructions?: string;
+  autoReplyMode?: 'template' | 'bot';
   commentTemplates?: CommentTemplate[];
   dmTemplates?: DmSavedResponse[];
   connectedByName?: string;
@@ -305,13 +307,20 @@ export function suggestDmReply(
 export function updateCommentAutoReply(
   pageId: string,
   enabled: boolean,
-  options?: { templateId?: string; message?: string },
+  options?: {
+    templateId?: string;
+    message?: string;
+    mode?: 'template' | 'bot';
+    instructions?: string;
+  },
 ) {
   return convex.mutation(api.metaChannels.updateCommentAutoReply, {
     pageId,
     enabled,
     templateId: options?.templateId,
     message: options?.message,
+    mode: options?.mode,
+    instructions: options?.instructions,
   });
 }
 

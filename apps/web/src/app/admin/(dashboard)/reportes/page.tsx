@@ -13,8 +13,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  exportDesgloseReservasXlsx,
   exportMovimientosXlsx,
   exportTercerosSiigoXlsx,
+  type DesgloseReservaRow,
   type MovimientoRow,
   type TerceroRow,
 } from "@/lib/xlsx-export";
@@ -58,6 +60,14 @@ export default function ReportesPage() {
   const terceros = useConvexQuery(api.reportes.getTercerosConReserva, {}) as
     | TerceroRow[]
     | undefined;
+  // Desglose por reserva: quién es el cliente, quién el propietario y cómo
+  // se repartió la plata (Adriana, 22-jul).
+  const desglose = useConvexQuery(api.reportes.getDesglosePorReserva, {
+    start,
+    end,
+  }) as
+    | { rows: DesgloseReservaRow[]; totals: Record<string, number> | null }
+    | undefined;
 
   const isLoading = movimientos === undefined;
   const rows = movimientos?.rows ?? [];
@@ -74,6 +84,16 @@ export default function ReportesPage() {
     }
     exportMovimientosXlsx(rows, `movimientos-${month}.xlsx`);
     toast.success("Excel de movimientos descargado.");
+  };
+
+  const downloadDesglose = () => {
+    const filas = desglose?.rows ?? [];
+    if (filas.length === 0) {
+      toast.error("No hay reservas en este mes para exportar.");
+      return;
+    }
+    exportDesgloseReservasXlsx(filas, `desglose-reservas-${month}.xlsx`);
+    toast.success("Excel de desglose descargado.");
   };
 
   const downloadTerceros = () => {
@@ -200,6 +220,101 @@ export default function ReportesPage() {
             </table>
           )}
         </div>
+      </div>
+
+      {/* Desglose por reserva — el resumen de negocio para la contadora */}
+      <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between gap-3 flex-wrap p-4">
+          <div>
+            <h2 className="font-bold">Desglose por reserva</h2>
+            <p className="text-xs text-muted-foreground">
+              Cliente, propietario y reparto de la plata: cobrado, pagado al
+              dueño, devuelto y lo que quedó para FincasYa.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={downloadDesglose}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90"
+          >
+            <Download className="h-4 w-4" /> Descargar Excel (desglose)
+          </button>
+        </div>
+        {desglose === undefined ? (
+          <p className="px-4 pb-4 text-sm text-muted-foreground">Cargando…</p>
+        ) : (desglose.rows ?? []).length === 0 ? (
+          <p className="px-4 pb-6 text-center text-sm text-muted-foreground">
+            No hay reservas con entrada en este mes.
+          </p>
+        ) : (
+          <div className="overflow-x-auto border-t border-border">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left">Reserva</th>
+                  <th className="px-3 py-2 text-left">Finca</th>
+                  <th className="px-3 py-2 text-left">Cliente</th>
+                  <th className="px-3 py-2 text-left">Propietario</th>
+                  <th className="px-3 py-2 text-right">Cobrado</th>
+                  <th className="px-3 py-2 text-right">Pagado dueño</th>
+                  <th className="px-3 py-2 text-right">Devolución</th>
+                  <th className="px-3 py-2 text-right">Ganancia FincasYa</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {desglose.rows.map((r) => (
+                  <tr key={r.reserva || `${r.finca}-${r.fechaEntrada}`}>
+                    <td className="px-3 py-2 font-semibold">
+                      {r.reserva || "—"}
+                    </td>
+                    <td className="px-3 py-2">{r.finca || "—"}</td>
+                    <td className="px-3 py-2">{r.cliente || "—"}</td>
+                    <td className="px-3 py-2">{r.propietario || "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(r.cobradoCliente)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(r.pagadoPropietario)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(r.devolucionDeposito)}
+                    </td>
+                    <td
+                      className={`px-3 py-2 text-right tabular-nums font-bold ${
+                        r.gananciaFincasya >= 0
+                          ? "text-emerald-700"
+                          : "text-red-700"
+                      }`}
+                    >
+                      {money(r.gananciaFincasya)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {desglose.totals ? (
+                <tfoot className="bg-muted/40 font-bold">
+                  <tr>
+                    <td className="px-3 py-2" colSpan={4}>
+                      TOTALES ({desglose.totals.reservas} reservas)
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(desglose.totals.cobradoCliente)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(desglose.totals.pagadoPropietario)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(desglose.totals.devolucionDeposito)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
+                      {money(desglose.totals.gananciaFincasya)}
+                    </td>
+                  </tr>
+                </tfoot>
+              ) : null}
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Terceros */}

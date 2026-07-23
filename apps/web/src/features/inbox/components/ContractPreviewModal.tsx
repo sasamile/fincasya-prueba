@@ -9,8 +9,9 @@
  * NO usa el HTML de la página de contratos.
  */
 import { useEffect, useRef, useState } from 'react';
-import { useAction, useMutation } from 'convex/react';
+import { useAction, useMutation, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
+import type { Id } from '@fincasya/backend/convex/_generated/dataModel';
 import { toast } from 'sonner';
 import { Download, Eye, FileWarning, Loader2, Send, X } from 'lucide-react';
 import { justifySuperDocContract } from "@/features/admin/utils/superdoc-justify-contract";
@@ -93,6 +94,13 @@ export function ContractPreviewModal({
   const sendDocument = useAction(api.advisorDocuments.sendDocumentToConversation);
   const upsertContract = useMutation(api.contracts.upsert);
   const registerDocument = useMutation(api.contractDocuments.registerDocument);
+  // RNT de la finca: se manda junto al contrato (Adriana, 22-jul).
+  const rnt = useQuery(
+    api.propertyOwners.getRntForProperty,
+    draft.fincaId
+      ? { propertyId: draft.fincaId as Id<'properties'> }
+      : 'skip',
+  );
   const superdocRef = useRef<SuperDocInstance | null>(null);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -515,6 +523,29 @@ export function ContractPreviewModal({
         // El contrato YA salió: que falle el respaldo Word no rompe el envío.
         console.error('[inbox] no se pudo archivar el Word del contrato', err);
       }
+      // RNT en un segundo mensaje, apenas sale el contrato.
+      if (rnt?.rntPdfUrl) {
+        try {
+          const rntRes = await sendDocument({
+            conversationId: conversation.conversationId,
+            documentUrl: rnt.rntPdfUrl,
+            filename: `RNT${rnt.rntNumber ? `-${rnt.rntNumber}` : ''}.pdf`,
+            caption: rnt.rntNumber
+              ? `Registro Nacional de Turismo N.º ${rnt.rntNumber}`
+              : 'Registro Nacional de Turismo (RNT)',
+          });
+          if (!rntRes.ok) {
+            toast.warning('El contrato salió, pero el RNT no se pudo enviar.');
+          }
+        } catch {
+          toast.warning('El contrato salió, pero el RNT no se pudo enviar.');
+        }
+      } else {
+        toast.warning(
+          'Esta finca no tiene RNT cargado: el contrato salió sin el RNT.',
+        );
+      }
+
       toast.success(
         `Contrato enviado a ${conversation.name || conversation.phone}.`,
       );

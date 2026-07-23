@@ -34,6 +34,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/features/auth/store/auth.store";
 import { DocFolderWordEditor } from "@/features/admin/components/contracts/doc-folder-word-editor";
 
 type Subcarpeta = "contratos" | "confirmaciones";
@@ -45,6 +46,7 @@ type DocRow = {
   url: string;
   filename: string;
   montoAbonado?: number;
+  version?: number;
   createdAt: number;
   validacionIa?: { motivo: string };
 };
@@ -76,26 +78,50 @@ function CarpetaCard({
   nombre,
   detalle,
   onClick,
+  onDelete,
+  deleting,
 }: {
   nombre: string;
   detalle?: string;
   onClick: () => void;
+  onDelete?: () => void;
+  deleting?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-2xl border border-border bg-card p-4 text-left transition hover:border-primary/40 hover:bg-muted/50"
-    >
-      <Folder className="h-8 w-8 shrink-0 text-amber-500" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold">{nombre}</p>
-        {detalle ? (
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{detalle}</p>
-        ) : null}
-      </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-    </button>
+    <div className="relative flex w-full items-center gap-3 rounded-2xl border border-border bg-card p-4 text-left transition hover:border-primary/40 hover:bg-muted/50">
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
+        <Folder className="h-8 w-8 shrink-0 text-amber-500" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold">{nombre}</p>
+          {detalle ? (
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{detalle}</p>
+          ) : null}
+        </div>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
+      {onDelete ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          disabled={deleting}
+          title="Eliminar carpeta (superadmin)"
+          className="absolute right-12 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg border border-red-200 bg-card text-red-600 hover:bg-red-50 disabled:opacity-60"
+        >
+          {deleting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="h-3.5 w-3.5" />
+          )}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -137,6 +163,7 @@ function ArchivoRow({
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-bold">{doc.filename}</p>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {doc.version ? `v${doc.version} · ` : ""}
           {fechaCorta(doc.createdAt)}
           {doc.montoAbonado
             ? ` · Abono $${doc.montoAbonado.toLocaleString("es-CO")}`
@@ -230,10 +257,14 @@ export function DocumentsExplorer() {
   const [subcarpeta, setSubcarpeta] = useState<Subcarpeta | null>(null);
   const [marcando, setMarcando] = useState<string | null>(null);
   const [borrando, setBorrando] = useState<string | null>(null);
+  const [borrandoCarpeta, setBorrandoCarpeta] = useState<string | null>(null);
   /** Vista de las carpetas: cuadrícula o lista (como el Finder de Mac). */
   const [vista, setVista] = useState<Vista>("grid");
   /** Archivo Word abierto en el editor (null = editor cerrado). */
   const [editando, setEditando] = useState<DocRow | null>(null);
+
+  const userRole = useAuthStore((s) => s.user?.role);
+  const canDeleteFolders = userRole === "superadmin";
 
   const folders = useQuery(api.contractDocuments.listFolders, { buscar });
   const contenido = useQuery(
@@ -242,6 +273,7 @@ export function DocumentsExplorer() {
   );
   const setEstado = useMutation(api.contractDocuments.setEstado);
   const deleteDocument = useMutation(api.contractDocuments.deleteDocument);
+  const deleteFolder = useMutation(api.contractDocuments.deleteFolder);
 
   const marcarNulo = async (id: Id<"contractDocuments">) => {
     if (
@@ -272,6 +304,39 @@ export function DocumentsExplorer() {
       toast.error("No se pudo eliminar el archivo.");
     } finally {
       setBorrando(null);
+    }
+  };
+
+  const borrarCarpeta = async (contractNumber: string) => {
+    if (!canDeleteFolders) {
+      toast.error("Solo el superadmin puede eliminar carpetas.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `¿Eliminar toda la carpeta «${contractNumber}»?\nSe borran contratos y confirmaciones archivados. No se puede deshacer.`,
+      )
+    ) {
+      return;
+    }
+    setBorrandoCarpeta(contractNumber);
+    try {
+      const res = await deleteFolder({ contractNumber });
+      toast.success(
+        res.deleted > 0
+          ? `Carpeta eliminada (${res.deleted} archivo${res.deleted === 1 ? "" : "s"}).`
+          : "Carpeta eliminada.",
+      );
+      if (carpeta === contractNumber) {
+        setCarpeta(null);
+        setSubcarpeta(null);
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo eliminar la carpeta.",
+      );
+    } finally {
+      setBorrandoCarpeta(null);
     }
   };
 
@@ -388,32 +453,57 @@ export function DocumentsExplorer() {
                     setCarpeta(f.contractNumber);
                     setSubcarpeta(null);
                   }}
+                  onDelete={
+                    canDeleteFolders
+                      ? () => void borrarCarpeta(f.contractNumber)
+                      : undefined
+                  }
+                  deleting={borrandoCarpeta === f.contractNumber}
                 />
               ))}
             </div>
           ) : (
             <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
               {folders.map((f) => (
-                <button
+                <div
                   key={f.contractNumber}
-                  type="button"
-                  onClick={() => {
-                    setCarpeta(f.contractNumber);
-                    setSubcarpeta(null);
-                  }}
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-muted/50"
+                  className="flex w-full items-center gap-2 px-3 py-2.5 transition hover:bg-muted/50"
                 >
-                  <Folder className="h-5 w-5 shrink-0 text-amber-500" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">
-                    {f.contractNumber}
-                  </span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">
-                    {f.contratos} contrato{f.contratos === 1 ? "" : "s"} ·{" "}
-                    {f.confirmaciones} confirmación
-                    {f.confirmaciones === 1 ? "" : "es"}
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCarpeta(f.contractNumber);
+                      setSubcarpeta(null);
+                    }}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  >
+                    <Folder className="h-5 w-5 shrink-0 text-amber-500" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                      {f.contractNumber}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      {f.contratos} contrato{f.contratos === 1 ? "" : "s"} ·{" "}
+                      {f.confirmaciones} confirmación
+                      {f.confirmaciones === 1 ? "" : "es"}
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                  {canDeleteFolders ? (
+                    <button
+                      type="button"
+                      onClick={() => void borrarCarpeta(f.contractNumber)}
+                      disabled={borrandoCarpeta === f.contractNumber}
+                      title="Eliminar carpeta (superadmin)"
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60"
+                    >
+                      {borrandoCarpeta === f.contractNumber ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  ) : null}
+                </div>
               ))}
             </div>
           )}
@@ -427,17 +517,36 @@ export function DocumentsExplorer() {
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Abriendo carpeta…
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <CarpetaCard
-              nombre="Contratos"
-              detalle={`${contratos.length} archivo${contratos.length === 1 ? "" : "s"}`}
-              onClick={() => setSubcarpeta("contratos")}
-            />
-            <CarpetaCard
-              nombre="Confirmaciones"
-              detalle={`${confirmaciones.length} archivo${confirmaciones.length === 1 ? "" : "s"}`}
-              onClick={() => setSubcarpeta("confirmaciones")}
-            />
+          <div className="space-y-3">
+            {canDeleteFolders ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void borrarCarpeta(carpeta)}
+                  disabled={borrandoCarpeta === carpeta}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-red-200 px-3 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                >
+                  {borrandoCarpeta === carpeta ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  Eliminar carpeta
+                </button>
+              </div>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <CarpetaCard
+                nombre="Contratos"
+                detalle={`${contratos.length} archivo${contratos.length === 1 ? "" : "s"}`}
+                onClick={() => setSubcarpeta("contratos")}
+              />
+              <CarpetaCard
+                nombre="Confirmaciones"
+                detalle={`${confirmaciones.length} archivo${confirmaciones.length === 1 ? "" : "s"}`}
+                onClick={() => setSubcarpeta("confirmaciones")}
+              />
+            </div>
           </div>
         )
       ) : null}

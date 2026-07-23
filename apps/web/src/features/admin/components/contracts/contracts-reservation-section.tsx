@@ -71,6 +71,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { PhoneWithCountry } from "@/components/phone-with-country";
 import {
   Select,
   SelectContent,
@@ -1083,6 +1084,7 @@ export function ContractsReservationSection({
         checkOutDate: form.checkOutDate,
         checkInTime: form.checkInTime,
         checkOutTime: form.checkOutTime,
+        guests: form.guests,
         habitaciones: form.habitaciones,
       },
       nights,
@@ -1129,6 +1131,7 @@ export function ContractsReservationSection({
     form.checkOutDate,
     form.checkInTime,
     form.checkOutTime,
+    form.guests,
     form.habitaciones,
     nights,
     staySubtotal,
@@ -3968,13 +3971,11 @@ export function ContractsReservationSection({
                         <Label className={fieldLabelClass("clientPhone")}>
                           Teléfono
                         </Label>
-                        <Input
+                        <PhoneWithCountry
                           value={form.clientPhone}
-                          onChange={(event) =>
-                            setClientField("clientPhone", event.target.value)
-                          }
-                          placeholder="—"
-                          className={fieldClass("clientPhone")}
+                          onChange={(next) => setField("clientPhone", next)}
+                          placeholder="321 245 7666"
+                          inputClassName={fieldClass("clientPhone")}
                         />
                         {errors.clientPhone && (
                           <p className="ml-1 text-[11px] font-semibold text-red-500">
@@ -3986,13 +3987,11 @@ export function ContractsReservationSection({
                         <Label className={fieldLabelClass("clientPhoneAlt")}>
                           Número adicional
                         </Label>
-                        <Input
+                        <PhoneWithCountry
                           value={form.clientPhoneAlt}
-                          onChange={(event) =>
-                            setClientField("clientPhoneAlt", event.target.value)
-                          }
-                          placeholder="Otro número de contacto"
-                          className={fieldClass("clientPhoneAlt")}
+                          onChange={(next) => setField("clientPhoneAlt", next)}
+                          placeholder="Otro número"
+                          inputClassName={fieldClass("clientPhoneAlt")}
                         />
                         <p className="ml-1 text-[11px] font-medium text-zinc-400">
                           Solo para contacto: no sale impreso en el contrato.

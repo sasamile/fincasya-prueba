@@ -84,6 +84,61 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
       expiresIn: 60 * 60 * 24 * 7, // 7 días
       updateAge: 60 * 60 * 24,
     },
+    /**
+     * UNA SOLA SESIÓN POR CUENTA (Adriana, 22-jul).
+     *
+     * La misma cuenta quedaba abierta en dos computadores a la vez. Ahora, al
+     * iniciar sesión, se cierran TODAS las sesiones anteriores de ese usuario:
+     * entra el nuevo y el anterior queda deslogueado.
+     *
+     * Va en try/catch a propósito: si la limpieza falla, el login NO se rompe
+     * — es preferible una sesión de más que dejar a alguien sin poder entrar.
+     */
+    databaseHooks: {
+      session: {
+        create: {
+          after: async (
+            session: { userId: string; token: string },
+            endpointCtx?: unknown,
+          ) => {
+            try {
+              // El adapter llega en el contexto del hook (no en el factory).
+              const db = (
+                endpointCtx as
+                  | {
+                      context?: {
+                        adapter?: {
+                          findMany: (a: unknown) => Promise<unknown>;
+                          delete: (a: unknown) => Promise<unknown>;
+                        };
+                      };
+                    }
+                  | undefined
+              )?.context?.adapter;
+              if (!db) return;
+
+              const previas = (await db.findMany({
+                model: 'session',
+                where: [{ field: 'userId', value: session.userId }],
+              })) as Array<{ token?: string }>;
+
+              for (const previa of previas) {
+                if (!previa?.token || previa.token === session.token) continue;
+                await db.delete({
+                  model: 'session',
+                  where: [{ field: 'token', value: previa.token }],
+                });
+              }
+            } catch (err) {
+              console.error(
+                '[auth] no se pudieron cerrar las sesiones anteriores',
+                err,
+              );
+            }
+          },
+        },
+      },
+    },
     plugins: [
       // Guarda la sesión en localStorage y la manda por header Better-Auth-Cookie
       // (las cookies de terceros en el navegador suelen bloquearse).

@@ -28,6 +28,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { PhoneWithCountry } from "@/components/phone-with-country";
 import { formatPriceInput, parseCOP } from "@/lib/utils";
 import { VentaBankAccounts } from "./venta-bank-accounts";
 import { StepHeader, VentaCallout } from "./venta-ui";
@@ -1978,11 +1979,11 @@ export function StepDatosContrato({
                   <FormItem>
                     <FormLabel>Teléfono / Celular *</FormLabel>
                     <FormControl>
-                      <Input
-                        placeholder="3001234567"
-                        className="h-11"
-                        {...field}
+                      <PhoneWithCountry
                         value={field.value ?? ""}
+                        onChange={field.onChange}
+                        placeholder="321 245 7666"
+                        inputClassName="h-11"
                       />
                     </FormControl>
                     <FormMessage />
@@ -1996,11 +1997,11 @@ export function StepDatosContrato({
                   <FormItem>
                     <FormLabel>Teléfono de respaldo</FormLabel>
                     <FormControl>
-                      <Input
-                        placeholder="Otro número de contacto"
-                        className="h-11"
-                        {...field}
+                      <PhoneWithCountry
                         value={field.value ?? ""}
+                        onChange={field.onChange}
+                        placeholder="Otro número"
+                        inputClassName="h-11"
                       />
                     </FormControl>
                     <FormMessage />

@@ -14,6 +14,37 @@ export type MovimientoRow = {
   observaciones: string;
   nombre: string;
   cedula: string;
+  /** Desglose: de qué reserva es y quiénes son las partes. */
+  reserva?: string;
+  cliente?: string;
+  clienteCedula?: string;
+  propietario?: string;
+  propietarioCedula?: string;
+};
+
+/** Una fila por reserva: el resumen de negocio que revisa la contadora. */
+export type DesgloseReservaRow = {
+  reserva: string;
+  finca: string;
+  ubicacion: string;
+  fechaEntrada: string;
+  fechaSalida: string;
+  noches: number;
+  personas: number;
+  cliente: string;
+  clienteCedula: string;
+  clienteTelefono: string;
+  propietario: string;
+  propietarioCedula: string;
+  valorReserva: number;
+  cobradoCliente: number;
+  reembolsadoCliente: number;
+  acordadoPropietario: number;
+  pagadoPropietario: number;
+  saldoPropietario: number;
+  devolucionDeposito: number;
+  gananciaFincasya: number;
+  estado: string;
 };
 
 export type TerceroRow = {
@@ -50,6 +81,7 @@ export function exportMovimientosXlsx(
 ): void {
   const data = rows.map((r) => ({
     FECHA: r.fecha,
+    RESERVA: r.reserva ?? "",
     "NOMBRE FINCA": r.finca,
     "OPERACIÓN": r.operacion,
     ENTIDAD: r.entidad,
@@ -58,12 +90,17 @@ export function exportMovimientosXlsx(
     OBSERVACIONES: r.observaciones,
     NOMBRE: r.nombre,
     CEDULA: r.cedula,
+    CLIENTE: r.cliente ?? "",
+    "CÉDULA CLIENTE": r.clienteCedula ?? "",
+    PROPIETARIO: r.propietario ?? "",
+    "CÉDULA PROPIETARIO": r.propietarioCedula ?? "",
   }));
 
   const totalIngresos = rows.reduce((s, r) => s + (r.ingreso || 0), 0);
   const totalEgresos = rows.reduce((s, r) => s + (r.egreso || 0), 0);
   data.push({
     FECHA: "",
+    RESERVA: "",
     "NOMBRE FINCA": "",
     "OPERACIÓN": "TOTALES",
     ENTIDAD: "",
@@ -72,6 +109,10 @@ export function exportMovimientosXlsx(
     OBSERVACIONES: `Neto: ${totalIngresos - totalEgresos}`,
     NOMBRE: "",
     CEDULA: "",
+    CLIENTE: "",
+    "CÉDULA CLIENTE": "",
+    PROPIETARIO: "",
+    "CÉDULA PROPIETARIO": "",
   });
 
   const ws = XLSX.utils.json_to_sheet(data);
@@ -105,5 +146,73 @@ export function exportTercerosSiigoXlsx(
   ws["!cols"] = autofit(data as Record<string, unknown>[]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Terceros");
+  XLSX.writeFile(wb, filename);
+}
+
+/**
+ * DESGLOSE POR RESERVA para la contadora (Adriana, 22-jul).
+ *
+ * Una fila por reserva con las dos partes (cliente y propietario) y la plata:
+ * lo cobrado, lo pagado al dueño, lo devuelto y lo que quedó para FincasYa.
+ */
+export function exportDesgloseReservasXlsx(
+  rows: DesgloseReservaRow[],
+  filename: string,
+): void {
+  const data: Record<string, string | number>[] = rows.map((r) => ({
+    RESERVA: r.reserva,
+    FINCA: r.finca,
+    UBICACIÓN: r.ubicacion,
+    "FECHA ENTRADA": r.fechaEntrada,
+    "FECHA SALIDA": r.fechaSalida,
+    NOCHES: r.noches,
+    PERSONAS: r.personas,
+    CLIENTE: r.cliente,
+    "CÉDULA CLIENTE": r.clienteCedula,
+    "TELÉFONO CLIENTE": r.clienteTelefono,
+    PROPIETARIO: r.propietario,
+    "CÉDULA PROPIETARIO": r.propietarioCedula,
+    "VALOR RESERVA": r.valorReserva || "",
+    "COBRADO AL CLIENTE": r.cobradoCliente || "",
+    "REEMBOLSADO AL CLIENTE": r.reembolsadoCliente || "",
+    "ACORDADO CON PROPIETARIO": r.acordadoPropietario || "",
+    "PAGADO AL PROPIETARIO": r.pagadoPropietario || "",
+    "SALDO AL PROPIETARIO": r.saldoPropietario || "",
+    "DEVOLUCIÓN DEPÓSITO": r.devolucionDeposito || "",
+    "GANANCIA FINCASYA": r.gananciaFincasya || "",
+    ESTADO: r.estado,
+  }));
+
+  const suma = (k: keyof DesgloseReservaRow) =>
+    rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+
+  data.push({
+    RESERVA: "",
+    FINCA: "",
+    UBICACIÓN: "",
+    "FECHA ENTRADA": "",
+    "FECHA SALIDA": "",
+    NOCHES: "",
+    PERSONAS: "",
+    CLIENTE: "TOTALES",
+    "CÉDULA CLIENTE": "",
+    "TELÉFONO CLIENTE": "",
+    PROPIETARIO: "",
+    "CÉDULA PROPIETARIO": "",
+    "VALOR RESERVA": suma("valorReserva") || "",
+    "COBRADO AL CLIENTE": suma("cobradoCliente") || "",
+    "REEMBOLSADO AL CLIENTE": suma("reembolsadoCliente") || "",
+    "ACORDADO CON PROPIETARIO": suma("acordadoPropietario") || "",
+    "PAGADO AL PROPIETARIO": suma("pagadoPropietario") || "",
+    "SALDO AL PROPIETARIO": suma("saldoPropietario") || "",
+    "DEVOLUCIÓN DEPÓSITO": suma("devolucionDeposito") || "",
+    "GANANCIA FINCASYA": suma("gananciaFincasya") || "",
+    ESTADO: "",
+  });
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  ws["!cols"] = autofit(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Desglose reservas");
   XLSX.writeFile(wb, filename);
 }

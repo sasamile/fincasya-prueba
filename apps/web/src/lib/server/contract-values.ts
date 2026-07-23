@@ -640,6 +640,8 @@ export type ContractDto = Record<string, unknown> & {
   checkOutDate?: string;
   checkInTime?: string;
   checkOutTime?: string;
+  /** Número de personas del contrato (campo Personas del formulario). */
+  guests?: number | string;
   petCount?: number;
   petDeposit?: number;
   petSurcharge?: number;
@@ -970,8 +972,13 @@ export function buildContractWordValues(
     ),
     nombreFinca: finca.title || "",
     municipioFinca: finca.location || "",
-    capacidadDePersonas: String(finca.capacity || 0),
-    capacidad: String(finca.capacity || 0),
+    // Personas del formulario (reserva), no la capacidad fija de la ficha.
+    capacidadDePersonas: String(
+      Number(dto.guests) > 0 ? Number(dto.guests) : finca.capacity || 0,
+    ),
+    capacidad: String(
+      Number(dto.guests) > 0 ? Number(dto.guests) : finca.capacity || 0,
+    ),
     característicasDeFinca: caracteristicasPlain,
     caracteristicasDeFinca: caracteristicasPlain,
     nombrePropietario,

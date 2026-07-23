@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PhoneWithCountry } from "@/components/phone-with-country";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
 
@@ -169,11 +170,11 @@ export function EditContactDialog({
 
             <div className="space-y-1.5">
               <Label htmlFor="edit-contact-phone-alt">Número adicional</Label>
-              <Input
+              <PhoneWithCountry
                 id="edit-contact-phone-alt"
                 value={phoneAlt}
-                onChange={(e) => setPhoneAlt(e.target.value)}
-                placeholder="Otro celular de contacto"
+                onChange={setPhoneAlt}
+                placeholder="Otro celular"
               />
             </div>
 

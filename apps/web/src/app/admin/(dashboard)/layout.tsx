@@ -129,20 +129,29 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
         icon: Landmark,
       },
       {
-        label: "Facturación",
-        href: "/admin/facturacion",
-        icon: Receipt,
+        label: "Links de cuentas",
+        href: "/admin/cuentas-links",
+        icon: Landmark,
       },
+      // Facturación oculto del menú por ahora; la ruta /admin/facturacion sigue existiendo.
+      // {
+      //   label: "Facturación",
+      //   href: "/admin/facturacion",
+      //   icon: Receipt,
+      // },
       {
         label: "Reportes",
         href: "/admin/reportes",
         icon: BarChart3,
       },
-      {
-        label: "Contratos y Confirmación",
-        href: "/admin/contracts-confirmation",
-        icon: FileText,
-      },
+      // Contratos y Confirmación oculto: el flujo vive en Documentos / inbox.
+      // La ruta /admin/contracts-confirmation sigue existiendo, solo no aparece
+      // en el menú.
+      // {
+      //   label: "Contratos y Confirmación",
+      //   href: "/admin/contracts-confirmation",
+      //   icon: FileText,
+      // },
       {
         label: "Links de Venta",
         href: "/admin/ventas",
@@ -197,7 +206,8 @@ const collapsibleNavGroups: { title: string; items: NavItem[] }[] = [
       { label: "Usuarios", href: "/admin/users", icon: Users },
       { label: "Clientes", href: "/admin/customers", icon: Users },
       { label: "Propietarios", href: "/admin/propietarios", icon: Home },
-      { label: "CRM", href: "/admin/crm", icon: Sparkles },
+      // CRM oculto del menú; la ruta /admin/crm sigue existiendo.
+      // { label: "CRM", href: "/admin/crm", icon: Sparkles },
       { label: "Roles y Permisos", href: "/admin/roles", icon: ShieldCheck },
       { label: "Habeas Data", href: "/admin/habeas-data", icon: ShieldCheck },
       {

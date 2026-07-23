@@ -133,7 +133,18 @@ export function OwnerQuotePage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ html, filename }),
     });
-    if (!res.ok) throw new Error('No se pudo generar el documento.');
+    if (!res.ok) {
+      // Surface el error real del servidor (Puppeteer/Chromium) en vez de un
+      // mensaje genérico, para saber la causa.
+      let detalle = `Error ${res.status}`;
+      try {
+        const data = (await res.json()) as { error?: string };
+        if (data?.error) detalle = data.error;
+      } catch {
+        /* respuesta no-JSON */
+      }
+      throw new Error(`No se pudo generar el documento: ${detalle}`);
+    }
     return { blob: await res.blob(), filename };
   }
 

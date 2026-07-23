@@ -292,23 +292,23 @@ export function DmInbox({
     [threads],
   );
 
-  const activeThread =
-    filtered.find((t) => t._id === activeThreadId) ?? filtered[0] ?? null;
-
-  useEffect(() => {
-    if (filtered.length === 0) {
-      setActiveThreadId(null);
-      return;
-    }
-    if (!activeThreadId || !filtered.some((t) => t._id === activeThreadId)) {
-      setActiveThreadId(filtered[0]._id);
-    }
-  }, [filtered, activeThreadId]);
+  /** No auto-abrir: el chat solo se abre al hacer clic (evita marcar todos leídos). */
+  const activeThread = useMemo(() => {
+    if (!activeThreadId) return null;
+    return (threads ?? []).find((t) => t._id === activeThreadId) ?? null;
+  }, [threads, activeThreadId]);
 
   useEffect(() => {
     if (!activeThreadId) return;
-    void markDmThreadRead(activeThreadId);
-  }, [activeThreadId]);
+    if (!(threads ?? []).some((t) => t._id === activeThreadId)) {
+      setActiveThreadId(null);
+    }
+  }, [threads, activeThreadId]);
+
+  function openThread(threadId: string) {
+    setActiveThreadId(threadId);
+    void markDmThreadRead(threadId);
+  }
 
   useEffect(() => {
     setReplyText('');
@@ -580,7 +580,7 @@ export function DmInbox({
         )}
       >
         {/* Lista de conversaciones */}
-        <div className="border-border flex w-full max-w-[340px] shrink-0 flex-col border-r bg-white">
+        <div className="border-border flex w-full max-w-[340px] shrink-0 flex-col border-r bg-card">
           <div className="border-border space-y-2 border-b p-3">
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
@@ -589,7 +589,7 @@ export function DmInbox({
                   placeholder="Buscar"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="h-9 border-0 bg-[#f0f2f5] pl-8 text-sm"
+                  className="h-9 border-0 bg-muted pl-8 text-sm"
                 />
               </div>
               {embedded ? (
@@ -621,7 +621,7 @@ export function DmInbox({
                     className={cn(
                       'rounded-full px-3 py-1 text-xs font-medium transition-colors',
                       listFilter === mode
-                        ? 'bg-[#e7f3ff] text-[#0084ff]'
+                        ? 'bg-primary/15 text-primary'
                         : 'text-muted-foreground hover:bg-muted/60',
                     )}
                   >
@@ -693,10 +693,10 @@ export function DmInbox({
                   <button
                     key={thread._id}
                     type="button"
-                    onClick={() => setActiveThreadId(thread._id)}
+                    onClick={() => openThread(thread._id)}
                     className={cn(
                       'flex w-full gap-2 px-3 py-3 text-left transition-colors',
-                      active ? 'bg-[#e7f3ff]' : 'hover:bg-[#f0f2f5]',
+                      active ? 'bg-primary/15' : 'hover:bg-muted',
                     )}
                   >
                     <MetaSocialAvatar
@@ -733,7 +733,7 @@ export function DmInbox({
                       </p>
                     </div>
                     {unread ? (
-                      <span className="mt-3 h-2.5 w-2.5 shrink-0 rounded-full bg-[#0084ff]" />
+                      <span className="mt-3 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
                     ) : null}
                   </button>
                 );
@@ -743,10 +743,13 @@ export function DmInbox({
         </div>
 
         {/* Chat activo */}
-        <div className="flex min-w-0 flex-1 flex-col bg-white">
+        <div className="flex min-w-0 flex-1 flex-col bg-card">
           {!activeThread ? (
-            <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
-              Selecciona una conversación
+            <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center px-6 text-center text-sm">
+              <p>Selecciona un chat para abrirlo</p>
+              <p className="mt-1 text-xs">
+                Los chats no se abren solos (así no se marcan leídos al filtrar).
+              </p>
             </div>
           ) : (
             <>
@@ -794,8 +797,8 @@ export function DmInbox({
                             className={cn(
                               'max-w-[75%] rounded-2xl px-3 py-2 text-[15px] leading-snug',
                               outbound
-                                ? 'bg-[#0084ff] text-white'
-                                : 'bg-[#f0f2f5] text-[#050505]',
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-muted text-foreground',
                               isPending && sending && 'opacity-80',
                             )}
                           >
@@ -816,7 +819,7 @@ export function DmInbox({
 
               <div className="px-4 pb-4 pt-1">
                 {recording ? (
-                  <div className="border-border rounded-lg border bg-white p-2 shadow-sm">
+                  <div className="border-border rounded-lg border bg-card p-2 shadow-sm">
                     <AudioRecorder
                       onCancel={() => setRecording(false)}
                       onSend={(blob, mime) => {
@@ -834,7 +837,7 @@ export function DmInbox({
                     />
                   </div>
                 ) : (
-                  <div className="border-border rounded-lg border bg-white shadow-sm">
+                  <div className="border-border rounded-lg border bg-card shadow-sm">
                     <textarea
                       ref={replyRef}
                       placeholder={composerPlaceholder(activeThread.platform)}
@@ -856,8 +859,8 @@ export function DmInbox({
                             className={cn(
                               'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
                               attachOpen
-                                ? 'bg-[#0084ff] text-white'
-                                : 'text-muted-foreground hover:bg-[#f0f2f5]',
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:bg-muted',
                             )}
                           >
                             {uploading ? (
@@ -913,8 +916,8 @@ export function DmInbox({
                             className={cn(
                               'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
                               templatesOpen
-                                ? 'bg-[#0084ff] text-white'
-                                : 'text-muted-foreground hover:bg-[#f0f2f5]',
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:bg-muted',
                             )}
                           >
                             <MessageSquareText className="h-4 w-4" />
@@ -988,7 +991,7 @@ export function DmInbox({
                                 <Button
                                   type="button"
                                   size="sm"
-                                  className="bg-[#0084ff] hover:bg-[#0073e6]"
+                                  className="bg-primary hover:bg-primary/90"
                                   disabled={
                                     savingTemplates ||
                                     newShortcut.trim().length < 3 ||
@@ -1018,7 +1021,7 @@ export function DmInbox({
                                         onClick={() => insertTemplate(tpl.text)}
                                         className="min-w-0 flex-1 px-2 py-2 text-left"
                                       >
-                                        <span className="rounded bg-[#e7f3ff] px-1.5 py-0.5 font-mono text-[11px] text-[#0084ff]">
+                                        <span className="rounded bg-primary/15 px-1.5 py-0.5 font-mono text-[11px] text-primary">
                                           {tpl.shortcut}
                                         </span>
                                         <p className="text-muted-foreground mt-1 line-clamp-2 text-xs">
@@ -1047,7 +1050,7 @@ export function DmInbox({
                               <button
                                 type="button"
                                 onClick={() => setTemplatesView('create')}
-                                className="text-[#0084ff] hover:bg-[#f0f2f5] mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-sm font-medium"
+                                className="text-primary hover:bg-muted mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-sm font-medium"
                               >
                                 <Plus className="h-4 w-4" />
                                 Crear respuesta guardada
@@ -1066,8 +1069,8 @@ export function DmInbox({
                           className={cn(
                             'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
                             showEmoji
-                              ? 'bg-[#0084ff] text-white'
-                              : 'text-muted-foreground hover:bg-[#f0f2f5]',
+                              ? 'bg-primary text-primary-foreground'
+                              : 'text-muted-foreground hover:bg-muted',
                           )}
                         >
                           <Smile className="h-4 w-4" />
@@ -1087,7 +1090,7 @@ export function DmInbox({
                         aria-label="Enviar me gusta"
                         disabled={sending || uploading}
                         onClick={() => void handleSendLike()}
-                        className="text-muted-foreground flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[#f0f2f5] disabled:opacity-40"
+                        className="text-muted-foreground flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-muted disabled:opacity-40"
                       >
                         <ThumbsUp className="h-4 w-4" />
                       </button>

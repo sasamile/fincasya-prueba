@@ -81,17 +81,32 @@ function isReplied(item: InboxComment) {
 function resolveAutoReply(
   connection: MetaConnection,
   templates: CommentTemplate[],
-): { enabled: boolean; templateId: string } {
+): {
+  enabled: boolean;
+  templateId: string;
+  mode: 'template' | 'bot';
+  instructions: string;
+} {
+  const mode = connection.autoReplyMode ?? 'template';
+  const instructions = connection.autoReplyInstructions?.trim() ?? '';
   const templateId = connection.autoReplyTemplateId ?? '';
   const hasTemplates = templates.length > 0;
   const validTemplate =
     hasTemplates &&
     templateId !== '' &&
     templates.some((t) => t.id === templateId);
+
+  if (mode === 'bot') {
+    const enabled = Boolean(connection.autoReplyComments && instructions);
+    return { enabled, templateId: '', mode: 'bot', instructions };
+  }
+
   const enabled = Boolean(connection.autoReplyComments && validTemplate);
   return {
     enabled,
     templateId: enabled ? templateId : '',
+    mode: 'template',
+    instructions,
   };
 }
 
@@ -117,12 +132,22 @@ export function CommentsInbox({
     connection.commentTemplates ?? [],
   );
   const [templatesModalOpen, setTemplatesModalOpen] = useState(false);
+  const [botModalOpen, setBotModalOpen] = useState(false);
   const [newTplLabel, setNewTplLabel] = useState('');
   const [newTplText, setNewTplText] = useState('');
   const [savingTemplates, setSavingTemplates] = useState(false);
   const [autoReply, setAutoReply] = useState(false);
+  const [autoReplyMode, setAutoReplyMode] = useState<'template' | 'bot'>('template');
   const [autoReplyTemplateId, setAutoReplyTemplateId] = useState('');
+  const [botInstructions, setBotInstructions] = useState(
+    connection.autoReplyInstructions ?? '',
+  );
+  const [draftInstructions, setDraftInstructions] = useState(
+    connection.autoReplyInstructions ?? '',
+  );
+  const [draftBotEnabled, setDraftBotEnabled] = useState(false);
   const [savingAutoReply, setSavingAutoReply] = useState(false);
+  const [savingBot, setSavingBot] = useState(false);
   const [threadReplies, setThreadReplies] = useState<Record<string, CommentThreadReply[]>>({});
   const [loadingThreads, setLoadingThreads] = useState(false);
 
@@ -151,18 +176,25 @@ export function CommentsInbox({
     const resolved = resolveAutoReply(connection, tpls);
     setAutoReply(resolved.enabled);
     setAutoReplyTemplateId(resolved.templateId);
+    setAutoReplyMode(resolved.mode);
+    setBotInstructions(resolved.instructions);
+    setDraftInstructions(resolved.instructions);
 
     const staleOnServer =
-      connection.autoReplyComments &&
-      (!resolved.enabled || connection.autoReplyTemplateId !== resolved.templateId);
+      connection.autoReplyComments && !resolved.enabled;
     if (staleOnServer) {
-      void updateCommentAutoReply(connection.pageId, false);
+      void updateCommentAutoReply(connection.pageId, false, {
+        mode: resolved.mode,
+        instructions: resolved.instructions || undefined,
+      });
     }
   }, [
     connection.pageId,
     connection.commentTemplates,
     connection.autoReplyComments,
     connection.autoReplyTemplateId,
+    connection.autoReplyInstructions,
+    connection.autoReplyMode,
   ]);
 
   const filteredGroups = useMemo(() => {
@@ -291,11 +323,17 @@ export function CommentsInbox({
     try {
       await saveCommentTemplates(connection.pageId, next);
       setTemplates(next);
-      if (next.length === 0 || (autoReplyTemplateId && !next.some((t) => t.id === autoReplyTemplateId))) {
+      if (
+        autoReplyMode === 'template' &&
+        (next.length === 0 ||
+          (autoReplyTemplateId && !next.some((t) => t.id === autoReplyTemplateId)))
+      ) {
         setAutoReplyTemplateId('');
         setAutoReply(false);
         if (autoReply) {
-          await updateCommentAutoReply(connection.pageId, false);
+          await updateCommentAutoReply(connection.pageId, false, {
+            mode: 'template',
+          });
         }
       }
       toast.success('Plantillas guardadas');
@@ -327,25 +365,84 @@ export function CommentsInbox({
     await persistTemplates(next);
   }
 
-  async function handleAutoReplyToggle(enabled: boolean) {
-    if (enabled && templates.length === 0) {
-      toast.error('Crea al menos una plantilla para activar la respuesta automática');
-      setTemplatesModalOpen(true);
+  async function handleSaveBotInstructions() {
+    const text = draftInstructions.trim();
+    if (!text) {
+      toast.error('Escribe cómo debe responder el bot a los comentarios');
       return;
     }
-    if (enabled && !autoReplyTemplateId) {
-      const first = templates[0];
-      if (first) setAutoReplyTemplateId(first.id);
-      else return;
+    setSavingBot(true);
+    try {
+      await updateCommentAutoReply(connection.pageId, draftBotEnabled, {
+        mode: 'bot',
+        instructions: text,
+      });
+      setBotInstructions(text);
+      setAutoReplyMode('bot');
+      setAutoReply(draftBotEnabled);
+      setBotModalOpen(false);
+      toast.success(
+        draftBotEnabled
+          ? 'Bot activado con las instrucciones guardadas'
+          : 'Instrucciones guardadas · bot desactivado',
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar');
+    } finally {
+      setSavingBot(false);
+    }
+  }
+
+  async function handleAutoReplyToggle(enabled: boolean) {
+    if (enabled) {
+      if (autoReplyMode === 'bot') {
+        if (!botInstructions.trim()) {
+          toast.error('Configura las instrucciones del bot primero');
+          setDraftInstructions(botInstructions);
+          setBotModalOpen(true);
+          return;
+        }
+      } else if (templates.length === 0) {
+        if (botInstructions.trim()) {
+          setAutoReplyMode('bot');
+        } else {
+          toast.error(
+            'Crea una plantilla o configura el bot con instrucciones',
+          );
+          setBotModalOpen(true);
+          return;
+        }
+      } else if (!autoReplyTemplateId) {
+        const first = templates[0];
+        if (first) setAutoReplyTemplateId(first.id);
+        else return;
+      }
     }
 
-    const templateId = enabled ? autoReplyTemplateId || templates[0]?.id : undefined;
+    const mode =
+      enabled && autoReplyMode === 'bot' && botInstructions.trim()
+        ? 'bot'
+        : enabled && templates.length === 0 && botInstructions.trim()
+          ? 'bot'
+          : 'template';
+    const templateId =
+      mode === 'template'
+        ? autoReplyTemplateId || templates[0]?.id
+        : undefined;
+
     setSavingAutoReply(true);
     try {
-      await updateCommentAutoReply(connection.pageId, enabled, { templateId });
+      await updateCommentAutoReply(connection.pageId, enabled, {
+        mode,
+        templateId,
+        instructions: botInstructions.trim() || undefined,
+      });
       setAutoReply(enabled);
+      setAutoReplyMode(mode);
       if (templateId) setAutoReplyTemplateId(templateId);
-      toast.success(enabled ? 'Respuesta automática activada' : 'Respuesta automática desactivada');
+      toast.success(
+        enabled ? 'Respuesta automática activada' : 'Respuesta automática desactivada',
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo guardar');
     } finally {
@@ -355,11 +452,37 @@ export function CommentsInbox({
 
   async function handleAutoReplyTemplateChange(templateId: string) {
     setAutoReplyTemplateId(templateId);
+    setAutoReplyMode('template');
     if (!autoReply) return;
     setSavingAutoReply(true);
     try {
-      await updateCommentAutoReply(connection.pageId, true, { templateId });
+      await updateCommentAutoReply(connection.pageId, true, {
+        mode: 'template',
+        templateId,
+        instructions: botInstructions.trim() || undefined,
+      });
       toast.success('Plantilla automática actualizada');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar');
+    } finally {
+      setSavingAutoReply(false);
+    }
+  }
+
+  async function handleSwitchToBotMode() {
+    if (!botInstructions.trim()) {
+      setDraftInstructions(botInstructions);
+      setBotModalOpen(true);
+      return;
+    }
+    setSavingAutoReply(true);
+    try {
+      await updateCommentAutoReply(connection.pageId, autoReply, {
+        mode: 'bot',
+        instructions: botInstructions.trim(),
+      });
+      setAutoReplyMode('bot');
+      toast.success('Auto-respuesta con bot activada');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo guardar');
     } finally {
@@ -580,29 +703,74 @@ export function CommentsInbox({
           <span className="text-foreground/70 tabular-nums">{templates.length}</span>
         </Button>
 
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn(
+            'h-8 gap-1.5 px-2 text-xs',
+            autoReply && autoReplyMode === 'bot'
+              ? 'text-foreground'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+          onClick={() => {
+            setDraftInstructions(botInstructions);
+            setDraftBotEnabled(autoReply && autoReplyMode === 'bot');
+            setBotModalOpen(true);
+          }}
+        >
+          <Bot className="h-3.5 w-3.5" />
+          Bot
+          {autoReply && autoReplyMode === 'bot' ? (
+            <span className="bg-primary/15 text-primary rounded px-1 py-0.5 text-[10px] font-medium">
+              activo
+            </span>
+          ) : botInstructions ? (
+            <span className="bg-muted text-muted-foreground rounded px-1 py-0.5 text-[10px] font-medium">
+              off
+            </span>
+          ) : null}
+        </Button>
+
         <div className="bg-border/80 hidden h-4 w-px sm:block" />
 
         <div className="flex items-center gap-2">
           <Switch
             id="auto-reply"
             checked={autoReply}
-            disabled={savingAutoReply || templates.length === 0}
+            disabled={
+              savingAutoReply ||
+              (templates.length === 0 && !botInstructions.trim())
+            }
             onCheckedChange={(v) => void handleAutoReplyToggle(v)}
           />
           <Label
             htmlFor="auto-reply"
             className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium"
           >
-            <Bot className="h-3.5 w-3.5" />
             Auto-respuesta
           </Label>
         </div>
-        {templates.length === 0 ? (
+        {templates.length === 0 && !botInstructions.trim() ? (
           <span className="text-muted-foreground text-[11px]">
-            Crea una plantilla para activarla
+            Configura el bot o una plantilla para activarla
           </span>
         ) : null}
-        {autoReply && templates.length > 0 ? (
+        {autoReply && autoReplyMode === 'bot' ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDraftInstructions(botInstructions);
+              setDraftBotEnabled(true);
+              setBotModalOpen(true);
+            }}
+            className="text-muted-foreground hover:text-foreground max-w-xs truncate text-left text-[11px] underline-offset-2 hover:underline"
+            title={botInstructions}
+          >
+            Bot con instrucciones
+          </button>
+        ) : null}
+        {autoReply && autoReplyMode === 'template' && templates.length > 0 ? (
           <select
             value={autoReplyTemplateId || templates[0]?.id}
             onChange={(e) => void handleAutoReplyTemplateChange(e.target.value)}
@@ -615,6 +783,20 @@ export function CommentsInbox({
               </option>
             ))}
           </select>
+        ) : null}
+        {autoReply &&
+        autoReplyMode === 'template' &&
+        botInstructions.trim() ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground h-7 px-2 text-[11px]"
+            disabled={savingAutoReply}
+            onClick={() => void handleSwitchToBotMode()}
+          >
+            Usar bot
+          </Button>
         ) : null}
         <span className="text-muted-foreground ml-auto hidden text-[11px] sm:inline">
           {totalComments} de {allCount} visibles
@@ -703,6 +885,86 @@ export function CommentsInbox({
                   <Plus className="h-4 w-4" />
                 )}
                 Crear plantilla
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={botModalOpen}
+        onOpenChange={(open) => {
+          setBotModalOpen(open);
+          if (open) {
+            setDraftInstructions(botInstructions);
+            setDraftBotEnabled(autoReply && autoReplyMode === 'bot');
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Bot de comentarios</DialogTitle>
+            <DialogDescription>
+              Indica la información y la lógica con la que el bot debe contestar
+              comentarios nuevos (precios, tono, qué ofrecer, cuándo invitar a
+              WhatsApp, etc.).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="bg-muted/50 flex items-center justify-between gap-3 rounded-xl px-3 py-2.5">
+              <div className="min-w-0">
+                <Label
+                  htmlFor="bot-enabled"
+                  className="text-sm font-medium"
+                >
+                  Activar bot
+                </Label>
+                <p className="text-muted-foreground text-[11px] leading-snug">
+                  {draftBotEnabled
+                    ? 'Responderá comentarios nuevos con IA'
+                    : 'Guardado, pero no responde hasta que lo actives'}
+                </p>
+              </div>
+              <Switch
+                id="bot-enabled"
+                checked={draftBotEnabled}
+                disabled={savingBot}
+                onCheckedChange={setDraftBotEnabled}
+              />
+            </div>
+
+            <Textarea
+              value={draftInstructions}
+              onChange={(e) => setDraftInstructions(e.target.value)}
+              placeholder={`Ejemplo:
+Eres la asesora de FincasYa. Responde comentarios de forma amable y breve.
+Si preguntan precios o disponibilidad, pide fechas, número de personas y city, e invita a WhatsApp +57 315 777 3937.
+No inventes tarifas. Si solo saludan, agradece y ofrece ayuda.`}
+              rows={10}
+              className="resize-y text-sm"
+            />
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              Escribir o enfocar el texto no activa el bot: usa el interruptor de
+              arriba y luego Guarda.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setBotModalOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                disabled={savingBot || !draftInstructions.trim()}
+                onClick={() => void handleSaveBotInstructions()}
+              >
+                {savingBot ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : null}
+                {draftBotEnabled ? 'Guardar y activar' : 'Guardar'}
               </Button>
             </div>
           </div>

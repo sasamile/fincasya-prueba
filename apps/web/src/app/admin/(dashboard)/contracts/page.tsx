@@ -14,7 +14,6 @@ import {
   Search,
   Download,
   RefreshCw,
-  Plus,
   FileText,
   Loader2,
   ExternalLink,
@@ -310,12 +309,6 @@ export default function ContractsManagerPage() {
               <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
             )}
             Rescatar históricos
-          </Button>
-          <Button asChild size="sm" className="rounded-xl h-9">
-            <Link href="/admin/contracts-confirmation">
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              Nuevo contrato
-            </Link>
           </Button>
           <Button asChild variant="outline" size="sm" className="rounded-xl h-9">
             <Link href="/admin/numeracion-contratos">Numeración CR</Link>

@@ -28,6 +28,8 @@ import {
   validarDocumentoFirmado,
   type VeredictoFirma,
 } from './lib/contractDocsAi';
+import { authComponent } from './betterAuth/auth';
+import { isSuperAdminRole } from './lib/roles';
 
 const tipoValidator = v.union(
   v.literal('contrato'),
@@ -73,8 +75,29 @@ export const registerDocument = mutation({
       return { ok: true };
     }
 
+    // VERSIONADO (Adriana, 22-jul): cada contrato nuevo o corregido sube una
+    // versión. El PDF y su Word de la misma tanda comparten número: se agrupan
+    // por el instante de creación cuando entran juntos.
+    let version: number | undefined;
+    if (args.tipo === 'contrato' || args.tipo === 'contrato_word') {
+      const versiones = yaEsta
+        .filter((d) => d.tipo === 'contrato' || d.tipo === 'contrato_word')
+        .map((d) => d.version ?? 1);
+      const maxVersion = versiones.length ? Math.max(...versiones) : 0;
+      // El Word y el PDF de la MISMA generación comparten versión: si el otro
+      // formato acaba de registrarse (menos de 2 min), se reutiliza su número.
+      const gemelo = yaEsta.find(
+        (d) =>
+          (d.tipo === 'contrato' || d.tipo === 'contrato_word') &&
+          d.tipo !== args.tipo &&
+          now - d.createdAt < 120_000,
+      );
+      version = gemelo?.version ?? maxVersion + 1;
+    }
+
     await ctx.db.insert('contractDocuments', {
       contractNumber,
+      version,
       tipo: args.tipo,
       estado: args.estado,
       url,
@@ -146,6 +169,52 @@ export const listFolders = query({
   },
 });
 
+/**
+ * ÚLTIMA VERSIÓN del contrato de una carpeta (Adriana, 22-jul).
+ *
+ * El CR debe emitirse contra la versión más reciente: si el contrato se
+ * corrigió y quedó una v2, la confirmación va sobre la v2, no sobre la v1.
+ */
+export const getLatestContractVersion = query({
+  args: { contractNumber: v.string() },
+  handler: async (ctx, { contractNumber }) => {
+    const raw = contractNumber.trim();
+    if (!raw) return null;
+    const normalized = normalizeContractLookupQueryConvex(raw) || raw;
+
+    const docs = [];
+    for (const key of [...new Set([normalized, raw])]) {
+      const rows = await ctx.db
+        .query('contractDocuments')
+        .withIndex('by_contract_number', (q) => q.eq('contractNumber', key))
+        .collect();
+      docs.push(...rows);
+    }
+
+    const contratos = docs.filter(
+      (d) => d.tipo === 'contrato' || d.tipo === 'contrato_word',
+    );
+    if (contratos.length === 0) return null;
+
+    const maxVersion = Math.max(...contratos.map((d) => d.version ?? 1));
+    const deLaVersion = contratos
+      .filter((d) => (d.version ?? 1) === maxVersion)
+      .sort((a, b) => b.createdAt - a.createdAt);
+
+    const pdf = deLaVersion.find((d) => d.tipo === 'contrato');
+    const word = deLaVersion.find((d) => d.tipo === 'contrato_word');
+    return {
+      version: maxVersion,
+      totalVersiones: maxVersion,
+      pdfUrl: pdf?.url ?? null,
+      pdfFilename: pdf?.filename ?? null,
+      wordUrl: word?.url ?? null,
+      wordFilename: word?.filename ?? null,
+      createdAt: deLaVersion[0]?.createdAt ?? null,
+    };
+  },
+});
+
 /** Borra un archivo de la carpeta (el asesor lo elimina si no sirve). */
 export const deleteDocument = mutation({
   args: { documentId: v.id('contractDocuments') },
@@ -172,6 +241,76 @@ export const deleteDocument = mutation({
       }
     }
     return { ok: true };
+  },
+});
+
+/**
+ * Borra TODA la carpeta de un contrato (todos los archivos archivados).
+ * Solo `superadmin` — no lo ve/usa el resto del equipo.
+ */
+export const deleteFolder = mutation({
+  args: { contractNumber: v.string() },
+  handler: async (
+    ctx,
+    { contractNumber },
+  ): Promise<{ ok: boolean; deleted: number }> => {
+    const user = (await authComponent.safeGetAuthUser(ctx)) as {
+      role?: string | null;
+    } | null;
+    if (!isSuperAdminRole(user?.role)) {
+      throw new Error('Solo el superadmin puede eliminar carpetas.');
+    }
+
+    const raw = contractNumber.trim();
+    if (!raw) return { ok: false, deleted: 0 };
+    const normalized = normalizeContractLookupQueryConvex(raw) || raw;
+    const keys = [...new Set([normalized, raw])];
+
+    const seen = new Set<string>();
+    const docs = [];
+    for (const key of keys) {
+      const rows = await ctx.db
+        .query('contractDocuments')
+        .withIndex('by_contract_number', (q) => q.eq('contractNumber', key))
+        .collect();
+      for (const row of rows) {
+        const id = String(row._id);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        docs.push(row);
+      }
+    }
+
+    const confirmationUrls = new Set(
+      docs.filter((d) => d.tipo === 'confirmacion').map((d) => d.url),
+    );
+
+    for (const doc of docs) {
+      await ctx.db.delete(doc._id);
+    }
+
+    if (confirmationUrls.size > 0) {
+      for (const key of keys) {
+        const contrato = await ctx.db
+          .query('contracts')
+          .withIndex('by_contract_number', (q) =>
+            q.eq('contractNumber', key),
+          )
+          .first();
+        if (
+          contrato?.confirmationPdfUrl &&
+          confirmationUrls.has(contrato.confirmationPdfUrl)
+        ) {
+          await ctx.db.patch(contrato._id, {
+            confirmationPdfUrl: undefined,
+            confirmationPdfFilename: undefined,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+    }
+
+    return { ok: true, deleted: docs.length };
   },
 });
 

@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { cn, parseCOP } from '@/lib/utils';
 import { formatPhoneCo } from '@/lib/phone-co';
+import { PhoneWithCountry } from '@/components/phone-with-country';
 import { SuggestTextInput } from '@/components/suggest-text-input';
 import { MUNICIPIOS_COLOMBIA } from '@/lib/colombia-municipios';
 import { propertyMatchesSearchQuery } from '@/lib/property/property-search';
@@ -1040,15 +1041,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           type={type}
           value={draft[key]}
           onChange={set(key)}
-          onBlur={
-            key === 'clientPhone' || key === 'clientPhoneAlt'
-              ? () =>
-                  setDraft((d) => ({
-                    ...d,
-                    [key]: formatPhoneCo(String(d[key])),
-                  }))
-              : undefined
-          }
+          onBlur={undefined}
           placeholder={placeholder}
         />
       )}
@@ -1724,8 +1717,28 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             'text',
             MUNICIPIOS_COLOMBIA,
           )}
-          {field('Teléfono', 'clientPhone', '—')}
-          {field('Número adicional', 'clientPhoneAlt', 'Otro número de contacto')}
+          <div>
+            <label className={fl}>Teléfono</label>
+            <PhoneWithCountry
+              value={String(draft.clientPhone ?? '')}
+              onChange={(next) =>
+                setDraft((d) => ({ ...d, clientPhone: next }))
+              }
+              placeholder="321 245 7666"
+              inputClassName={cn(input, 'px-0 focus:ring-0')}
+            />
+          </div>
+          <div>
+            <label className={fl}>Número adicional</label>
+            <PhoneWithCountry
+              value={String(draft.clientPhoneAlt ?? '')}
+              onChange={(next) =>
+                setDraft((d) => ({ ...d, clientPhoneAlt: next }))
+              }
+              placeholder="Otro número"
+              inputClassName={cn(input, 'px-0 focus:ring-0')}
+            />
+          </div>
           {field('Correo', 'clientEmail', '—')}
           <div className="col-span-2">{field('Dirección', 'clientAddress', '—')}</div>
         </div>

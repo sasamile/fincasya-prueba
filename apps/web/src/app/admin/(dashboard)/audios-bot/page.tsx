@@ -6,15 +6,23 @@
  * confiables?" → audio de confianza). El equipo crea el caso, sube el audio y
  * lo habilita/deshabilita; el bot lo envía máximo una vez por conversación.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useQuery as useConvexQuery,
   useMutation as useConvexMutation,
 } from "convex/react";
 import { api } from "@fincasya/backend/convex/_generated/api";
 import type { Id } from "@fincasya/backend/convex/_generated/dataModel";
-import { AlertTriangle, Loader2, Mic, Plus, Trash2, Upload } from "lucide-react";
+import {
+  AlertTriangle,
+  Loader2,
+  Mic,
+  Plus,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { toast } from "sonner";
+import { AudioRecorder } from "@/features/inbox/components/AudioRecorder";
 
 type AudioRow = {
   id: Id<"botAudios">;
@@ -53,8 +61,15 @@ function audioFormat(mime: string | null, name: string | null): {
   return {
     ok: true,
     voiceNote: false,
-    msg: "Se enviará, pero NO como nota de voz (WhatsApp solo muestra la onda con OGG/Opus). Para el efecto de voz, graba la nota en WhatsApp y compártela — sale en .opus.",
+    msg: "Se enviará, pero NO como nota de voz (WhatsApp solo muestra la onda con OGG/Opus). Para el efecto de voz, graba aquí con el micrófono (sale en OGG) o exporta una nota de WhatsApp.",
   };
+}
+
+function blobToAudioFile(blob: Blob, mimeType: string, seconds: number): File {
+  const ext =
+    mimeType.includes("ogg") || mimeType.includes("opus") ? "ogg" : "webm";
+  const name = `nota-voz-${seconds || 0}s-${Date.now()}.${ext}`;
+  return new File([blob], name, { type: mimeType || "audio/ogg" });
 }
 
 function Toggle({
@@ -97,6 +112,8 @@ export default function AudiosBotPage() {
   const [situacion, setSituacion] = useState("");
   const [texto, setTexto] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [filePreview, setFilePreview] = useState<string | null>(null);
+  const [recordingNew, setRecordingNew] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -110,8 +127,23 @@ export default function AudiosBotPage() {
   const [pendingPreview, setPendingPreview] = useState<
     Record<string, string | null>
   >({});
+  const [recordingEditId, setRecordingEditId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const replaceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  useEffect(() => {
+    return () => {
+      if (filePreview) URL.revokeObjectURL(filePreview);
+    };
+  }, [filePreview]);
+
+  const applyNewFile = (f: File | null) => {
+    setFilePreview((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return f ? URL.createObjectURL(f) : null;
+    });
+    setFile(f);
+  };
 
   const setPendingFile = (key: string, f: File | null) => {
     setPendingPreview((prev) => {
@@ -172,7 +204,9 @@ export default function AudiosBotPage() {
     if (!situacion.trim())
       return toast.error("Describe cuándo debe enviarse la respuesta.");
     if (!file && !texto.trim())
-      return toast.error("El caso necesita al menos un audio o un texto oficial.");
+      return toast.error(
+        "El caso necesita al menos un audio o un texto oficial.",
+      );
     if (file && !audioFormat(file.type, file.name).ok)
       return toast.error(
         "Ese formato de audio no lo acepta WhatsApp. Usa OGG/Opus (nota de voz de WhatsApp) o MP3.",
@@ -191,7 +225,8 @@ export default function AudiosBotPage() {
       setTitulo("");
       setSituacion("");
       setTexto("");
-      setFile(null);
+      applyNewFile(null);
+      setRecordingNew(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
       toast.success("Caso creado — el bot ya puede enviar esta respuesta.");
     } catch (err) {
@@ -231,7 +266,9 @@ export default function AudiosBotPage() {
     if (!e.situacion.trim())
       return toast.error("La situación no puede quedar vacía.");
     if (!e.texto.trim() && !a.url && !newFile) {
-      return toast.error("El caso necesita al menos un audio o un texto oficial.");
+      return toast.error(
+        "El caso necesita al menos un audio o un texto oficial.",
+      );
     }
 
     setSavingId(key);
@@ -262,6 +299,7 @@ export default function AudiosBotPage() {
         return next;
       });
       clearPendingFile(key);
+      setRecordingEditId(null);
       const input = replaceInputRefs.current[key];
       if (input) input.value = "";
       toast.success("Caso actualizado.");
@@ -334,34 +372,69 @@ export default function AudiosBotPage() {
             rows={3}
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
           />
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 text-sm text-muted-foreground hover:bg-muted">
-              <Upload className="w-4 h-4" />
-              {file ? file.name : "Cargar audio (opcional — mp3, ogg, m4a…)"}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*"
-                className="hidden"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+
+          {recordingNew ? (
+            <div className="rounded-xl border border-border bg-muted/40 px-3 py-2">
+              <AudioRecorder
+                onCancel={() => setRecordingNew(false)}
+                onSend={(blob, mime, seconds) => {
+                  applyNewFile(blobToAudioFile(blob, mime, seconds));
+                  setRecordingNew(false);
+                  toast.success("Audio grabado — listo para crear el caso.");
+                }}
               />
-            </label>
-            {file && (
-              <audio controls src={URL.createObjectURL(file)} className="h-10" />
-            )}
-            <button
-              onClick={() => void crear()}
-              disabled={saving}
-              className="ml-auto inline-flex h-10 items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              {saving ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Plus className="w-4 h-4" />
-              )}
-              Crear caso
-            </button>
-          </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setRecordingNew(true)}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 text-sm font-medium text-primary hover:bg-primary/10"
+              >
+                <Mic className="h-4 w-4" />
+                Grabar audio
+              </button>
+              <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 text-sm text-muted-foreground hover:bg-muted">
+                <Upload className="w-4 h-4" />
+                {file ? file.name : "Cargar archivo"}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*"
+                  className="hidden"
+                  onChange={(e) => applyNewFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              {file && filePreview ? (
+                <audio controls src={filePreview} className="h-10 max-w-full" />
+              ) : null}
+              {file ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    applyNewFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                  className="text-muted-foreground hover:text-destructive text-xs underline-offset-2 hover:underline"
+                >
+                  Quitar audio
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void crear()}
+                disabled={saving}
+                className="ml-auto inline-flex h-10 items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {saving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+                Crear caso
+              </button>
+            </div>
+          )}
           {file &&
             (() => {
               const f = audioFormat(file.type, file.name);
@@ -378,9 +451,9 @@ export default function AudiosBotPage() {
               );
             })()}
           <p className="text-xs text-muted-foreground">
-            💡 Para que suene como <strong>nota de voz</strong> (con la onda),
-            graba el audio en WhatsApp, mantén pulsado el mensaje →{" "}
-            <em>Compartir/Exportar</em>, y sube ese archivo (.opus/.ogg).
+            💡 <strong>Grabar audio</strong> genera OGG/Opus (nota de voz con
+            onda en WhatsApp). También puedes cargar un archivo exportado desde
+            WhatsApp (.opus/.ogg).
           </p>
         </div>
       </div>
@@ -416,6 +489,7 @@ export default function AudiosBotPage() {
               ? audioFormat(newFile.type, newFile.name)
               : audioFormat(a.mimeType, a.filename);
             const isSaving = savingId === key;
+            const isRecordingThis = recordingEditId === key;
 
             return (
               <div
@@ -477,35 +551,65 @@ export default function AudiosBotPage() {
                 </div>
 
                 <div className="space-y-2 rounded-xl border border-dashed border-border bg-muted/20 p-3">
-                  <div className="flex flex-wrap items-center gap-3">
-                    {previewUrl ? (
-                      <audio controls src={previewUrl} className="h-10 min-w-0 flex-1" />
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        Sin audio todavía
-                      </span>
-                    )}
-                    <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
-                      <Upload className="h-3.5 w-3.5" />
-                      {a.url || newFile ? "Cambiar audio" : "Subir audio"}
-                      <input
-                        ref={(el) => {
-                          replaceInputRefs.current[key] = el;
-                        }}
-                        type="file"
-                        accept="audio/*"
-                        className="hidden"
-                        onChange={(ev) => {
-                          const f = ev.target.files?.[0] ?? null;
-                          setPendingFile(key, f);
+                  {isRecordingThis ? (
+                    <div className="rounded-lg border border-border bg-background px-3 py-2">
+                      <AudioRecorder
+                        onCancel={() => setRecordingEditId(null)}
+                        onSend={(blob, mime, seconds) => {
+                          setPendingFile(
+                            key,
+                            blobToAudioFile(blob, mime, seconds),
+                          );
+                          setRecordingEditId(null);
+                          toast.success(
+                            "Audio grabado — pulsa Guardar para aplicarlo.",
+                          );
                         }}
                       />
-                    </label>
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-3">
+                      {previewUrl ? (
+                        <audio
+                          controls
+                          src={previewUrl}
+                          className="h-10 min-w-0 flex-1"
+                        />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Sin audio todavía
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setRecordingEditId(key)}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 text-sm font-medium text-primary hover:bg-primary/10"
+                      >
+                        <Mic className="h-3.5 w-3.5" />
+                        Grabar
+                      </button>
+                      <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
+                        <Upload className="h-3.5 w-3.5" />
+                        {a.url || newFile ? "Cambiar archivo" : "Subir archivo"}
+                        <input
+                          ref={(el) => {
+                            replaceInputRefs.current[key] = el;
+                          }}
+                          type="file"
+                          accept="audio/*"
+                          className="hidden"
+                          onChange={(ev) => {
+                            const f = ev.target.files?.[0] ?? null;
+                            setPendingFile(key, f);
+                          }}
+                        />
+                      </label>
+                    </div>
+                  )}
                   {newFile && (
                     <p className="text-xs text-primary">
-                      Nuevo archivo listo: <strong>{newFile.name}</strong> — pulsa
-                      Guardar para aplicarlo.
+                      Nuevo archivo listo: <strong>{newFile.name}</strong> —
+                      pulsa Guardar para aplicarlo.
                     </p>
                   )}
                   {fmt.msg && (

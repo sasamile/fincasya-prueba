@@ -267,13 +267,19 @@ export const listConnections = query({
         igPictureUrl: r.igPictureUrl,
         webhookSubscribed: r.webhookSubscribed ?? false,
         autoReplyComments: (() => {
+          if (!r.autoReplyComments) return false;
+          const mode = r.autoReplyMode ?? 'template';
+          if (mode === 'bot') {
+            return Boolean(r.autoReplyInstructions?.trim());
+          }
           const tpls = r.commentTemplates ?? [];
-          if (!r.autoReplyComments || tpls.length === 0) return false;
-          if (!r.autoReplyTemplateId) return false;
+          if (tpls.length === 0 || !r.autoReplyTemplateId) return false;
           return tpls.some((t) => t.id === r.autoReplyTemplateId);
         })(),
         autoReplyMessage: r.autoReplyMessage,
         autoReplyTemplateId: r.autoReplyTemplateId,
+        autoReplyInstructions: r.autoReplyInstructions,
+        autoReplyMode: r.autoReplyMode ?? 'template',
         commentTemplates: r.commentTemplates ?? [],
         dmTemplates: r.dmTemplates ?? [],
         connectedByName: r.connectedByName,
@@ -1525,6 +1531,8 @@ export const updateCommentAutoReply = mutation({
     enabled: v.boolean(),
     templateId: v.optional(v.string()),
     message: v.optional(v.string()),
+    mode: v.optional(v.union(v.literal('template'), v.literal('bot'))),
+    instructions: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const row = await ctx.db
@@ -1533,19 +1541,42 @@ export const updateCommentAutoReply = mutation({
       .first();
     if (!row) throw new Error('Página no encontrada');
 
-    const templates = row.commentTemplates ?? [];
-    if (args.enabled && templates.length === 0) {
-      throw new Error('Crea al menos una plantilla antes de activar la respuesta automática');
-    }
+    const mode =
+      args.mode ??
+      row.autoReplyMode ??
+      (args.instructions?.trim() ? 'bot' : 'template');
+    const instructions =
+      args.instructions !== undefined
+        ? args.instructions.trim() || undefined
+        : row.autoReplyInstructions;
 
+    const templates = row.commentTemplates ?? [];
     let autoReplyMessage = args.message?.trim() || undefined;
-    let autoReplyTemplateId = args.templateId;
+    let autoReplyTemplateId = args.templateId ?? row.autoReplyTemplateId;
 
     if (args.enabled) {
-      const tpl = templates.find((t) => t.id === args.templateId) ?? templates[0];
-      if (!tpl) throw new Error('Plantilla no encontrada');
-      autoReplyMessage = tpl.text;
-      autoReplyTemplateId = tpl.id;
+      if (mode === 'bot') {
+        if (!instructions) {
+          throw new Error(
+            'Escribe las instrucciones del bot antes de activar la auto-respuesta',
+          );
+        }
+        autoReplyMessage = undefined;
+        autoReplyTemplateId = undefined;
+      } else {
+        if (templates.length === 0) {
+          throw new Error(
+            'Crea al menos una plantilla antes de activar la respuesta automática',
+          );
+        }
+        const tpl =
+          templates.find((t) => t.id === args.templateId) ??
+          templates.find((t) => t.id === autoReplyTemplateId) ??
+          templates[0];
+        if (!tpl) throw new Error('Plantilla no encontrada');
+        autoReplyMessage = tpl.text;
+        autoReplyTemplateId = tpl.id;
+      }
     } else {
       autoReplyTemplateId = undefined;
       autoReplyMessage = undefined;
@@ -1555,6 +1586,8 @@ export const updateCommentAutoReply = mutation({
       autoReplyComments: args.enabled,
       autoReplyMessage,
       autoReplyTemplateId,
+      autoReplyMode: mode,
+      autoReplyInstructions: instructions,
       updatedAt: Date.now(),
     });
   },
@@ -1602,7 +1635,12 @@ export const saveCommentTemplates = mutation({
     };
 
     const currentTplId = row.autoReplyTemplateId;
-    if (currentTplId && !templates.some((t) => t.id === currentTplId)) {
+    const mode = row.autoReplyMode ?? 'template';
+    if (
+      mode === 'template' &&
+      currentTplId &&
+      !templates.some((t) => t.id === currentTplId)
+    ) {
       patch.autoReplyTemplateId = undefined;
       patch.autoReplyMessage = undefined;
       patch.autoReplyComments = false;
@@ -1735,20 +1773,59 @@ export const maybeAutoReplyComment = internalAction({
     if (!conn?.connected || !conn.autoReplyComments) return;
     if (args.fromId === args.pageId || args.fromId === conn.igUserId) return;
 
-    const tpls = conn.commentTemplates ?? [];
-    if (!conn.autoReplyTemplateId) return;
-    const tpl = tpls.find(
-      (t: { id: string; text: string; label: string }) =>
-        t.id === conn.autoReplyTemplateId,
-    );
-    if (!tpl?.text?.trim()) return;
-    const message = tpl.text.trim();
-
     const existing = await ctx.runQuery(internal.metaChannels.getCommentReply, {
       provider: args.provider,
       commentId: args.commentId,
     });
     if (existing) return;
+
+    const mode = conn.autoReplyMode ?? 'template';
+    let message = '';
+
+    if (mode === 'bot') {
+      const instructions = conn.autoReplyInstructions?.trim();
+      if (!instructions) return;
+      try {
+        const { chatCompletion } = await import('./lib/openai');
+        const system = `Eres el bot de comentarios de FincasYa.com en Facebook/Instagram.
+Sigue estas instrucciones del operador al pie de la letra para redactar UNA sola respuesta al comentario:
+
+---
+${instructions}
+---
+
+Reglas fijas:
+- Responde en español colombiano, tono cálido y profesional.
+- Máximo 280 caracteres.
+- No uses markdown ni JSON; solo el texto de la respuesta.
+- No inventes precios, disponibilidades ni promesas que no estén en las instrucciones.`;
+
+        const { content } = await chatCompletion({
+          messages: [
+            { role: 'system', content: system },
+            {
+              role: 'user',
+              content: `Comentario recibido: "${args.text.trim().slice(0, 500)}"`,
+            },
+          ],
+          temperature: 0.7,
+        });
+        message = (content ?? '').trim().replace(/^["']|["']$/g, '');
+      } catch {
+        return;
+      }
+    } else {
+      const tpls = conn.commentTemplates ?? [];
+      if (!conn.autoReplyTemplateId) return;
+      const tpl = tpls.find(
+        (t: { id: string; text: string; label: string }) =>
+          t.id === conn.autoReplyTemplateId,
+      );
+      if (!tpl?.text?.trim()) return;
+      message = tpl.text.trim();
+    }
+
+    if (!message) return;
 
     await ctx.runAction(api.metaChannels.replyToComment, {
       pageId: args.pageId,

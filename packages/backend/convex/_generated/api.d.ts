@@ -124,6 +124,7 @@ import type * as permissions from "../permissions.js";
 import type * as propertyBlocks from "../propertyBlocks.js";
 import type * as propertyOwners from "../propertyOwners.js";
 import type * as propertyWhatsAppCatalog from "../propertyWhatsAppCatalog.js";
+import type * as publicBankAccounts from "../publicBankAccounts.js";
 import type * as quickReplies from "../quickReplies.js";
 import type * as quienes_somos from "../quienes_somos.js";
 import type * as reportes from "../reportes.js";
@@ -262,6 +263,7 @@ declare const fullApi: ApiFromModules<{
   propertyBlocks: typeof propertyBlocks;
   propertyOwners: typeof propertyOwners;
   propertyWhatsAppCatalog: typeof propertyWhatsAppCatalog;
+  publicBankAccounts: typeof publicBankAccounts;
   quickReplies: typeof quickReplies;
   quienes_somos: typeof quienes_somos;
   reportes: typeof reportes;

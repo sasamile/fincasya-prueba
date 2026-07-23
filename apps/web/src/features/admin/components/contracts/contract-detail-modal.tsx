@@ -513,11 +513,11 @@ export function ContractDetailModal({
                 </>
               )}
               <a
-                href={`/admin/contracts-confirmation?contract=${encodeURIComponent(c.contractNumber)}`}
+                href={`/admin/documentos`}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 h-9 text-xs font-semibold hover:bg-muted transition"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
-                Editar en admin
+                Ver en Documentos
               </a>
               {fill?.token && (
                 <a

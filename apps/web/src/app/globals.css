@@ -67,12 +67,15 @@ body:has(.inbox) {
   color-scheme: dark;
 }
 
-/* ── Redes sociales CRM · pantalla completa (tema claro FincasYa) ─ */
+/* ── Redes sociales CRM · pantalla completa (sigue el tema del admin) ─ */
 .social-crm {
   --background: #f7f7f8;
   --foreground: #1c1917;
   --card: #ffffff;
+  --card-foreground: #1c1917;
   --panel-header: #ffffff;
+  --popover: #ffffff;
+  --popover-foreground: #1c1917;
   --muted: #f1f1f3;
   --muted-foreground: #71717a;
   --border: #e8e8ec;
@@ -80,7 +83,9 @@ body:has(.inbox) {
   --primary: #fe4a19;
   --primary-foreground: #ffffff;
   --secondary: #f1f1f3;
+  --secondary-foreground: #1c1917;
   --accent: #fff0eb;
+  --accent-foreground: #1c1917;
   --destructive: #e5484d;
   --ring: #fe4a19;
   --bubble-in: #f4f4f5;
@@ -91,10 +96,41 @@ body:has(.inbox) {
   min-height: 100dvh;
 }
 
+html.dark .social-crm {
+  color-scheme: dark;
+  --background: #161717;
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --panel-header: #161717;
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --muted: #202c33;
+  --muted-foreground: oklch(0.708 0 0);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --primary: #fe4a19;
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --ring: oklch(0.439 0 0);
+  --bubble-in: #1d1f1f;
+  --bubble-out: #0084ff;
+}
+
 html:has(.social-crm),
 body:has(.social-crm) {
   background-color: #f7f7f8;
   color-scheme: light;
+}
+
+html.dark:has(.social-crm),
+html.dark body:has(.social-crm) {
+  background-color: #161717;
+  color-scheme: dark;
 }
 
 @theme inline {

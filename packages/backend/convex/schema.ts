@@ -633,6 +633,12 @@ export default defineSchema(
     contractDocuments: defineTable({
       /** Codificación del contrato = nombre de la carpeta. */
       contractNumber: v.string(),
+      /**
+       * VERSIÓN del contrato (1, 2, 3…). Cada vez que se genera o se corrige
+       * un contrato sube una versión (Adriana, 22-jul). La confirmación (CR)
+       * se emite SIEMPRE contra la última versión.
+       */
+      version: v.optional(v.number()),
       tipo: v.union(
         v.literal('contrato'),
         /** El .docx editable del mismo contrato, por si hay que corregirlo. */
@@ -2072,6 +2078,14 @@ export default defineSchema(
       autoReplyComments: v.optional(v.boolean()),
       autoReplyMessage: v.optional(v.string()),
       autoReplyTemplateId: v.optional(v.string()),
+      /**
+       * Instrucciones libres para el bot de comentarios (modo IA).
+       * Si está definido y autoReplyMode === 'bot', genera la respuesta con LLM.
+       */
+      autoReplyInstructions: v.optional(v.string()),
+      autoReplyMode: v.optional(
+        v.union(v.literal('template'), v.literal('bot')),
+      ),
       /** Plantillas de respuesta creadas por el operador (por página). */
       commentTemplates: v.optional(
         v.array(

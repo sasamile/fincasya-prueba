@@ -72,7 +72,7 @@ export function MetaSocialAvatar({
         </div>
       )}
       {badge ? (
-        <span className="absolute -right-0.5 -bottom-0.5 rounded-full bg-white p-0.5 shadow-sm">
+        <span className="absolute -right-0.5 -bottom-0.5 rounded-full bg-background p-0.5 shadow-sm">
           {badge}
         </span>
       ) : null}

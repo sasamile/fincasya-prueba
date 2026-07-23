@@ -35,6 +35,8 @@ type ConfirmationPayload = {
   groupType?: string;
   purpose?: string;
   issueDate?: string;
+  /** Texto libre del recuadro grande del CR (notas, cifras, lo que sea). */
+  observaciones?: string;
 };
 
 type PaymentMethod =
@@ -267,7 +269,7 @@ function buildConfirmationHtml(p: ConfirmationPayload, logoDataUrl: string | nul
           <td class="peach" style="width:18%;">Propiedad</td>
           <td class="value-cell" style="width:31%;">${esc(p.propertyName ?? '-')}</td>
           <td colspan="2" class="value-cell" style="width:32%;">Contrato: ${esc(p.contractNumber ?? '-')}</td>
-          <td rowspan="6" class="empty-box" style="width:19%;"></td>
+          <td rowspan="6" class="empty-box" style="width:19%;vertical-align:top;padding:6px;font-size:10px;line-height:1.35;white-space:pre-wrap;">${esc(p.observaciones ?? '')}</td>
         </tr>
         <tr>
           <td class="peach">Ubicaci&oacute;n</td>

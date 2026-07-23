@@ -66,6 +66,8 @@ type PreviewFormSlice = {
   checkOutDate: string;
   checkInTime: string;
   checkOutTime: string;
+  /** Personas del contrato (input Personas). */
+  guests?: string | number;
   /** Opcional: override del # de habitaciones; si vacío se cuentan zonas. */
   habitaciones?: string;
 };
@@ -169,7 +171,11 @@ export function buildReservationPreviewFincaData(
     nombreFinca: property?.title || "—",
     municipioFinca: property?.location || "—",
     nombrePropietario,
-    capacidadDePersonas: String(property?.capacity ?? 0),
+    capacidadDePersonas: String(
+      Number(form.guests) > 0
+        ? Number(form.guests)
+        : (property?.capacity ?? 0),
+    ),
     caracteristicasDeFinca: caracteristicasHtml,
     precioNumerico: formatCop(total),
     precioLetras: numberToSpanishTextCO(total, true),

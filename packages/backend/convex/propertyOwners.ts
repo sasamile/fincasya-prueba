@@ -425,3 +425,22 @@ export const saveProfile = mutation({
     };
   },
 });
+
+/**
+ * RNT de una propiedad, para adjuntarlo junto al contrato (Adriana, 22-jul):
+ * al enviar el contrato por WhatsApp se manda también el PDF del RNT.
+ */
+export const getRntForProperty = query({
+  args: { propertyId: v.id('properties') },
+  handler: async (ctx, { propertyId }) => {
+    const info = await ctx.db
+      .query('propertyOwnerInfo')
+      .withIndex('by_property', (q) => q.eq('propertyId', propertyId))
+      .first();
+    if (!info?.rntPdfUrl?.trim()) return null;
+    return {
+      rntPdfUrl: info.rntPdfUrl.trim(),
+      rntNumber: info.rntNumber?.trim() || '',
+    };
+  },
+});
