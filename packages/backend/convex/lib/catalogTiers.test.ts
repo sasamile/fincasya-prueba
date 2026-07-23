@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   catalogTier,
-  entraEnPrimerLote,
+  MAX_FICHAS_PRIMER_LOTE,
   PRIMER_TIER_VECINO,
   TIER_FAVORITA_EN_ZONA,
   TIER_FAVORITA_VECINA,
@@ -61,30 +61,62 @@ describe('orden del lote', () => {
   });
 });
 
-describe('primer lote: favoritas primero', () => {
-  const MUCHAS = 10; // suficientes favoritas para llenar el lote
-
-  test('con favoritas de sobra, lo no favorito espera al siguiente envío', () => {
-    expect(entraEnPrimerLote(TIER_RESTO_EN_ZONA, MUCHAS)).toBe(false);
-    expect(entraEnPrimerLote(TIER_RESTO_VECINA, MUCHAS)).toBe(false);
+describe('primer lote: 8 fichas mezcladas', () => {
+  // Santiago, 23-jul: "no solo 3, máximo 8 entre favoritas del lugar, cercanas
+  // a ese lugar y las otras". Antes el primer lote era solo-favoritas y a un
+  // grupo de 4 le llegaron 2 fichas (Adriana, 22-jul).
+  test('el primer envío lleva 8 fichas', () => {
+    expect(MAX_FICHAS_PRIMER_LOTE).toBe(8);
   });
 
-  test('favoritas y fincas de la semana sí entran', () => {
-    expect(entraEnPrimerLote(TIER_SEMANA_EN_ZONA, MUCHAS)).toBe(true);
-    expect(entraEnPrimerLote(TIER_FAVORITA_EN_ZONA, MUCHAS)).toBe(true);
-    expect(entraEnPrimerLote(TIER_FAVORITA_VECINA, MUCHAS)).toBe(true);
-    expect(entraEnPrimerLote(TIER_SEMANA_VECINA, MUCHAS)).toBe(true);
+  /** Llenado del lote: orden de tier, sin excluir a nadie. */
+  const armarLote = (tiers: number[]) =>
+    [...tiers].sort((a, b) => a - b).slice(0, MAX_FICHAS_PRIMER_LOTE);
+
+  test('lo no favorito de la zona SÍ entra al primer lote', () => {
+    // 2 favoritas + 3 no favoritas de la zona → salen las 5, no solo 2.
+    const lote = armarLote([
+      TIER_FAVORITA_EN_ZONA,
+      TIER_FAVORITA_EN_ZONA,
+      TIER_RESTO_EN_ZONA,
+      TIER_RESTO_EN_ZONA,
+      TIER_RESTO_EN_ZONA,
+    ]);
+    expect(lote).toHaveLength(5);
+    expect(lote.filter((t) => t === TIER_RESTO_EN_ZONA)).toHaveLength(3);
   });
 
-  test('sin ninguna favorita se manda lo que haya', () => {
-    expect(entraEnPrimerLote(TIER_RESTO_EN_ZONA, 0)).toBe(true);
-    expect(entraEnPrimerLote(TIER_RESTO_VECINA, 0)).toBe(true);
+  test('con inventario de sobra el lote se corta en 8', () => {
+    const lote = armarLote(Array(20).fill(TIER_RESTO_EN_ZONA));
+    expect(lote).toHaveLength(8);
   });
 
-  test('con POCAS favoritas se completa el lote con el resto', () => {
-    // Caso real (Adriana, 22-jul): grupo de 4 personas, solo 2 favoritas
-    // chicas disponibles → al cliente le llegaban 2 fichas y nada más.
-    expect(entraEnPrimerLote(TIER_RESTO_EN_ZONA, 2)).toBe(true);
-    expect(entraEnPrimerLote(TIER_RESTO_VECINA, 2)).toBe(true);
+  test('las favoritas de la zona van antes que el resto y que las vecinas', () => {
+    const lote = armarLote([
+      TIER_RESTO_VECINA,
+      TIER_RESTO_EN_ZONA,
+      TIER_FAVORITA_VECINA,
+      TIER_FAVORITA_EN_ZONA,
+      TIER_SEMANA_EN_ZONA,
+    ]);
+    expect(lote).toEqual([
+      TIER_SEMANA_EN_ZONA,
+      TIER_FAVORITA_EN_ZONA,
+      TIER_RESTO_EN_ZONA,
+      TIER_FAVORITA_VECINA,
+      TIER_RESTO_VECINA,
+    ]);
+  });
+
+  test('el lote mezcla zona pedida y vecinas cuando la zona no alcanza', () => {
+    const lote = armarLote([
+      TIER_FAVORITA_EN_ZONA,
+      TIER_RESTO_EN_ZONA,
+      ...Array(6).fill(TIER_FAVORITA_VECINA),
+      TIER_SEMANA_VECINA,
+    ]);
+    expect(lote).toHaveLength(8);
+    expect(lote.filter((t) => t < PRIMER_TIER_VECINO)).toHaveLength(2);
+    expect(lote.filter((t) => t >= PRIMER_TIER_VECINO)).toHaveLength(6);
   });
 });

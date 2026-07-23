@@ -62,12 +62,9 @@ import {
 import { detectPuenteFestivo, humanHolidayEs } from './lib/colombiaPublicHolidays';
 import {
   catalogTier,
-  entraEnPrimerLote,
+  MAX_FICHAS_PRIMER_LOTE,
   PRIMER_TIER_VECINO,
-  TIER_FAVORITA_EN_ZONA,
-  TIER_FAVORITA_VECINA,
   TIER_RESTO_VECINA,
-  TIER_SEMANA_EN_ZONA,
   TIER_SEMANA_VECINA,
 } from './lib/catalogTiers';
 import {
@@ -179,6 +176,12 @@ type CatalogPickResult =
        * pedida no alcanzó a llenarlo. El agente lo aclara en su mensaje.
        */
       incluyeCercanas?: boolean;
+      /**
+       * Cuántas fichas se pueden enviar en ESTE lote (8 en el primer envío,
+       * 12 en los de "más opciones"). `items` trae extras de repuesto por si
+       * alguna ficha falla en Meta — el enviador corta en este número.
+       */
+      maxFichas: number;
       items: Array<{
         propertyId: string;
         retailerId: string;
@@ -188,6 +191,12 @@ type CatalogPickResult =
         image?: string | null;
         /** Códigos / IDs alternativos si Meta no reconoce el retailer principal. */
         alternateRetailerIds?: string[];
+        /**
+         * El cliente trae mascotas y esta finca NO las tiene confirmadas: se
+         * envía igual (un Experto puede negociar el ingreso) y el agente lo
+         * aclara en su mensaje.
+         */
+        petPending?: boolean;
       }>;
     };
 
@@ -711,7 +720,7 @@ export const toolCatalogPick = internalQuery({
       apagadas: 0, // active/visible/visibleInWhatsAppCatalog en false
       costa: 0, // costa sin que el cliente la pidiera
       fueraDeZona: 0, // no coincide con la zona pedida
-      sinMascotas: 0, // pidieron mascotas y la finca no acepta
+      sinMascotas: 0, // traen mascotas y la finca no las confirma (se envía igual)
       minNochesFinca: 0, // estadía más corta que el mínimo propio de la finca
       capacidad: 0, // fuera del rango de cupo del grupo
       ocupadas: 0, // reserva/bloqueo se cruza con las fechas
@@ -778,9 +787,12 @@ export const toolCatalogPick = internalQuery({
         razones.fueraDeZona++;
         continue;
       }
+      // MASCOTAS = PREFERENCIA, NO FILTRO (Santiago, 23-jul): si pidió Melgar
+      // con perro, las de Melgar que no aceptan mascotas se envían IGUAL — un
+      // Experto muchas veces negocia el ingreso. Las pet friendly van primero
+      // dentro de su tier y el agente aclara cuáles quedan por confirmar.
       if (mascotas && p.allowsPets !== true) {
-        razones.sinMascotas++;
-        continue;
+        razones.sinMascotas++; // solo conteo: ya no excluye
       }
       // Estadía mínima propia de la finca (aplica también a picks de la semana).
       if (hayFechas) {
@@ -868,27 +880,15 @@ export const toolCatalogPick = internalQuery({
       clasificadas.push(p);
     }
 
-    // PRIMER LOTE = SOLO FAVORITAS (Vane: "primero las favoritas y si piden
-    // más se le envía la otra"). Las no favoritas quedan para el siguiente
-    // envío de "más opciones".
+    // PRIMER LOTE = 8 FICHAS MEZCLADAS (Santiago, 23-jul). Ningún tier se
+    // excluye: "primero las favoritas" se cumple por el ORDEN, no dejando
+    // fincas fuera. Lo que no cabe en las 8 queda para "más opciones".
     const primerLote = exclude.size === 0;
-    // Cuántas favoritas/semana hay realmente disponibles: si son pocas, el
-    // primer lote se completa con el resto en vez de mandar 2 fichas sueltas.
-    const favoritasDisponibles = clasificadas.filter((p) => {
-      const t = tierIndex.get(String(p._id));
-      return (
-        t === TIER_SEMANA_EN_ZONA ||
-        t === TIER_FAVORITA_EN_ZONA ||
-        t === TIER_FAVORITA_VECINA ||
-        t === TIER_SEMANA_VECINA
-      );
-    }).length;
+    const maxFichas = primerLote ? MAX_FICHAS_PRIMER_LOTE : MAX_CATALOG_CARDS;
 
     const porTier = new Map<number, typeof matches>();
     for (const p of clasificadas) {
       const tier = tierIndex.get(String(p._id)) ?? TIER_RESTO_VECINA;
-      if (primerLote && !entraEnPrimerLote(tier, favoritasDisponibles))
-        continue;
       const bucket = porTier.get(tier);
       if (bucket) bucket.push(p);
       else porTier.set(tier, [p]);
@@ -933,6 +933,8 @@ export const toolCatalogPick = internalQuery({
       compactFriendly: boolean;
       /** Black Lux / Golondrinas / Villa Barbosa — mal default amigos. */
       softDemoted: boolean;
+      /** Traen mascotas y la finca no las confirma — va DESPUÉS en su tier. */
+      petPending: boolean;
       item: CatalogItem;
     }> = [];
     // PRECIO POR TEMPORADA (Vane 21-jul): con fechas, la ficha muestra el
@@ -1014,6 +1016,7 @@ export const toolCatalogPick = internalQuery({
         grandOrLuxury: isGrandOrLuxuryCategory(p.category),
         compactFriendly: isCompactFriendlyType(p.type),
         softDemoted: isSoftDemotedForFriends(p.title),
+        petPending: mascotas === true && p.allowsPets !== true,
         item: {
           propertyId: String(p._id),
           retailerId: mapping.productRetailerId,
@@ -1021,6 +1024,7 @@ export const toolCatalogPick = internalQuery({
           bodyText: parts.join(' · '),
           image,
           alternateRetailerIds: p.code?.trim() ? [p.code.trim()] : undefined,
+          petPending: mascotas === true && p.allowsPets !== true ? true : undefined,
         },
       });
     }
@@ -1033,7 +1037,7 @@ export const toolCatalogPick = internalQuery({
       .slice(0, MAX_PICKS_FUERA_DE_ZONA);
     const enPickFuera = new Set(pickFuera.map((c) => c.item.propertyId));
     const principal = candidatos.filter((c) => !enPickFuera.has(c.item.propertyId));
-    const cupoPrincipal = Math.max(MAX_CATALOG_CARDS - pickFuera.length, 0);
+    const cupoPrincipal = Math.max(maxFichas - pickFuera.length, 0);
 
     /**
      * Orden DENTRO de un pool (mismo tier): cupo ajustado → no lujo →
@@ -1050,9 +1054,13 @@ export const toolCatalogPick = internalQuery({
         const luxuryPenalty = c.grandOrLuxury ? 1 : 0;
         const softPenalty = c.softDemoted ? 1 : 0;
         const compactBonus = c.compactFriendly ? 1 : 0;
+        // Con mascotas: las pet friendly del tier van primero; las demás se
+        // envían igual pero después (el Experto confirma el ingreso).
+        const petPenalty = c.petPending ? 1 : 0;
         const jitter = ((rotSeed + i * 9973) % 81) - 40;
         const score =
           overPrefer * 1000 +
+          petPenalty * 600 +
           luxuryPenalty * 250 +
           softPenalty * 180 +
           (c.capacity - cupo) * 12 -
@@ -1151,6 +1159,7 @@ export const toolCatalogPick = internalQuery({
       ok: true,
       catalogMetaId: catalog.whatsappCatalogId,
       incluyeCercanas,
+      maxFichas,
       items,
     };
   },
@@ -2708,10 +2717,12 @@ export const runAgentTurn = internalAction({
               // Una ficha a la vez: el panel las muestra en vivo mientras salen
               // (antes se guardaban todas al final del lote).
               const sent = [];
+              /** Títulos que SÍ salieron (para las notas posteriores del lote). */
+              const titulosEnviados = new Set<string>();
               let okCount = 0;
               let sentAny = false;
               for (const item of pick.items) {
-                if (okCount >= MAX_CATALOG_CARDS) break;
+                if (okCount >= (pick.maxFichas ?? MAX_CATALOG_CARDS)) break;
                 if (sentAny) {
                   await new Promise((r) => setTimeout(r, BETWEEN_CATALOG_SENDS_MS));
                 }
@@ -2729,6 +2740,7 @@ export const runAgentTurn = internalAction({
                     bodyText: item.bodyText,
                   };
                   sent.push({ ...card, wamid: undefined });
+                  titulosEnviados.add(item.title);
                   await ctx.runMutation(internal.agent.recordCatalogSend, {
                     conversationId,
                     sent: [card],
@@ -2757,6 +2769,7 @@ export const runAgentTurn = internalAction({
                     priceIsDesde: priced?.priceIsDesde,
                   };
                   sent.push(card);
+                  titulosEnviados.add(item.title);
                   await ctx.runMutation(internal.agent.recordCatalogSend, {
                     conversationId,
                     sent: [card],
@@ -2774,13 +2787,25 @@ export const runAgentTurn = internalAction({
                   hasPets:
                     typeof args.mascotas === 'boolean' ? args.mascotas : undefined,
                 });
+                // Fichas enviadas SIN mascotas confirmadas: el bot lo aclara
+                // (un Experto negocia el ingreso con el propietario).
+                const petPendientes = pick.items
+                  .filter(
+                    (i) => i.petPending === true && titulosEnviados.has(i.title),
+                  )
+                  .map((i) => i.title);
+                const notaMascotas =
+                  petPendientes.length > 0
+                    ? ` OJO MASCOTAS (OBLIGATORIO aclararlo en 1 linea calida): estas opciones aun NO tienen confirmado el ingreso de mascotas: ${petPendientes.join(' · ')}. Si al cliente le gusta una de esas, un Experto valida con el propietario el ingreso de su mascota (muchas veces se logra) — SIN prometer que si y SIN descartar la finca.`
+                    : '';
                 result = {
                   enviadas: sent.map((s) => s.title),
                   nota:
                     (zonaAmpliada
                       ? 'OJO: la zona que pidio el cliente no alcanzo a llenar el lote, asi que ADEMAS de las de su zona se enviaron opciones de destinos CERCANOS de la MISMA region (esto es lo correcto — PROHIBIDO decir "no tenemos fincas/disponibilidad"). El mensaje oficial YA salio completo con las fichas (valor por noche, invitacion a elegir, mas opciones) — NO repitas nada de eso. Escribe SOLO 1-2 lineas con empatia aclarando que algunas opciones son de destinos cercanos al que pidio, y que si prefiere solo su zona exacta, un experto se la busca.'
                       : 'El mensaje oficial YA salio completo junto a las fichas (valor por noche, invitacion a decir cual le gusto, ayuda con la mejor tarifa y ver mas opciones). PROHIBIDO escribir un cierre que repita algo de eso. Solo escribe algo si el cliente pregunto algo puntual que aun NO se ha respondido; si no hay nada pendiente, no escribas nada este turno.') +
-                    notaProximoAnio,
+                    notaProximoAnio +
+                    notaMascotas,
                 };
               } else {
                 // Catalogo no conectado al numero / producto invalido: NO
