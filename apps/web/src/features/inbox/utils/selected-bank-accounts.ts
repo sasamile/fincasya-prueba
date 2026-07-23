@@ -96,3 +96,27 @@ export function collectSelectedBankImageUrls(
   }
   return out;
 }
+
+/**
+ * Fotos a enviar con el contrato: primero el flyer general (todas las cuentas),
+ * luego fotos específicas de las cuentas seleccionadas (QR, etc.). Sin duplicar.
+ */
+export function collectContractPaymentImageUrls(args: {
+  generalImageUrls?: string[];
+  selectedAccounts?: Array<{ imageUrls?: string[] }>;
+}): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const url of args.generalImageUrls ?? []) {
+    const u = url.trim();
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  for (const u of collectSelectedBankImageUrls(args.selectedAccounts ?? [])) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}

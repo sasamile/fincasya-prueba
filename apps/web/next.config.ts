@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     "puppeteer",
     "puppeteer-core",
+    "@sparticuz/chromium",
     "@ilovepdf/ilovepdf-nodejs",
     "@ilovepdf/ilovepdf-js-core",
     "heic-convert",

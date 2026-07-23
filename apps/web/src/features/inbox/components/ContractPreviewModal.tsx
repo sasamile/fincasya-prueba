@@ -19,7 +19,7 @@ import '@harbour-enterprises/superdoc/style.css';
 import type { ConversationRow } from '@/features/inbox/types';
 import { buildInboxContractUpsertArgs } from '@/features/inbox/utils/persist-inbox-contract';
 import {
-  collectSelectedBankImageUrls,
+  collectContractPaymentImageUrls,
   resolveSelectedBankPayload,
 } from '@/features/inbox/utils/selected-bank-accounts';
 import { firmaUrlToDataUrl } from '@/features/inbox/utils/firma-to-data-url';
@@ -67,6 +67,7 @@ export function ContractPreviewModal({
   draft,
   selectedBankIds,
   selectedBankAccounts = [],
+  generalPaymentImageUrls = [],
   firmanteFields = {},
   conversation,
   propertyTitle,
@@ -84,6 +85,8 @@ export function ContractPreviewModal({
     ownerCedula?: string;
     imageUrls?: string[];
   }>;
+  /** Flyer general (todas las cuentas) — se envía junto al contrato. */
+  generalPaymentImageUrls?: string[];
   firmanteFields?: {
     adminName?: string;
     adminCedula?: string;
@@ -551,8 +554,11 @@ export function ContractPreviewModal({
         );
       }
 
-      // Fotos de las cuentas seleccionadas (flyer / QR), una o más.
-      const paymentImages = collectSelectedBankImageUrls(selectedBankAccounts);
+      // Flyer general + fotos por cuenta (QR), sin duplicar.
+      const paymentImages = collectContractPaymentImageUrls({
+        generalImageUrls: generalPaymentImageUrls,
+        selectedAccounts: selectedBankAccounts,
+      });
       if (paymentImages.length > 0) {
         let sentOk = 0;
         for (let i = 0; i < paymentImages.length; i++) {
@@ -564,7 +570,7 @@ export function ContractPreviewModal({
               filename: `medios-pago-${draft.contractCode || 'contrato'}-${i + 1}.jpg`,
               caption:
                 i === 0
-                  ? 'Medios de pago FincasYa — datos de la cuenta'
+                  ? 'Medios de pago FincasYa'
                   : undefined,
             });
             if (imgRes.ok) sentOk += 1;
@@ -574,12 +580,12 @@ export function ContractPreviewModal({
         }
         if (sentOk < paymentImages.length) {
           toast.warning(
-            `El contrato salió, pero solo ${sentOk} de ${paymentImages.length} fotos de cuenta se enviaron.`,
+            `El contrato salió, pero solo ${sentOk} de ${paymentImages.length} fotos de pago se enviaron.`,
           );
         }
       } else {
         toast.warning(
-          'El contrato salió sin fotos de cuenta. Edita las cuentas y carga el flyer / QR.',
+          'El contrato salió sin foto de medios de pago. Abre el titular y carga su flyer general.',
         );
       }
 

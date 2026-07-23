@@ -370,12 +370,13 @@ export function BankAccountDialog({
             <Label className={labelClass}>
               {form.qrOnly
                 ? "Imagen del QR * "
-                : "Fotos de la cuenta (flyer / QR) "}
+                : "Foto de esta cuenta (opcional) "}
               ({form.imageUrls.length})
             </Label>
             <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Sube una o más imágenes (como el flyer de medios de pago). Al
-              enviar el contrato por WhatsApp se mandan junto al PDF y al RNT.
+              Solo si esta cuenta tiene QR u otra imagen propia. El flyer con
+              todas las cuentas del titular va en la foto general de ese
+              titular.
             </p>
             {form.imageUrls.length > 0 ? (
               <div className="grid grid-cols-2 gap-2">

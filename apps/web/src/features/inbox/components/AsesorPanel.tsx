@@ -53,7 +53,9 @@ import {
   useContractSettingsStore,
   type BankAccount as StoreBankAccount,
   type Firmante as StoreFirmante,
+  type PaymentMedia,
 } from '@/features/admin/store/contract-settings.store';
+import { uploadPaymentImages } from '@/features/admin/api/payment-images.api';
 import { BankAccountDialog } from '@/features/admin/components/contracts/bank-account-dialog';
 import {
   FirmanteDialog,
@@ -389,6 +391,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const settings = useQuery(api.adminContractSettings.getGlobalPayload, {}) as
     | {
         bankAccounts?: BankAccount[];
+        paymentMedia?: PaymentMedia[];
         contractBankAccountIds?: string[];
         primaryBankAccountId?: string;
         firmantes?: Array<{
@@ -411,6 +414,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
     | undefined;
   const replaceSettings = useMutation(api.adminContractSettings.replaceForAdmin);
   const storeBankAccounts = useContractSettingsStore((s) => s.bankAccounts);
+  const storePaymentMedia = useContractSettingsStore((s) => s.paymentMedia);
   const storeFirmantes = useContractSettingsStore((s) => s.firmantes);
   /** Catálogo de cuentas: une Convex + store local (por id). */
   const bankAccounts: BankAccount[] = useMemo(() => {
@@ -437,6 +441,39 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
     }
     return Array.from(map.values());
   }, [settings?.bankAccounts, storeBankAccounts]);
+
+  /** Flyers por titular (cada uno con todas sus cuentas). */
+  const paymentMedia: PaymentMedia[] = useMemo(() => {
+    const map = new Map<string, PaymentMedia>();
+    for (const m of storePaymentMedia) {
+      if (!m?.id || !m.imageUrl?.trim()) continue;
+      map.set(String(m.id), {
+        id: String(m.id),
+        label: m.label || 'Medios de pago',
+        imageUrl: m.imageUrl,
+        ownerName: m.ownerName?.trim() || undefined,
+      });
+    }
+    for (const m of settings?.paymentMedia ?? []) {
+      if (!m?.id || !m.imageUrl?.trim()) continue;
+      const id = String(m.id);
+      map.set(id, {
+        ...map.get(id),
+        ...m,
+        id,
+        ownerName: m.ownerName?.trim() || map.get(id)?.ownerName,
+      });
+    }
+    return Array.from(map.values());
+  }, [settings?.paymentMedia, storePaymentMedia]);
+
+  const mediaForOwner = (owner: string) => {
+    const key = owner.trim().toLowerCase().replace(/\s+/g, ' ');
+    return paymentMedia.filter(
+      (m) =>
+        (m.ownerName ?? '').trim().toLowerCase().replace(/\s+/g, ' ') === key,
+    );
+  };
 
   type InboxFirmante = {
     id: string;
@@ -478,6 +515,29 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
     [bankAccounts, selectedBankIds],
   );
 
+  /** Flyer de titulares con al menos una cuenta seleccionada. */
+  const generalPaymentImageUrls = useMemo(() => {
+    const selectedOwners = new Set(
+      selectedBankPayload.bankAccounts.map((a) =>
+        (a.ownerName || 'Sin titular').trim().toLowerCase().replace(/\s+/g, ' '),
+      ),
+    );
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const m of paymentMedia) {
+      const key = (m.ownerName ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
+      if (!key || !selectedOwners.has(key)) continue;
+      const url = m.imageUrl.trim();
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      out.push(url);
+    }
+    return out;
+  }, [paymentMedia, selectedBankPayload.bankAccounts]);
+
   /** Solo si el asesor marcó uno y sigue existiendo; vacío = sin imagen. */
   const selectedFirmante = useMemo(() => {
     if (!selectedFirmanteId) return null;
@@ -499,6 +559,12 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const [bankDialogOpen, setBankDialogOpen] = useState(false);
   const [editingBank, setEditingBank] = useState<BankAccount | null>(null);
   const [savingBank, setSavingBank] = useState(false);
+  const [uploadingPaymentMediaFor, setUploadingPaymentMediaFor] = useState<
+    string | null
+  >(null);
+  const [removingPaymentMediaId, setRemovingPaymentMediaId] = useState<
+    string | null
+  >(null);
   const [firmanteDialogOpen, setFirmanteDialogOpen] = useState(false);
   const [editingFirmante, setEditingFirmante] = useState<InboxFirmante | null>(
     null,
@@ -691,6 +757,76 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
       );
     } finally {
       setSavingBank(false);
+    }
+  };
+
+  const handleAddHolderPaymentPhotos = async (
+    ownerName: string,
+    files: File[],
+  ) => {
+    if (!files.length || uploadingPaymentMediaFor) return;
+    const owner = ownerName.trim() || 'Sin titular';
+    setUploadingPaymentMediaFor(owner);
+    try {
+      const urls = await uploadPaymentImages(files);
+      const base =
+        settings ??
+        getContractSettingsSnapshot(useContractSettingsStore.getState());
+      const prev = (base.paymentMedia as PaymentMedia[] | undefined) ?? [];
+      const added: PaymentMedia[] = urls.map((imageUrl, i) => ({
+        id: crypto.randomUUID(),
+        label:
+          urls.length === 1
+            ? `Medios de pago · ${owner}`
+            : `Medios de pago · ${owner} (${prev.filter((p) => (p.ownerName ?? '').trim().toLowerCase() === owner.toLowerCase()).length + i + 1})`,
+        imageUrl,
+        ownerName: owner,
+      }));
+      const next = [...prev, ...added];
+      await replaceSettings({
+        payload: {
+          ...base,
+          paymentMedia: next,
+        },
+      });
+      useContractSettingsStore.setState({ paymentMedia: next });
+      toast.success(
+        added.length === 1
+          ? `Foto de ${owner} agregada`
+          : `${added.length} fotos de ${owner} agregadas`,
+      );
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo subir la foto del titular',
+      );
+    } finally {
+      setUploadingPaymentMediaFor(null);
+    }
+  };
+
+  const handleRemoveHolderPaymentPhoto = async (id: string) => {
+    if (removingPaymentMediaId) return;
+    setRemovingPaymentMediaId(id);
+    try {
+      const base =
+        settings ??
+        getContractSettingsSnapshot(useContractSettingsStore.getState());
+      const prev = (base.paymentMedia as PaymentMedia[] | undefined) ?? [];
+      const next = prev.filter((m) => m.id !== id);
+      await replaceSettings({
+        payload: {
+          ...base,
+          paymentMedia: next,
+        },
+      });
+      useContractSettingsStore.setState({ paymentMedia: next });
+      toast.success('Foto del titular eliminada');
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo eliminar la foto',
+      );
+    } finally {
+      setRemovingPaymentMediaId(null);
     }
   };
 
@@ -1416,10 +1552,11 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         hint={`${selectedBankIds.length} seleccionada${selectedBankIds.length === 1 ? '' : 's'}`}
       >
         <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
-          Marca las cuentas del contrato. En cada una puedes cargar una o más
-          fotos (flyer / QR): al enviar el contrato también se mandan por
-          WhatsApp junto al RNT.
+          Marca las cuentas del contrato. Cada <strong>titular</strong> tiene
+          su foto general (flyer con todas sus cuentas). La foto por cuenta es
+          opcional (QR).
         </p>
+
         <div className="mb-3 flex justify-end">
           <button
             type="button"
@@ -1454,10 +1591,12 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
               const selCount = accs.filter((a) =>
                 selectedBankIds.map(String).includes(String(a.id)),
               ).length;
+              const holderMedia = mediaForOwner(owner);
+              const uploadingThis = uploadingPaymentMediaFor === owner;
               return (
                 <div
                   key={owner}
-                  className="overflow-hidden rounded-xl border border-border"
+                  className="overflow-hidden rounded-xl border border-border/40"
                 >
                   <button
                     type="button"
@@ -1478,7 +1617,12 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                       <p className="truncate text-[13px] font-bold">{owner}</p>
                       <p className="text-[11px] text-muted-foreground">
                         {accs.length} cuenta{accs.length === 1 ? '' : 's'}
-                        {selCount > 0 ? ` · ${selCount} seleccionada${selCount === 1 ? '' : 's'}` : ''}
+                        {selCount > 0
+                          ? ` · ${selCount} seleccionada${selCount === 1 ? '' : 's'}`
+                          : ''}
+                        {holderMedia.length > 0
+                          ? ` · ${holderMedia.length} foto${holderMedia.length === 1 ? '' : 's'}`
+                          : ''}
                       </p>
                     </div>
                     <ChevronDown
@@ -1489,7 +1633,81 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                     />
                   </button>
                   {open ? (
-                    <div className="space-y-1.5 p-2">
+                    <div className="space-y-2 p-2">
+                      <div className="space-y-2 rounded-lg border border-border/40 bg-muted/15 p-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-bold">
+                              Foto general de {owner.split(' ')[0]}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Flyer con todas sus cuentas (se envía con el
+                              contrato).
+                            </p>
+                          </div>
+                          <label
+                            className={cn(
+                              'inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[11px] font-bold hover:bg-muted',
+                              uploadingThis && 'pointer-events-none opacity-60',
+                            )}
+                          >
+                            {uploadingThis ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ImagePlus className="h-3.5 w-3.5" />
+                            )}
+                            {uploadingThis ? 'Subiendo…' : 'Agregar'}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              className="hidden"
+                              disabled={Boolean(uploadingPaymentMediaFor)}
+                              onChange={(e) => {
+                                const files = Array.from(e.target.files ?? []);
+                                void handleAddHolderPaymentPhotos(owner, files);
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                        </div>
+                        {holderMedia.length === 0 ? (
+                          <p className="rounded-lg border border-dashed border-border/60 px-2 py-2.5 text-center text-[10px] text-amber-600 dark:text-amber-400">
+                            Sin foto de este titular — carga el flyer
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2">
+                            {holderMedia.map((m) => (
+                              <div
+                                key={m.id}
+                                className="relative overflow-hidden rounded-lg border border-border/40 bg-background"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={m.imageUrl}
+                                  alt={m.label}
+                                  className="aspect-video w-full object-cover"
+                                />
+                                <button
+                                  type="button"
+                                  title="Quitar foto"
+                                  disabled={removingPaymentMediaId === m.id}
+                                  onClick={() =>
+                                    void handleRemoveHolderPaymentPhoto(m.id)
+                                  }
+                                  className="absolute right-1.5 top-1.5 rounded-md bg-red-500/90 p-1.5 text-white hover:bg-red-600 disabled:opacity-50"
+                                >
+                                  {removingPaymentMediaId === m.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-3 w-3" />
+                                  )}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       {accs.map((acc) => {
                         const on = selectedBankIds
                           .map(String)
@@ -1506,7 +1724,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                               'flex items-center gap-1 rounded-lg border transition',
                               on
                                 ? 'border-primary/50 bg-primary/5'
-                                : 'border-border',
+                                : 'border-border/40',
                             )}
                           >
                             <button
@@ -1519,7 +1737,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                                   'grid h-5 w-5 shrink-0 place-items-center rounded-md border-2 transition',
                                   on
                                     ? 'border-primary bg-primary text-primary-foreground'
-                                    : 'border-border',
+                                    : 'border-border/60',
                                 )}
                               >
                                 {on ? <Check className="h-3 w-3" /> : null}
@@ -1536,31 +1754,30 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                                 <p className="truncate text-[11px] text-muted-foreground">
                                   {acc.accountNumber}
                                 </p>
-                                <p
-                                  className={cn(
-                                    'mt-0.5 text-[10px] font-semibold',
-                                    images.length > 0
-                                      ? 'text-emerald-600 dark:text-emerald-400'
-                                      : 'text-amber-600 dark:text-amber-400',
-                                  )}
-                                >
-                                  {images.length > 0
-                                    ? `${images.length} foto${images.length === 1 ? '' : 's'} de pago`
-                                    : 'Sin foto — edita y carga el flyer'}
-                                </p>
+                                {images.length > 0 ? (
+                                  <p className="mt-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                    {images.length} foto
+                                    {images.length === 1 ? '' : 's'} de esta
+                                    cuenta
+                                  </p>
+                                ) : (
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                    Sin foto de cuenta (opcional)
+                                  </p>
+                                )}
                               </div>
                               {images[0] ? (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img
                                   src={images[0]}
                                   alt=""
-                                  className="h-10 w-10 shrink-0 rounded-md border border-border object-cover"
+                                  className="h-10 w-10 shrink-0 rounded-md border border-border/40 object-cover"
                                 />
                               ) : null}
                             </button>
                             <button
                               type="button"
-                              title="Editar / cargar fotos"
+                              title="Editar / foto de esta cuenta"
                               aria-label={`Editar ${label}`}
                               disabled={savingBank}
                               onClick={() => {
@@ -1572,7 +1789,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                               {images.length > 0 ? (
                                 <Pencil className="h-3.5 w-3.5" />
                               ) : (
-                                <ImagePlus className="h-3.5 w-3.5 text-amber-600" />
+                                <ImagePlus className="h-3.5 w-3.5" />
                               )}
                             </button>
                             <button
@@ -1915,6 +2132,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           }}
           selectedBankIds={selectedBankPayload.bankAccountIds}
           selectedBankAccounts={selectedBankPayload.bankAccounts}
+          generalPaymentImageUrls={generalPaymentImageUrls}
           firmanteFields={firmanteContractFields}
           conversation={conversation}
           propertyTitle={

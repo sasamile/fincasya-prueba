@@ -18,11 +18,13 @@ export interface BankAccount {
   brebKey?: boolean;
 }
 
-/** Flyers globales de medios de pago (ej. imagen con varias cuentas o QR Bre-B). */
+/** Flyer de medios de pago. Si tiene `ownerName`, es del titular (todas sus cuentas). */
 export interface PaymentMedia {
   id: string;
   label: string;
   imageUrl: string;
+  /** Titular al que pertenece el flyer (ej. "Hernán Aguilera Gómez"). */
+  ownerName?: string;
 }
 
 export interface ContractClause {
