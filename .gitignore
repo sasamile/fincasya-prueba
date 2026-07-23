@@ -42,3 +42,7 @@ next-env.d.ts
 
 # Assets de runtime de pdfjs (generados por apps/web/scripts/copy-pdf-worker.mjs)
 apps/web/public/pdfjs/
+
+# Turborepo (caché local; no subir — puede pesar varios GB)
+.turbo/
+**/.turbo/

@@ -67,70 +67,22 @@ body:has(.inbox) {
   color-scheme: dark;
 }
 
-/* ── Redes sociales CRM · pantalla completa (sigue el tema del admin) ─ */
+/* ── Redes sociales CRM · hereda tokens de `.admin` (claro/oscuro/acento) ─
+ * No forzar paleta propia: vive dentro de `.admin` en el layout.
+ * Solo define burbujas Meta y panel header.
+ */
 .social-crm {
-  --background: #f7f7f8;
-  --foreground: #1c1917;
-  --card: #ffffff;
-  --card-foreground: #1c1917;
-  --panel-header: #ffffff;
-  --popover: #ffffff;
-  --popover-foreground: #1c1917;
-  --muted: #f1f1f3;
-  --muted-foreground: #71717a;
-  --border: #e8e8ec;
-  --input: #f1f1f3;
-  --primary: #fe4a19;
-  --primary-foreground: #ffffff;
-  --secondary: #f1f1f3;
-  --secondary-foreground: #1c1917;
-  --accent: #fff0eb;
-  --accent-foreground: #1c1917;
-  --destructive: #e5484d;
-  --ring: #fe4a19;
+  --panel-header: var(--card);
   --bubble-in: #f4f4f5;
   --bubble-out: #0084ff;
-  color-scheme: light;
   background: var(--background);
   color: var(--foreground);
   min-height: 100dvh;
 }
 
 html.dark .social-crm {
-  color-scheme: dark;
-  --background: #161717;
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --panel-header: #161717;
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --muted: #202c33;
-  --muted-foreground: oklch(0.708 0 0);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --primary: #fe4a19;
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --ring: oklch(0.439 0 0);
   --bubble-in: #1d1f1f;
   --bubble-out: #0084ff;
-}
-
-html:has(.social-crm),
-body:has(.social-crm) {
-  background-color: #f7f7f8;
-  color-scheme: light;
-}
-
-html.dark:has(.social-crm),
-html.dark body:has(.social-crm) {
-  background-color: #161717;
-  color-scheme: dark;
 }
 
 @theme inline {
@@ -561,6 +513,9 @@ body:has(.landing) {
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.94 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --panel-header: oklch(1 0 0);
+  --bubble-in: #f4f4f5;
+  --bubble-out: #0084ff;
   background: var(--background);
   color: var(--foreground);
   min-height: 100dvh;
@@ -594,21 +549,98 @@ html.dark .admin {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+  --panel-header: #161717;
+  --bubble-in: #1d1f1f;
+  --bubble-out: #0084ff;
 }
 
-html:has(.admin),
+/*
+ * Tokens de admin también en <html> cuando hay `.admin` en el árbol.
+ * Los portales Radix (Dialog, Dropdown, Popover, Sheet) montan en <body>
+ * y no heredan variables de `.admin`; sin esto el modal queda claro/verde
+ * aunque el panel esté en dark.
+ */
+html:has(.admin) {
+  color-scheme: light;
+  background-color: #ffffff;
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: #fe4a19;
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.94 0 0);
+  --input: oklch(1 0 0);
+  --ring: oklch(0.708 0 0);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.94 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+  --panel-header: oklch(1 0 0);
+  --bubble-in: #f4f4f5;
+  --bubble-out: #0084ff;
+}
+
+html.dark:has(.admin) {
+  color-scheme: dark;
+  background-color: #161717;
+  --background: #161717;
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: #fe4a19;
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: #202c33;
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+  --sidebar: #161717;
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #fe4a19;
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
+  --panel-header: #161717;
+  --bubble-in: #1d1f1f;
+  --bubble-out: #0084ff;
+}
+
 body:has(.admin) {
   background-color: #ffffff;
   color-scheme: light;
 }
 
-html.dark:has(.admin),
 html.dark body:has(.admin) {
   background-color: #161717;
   color-scheme: dark;
 }
 
-/* Multi-acento (claro + oscuro) */
+/* Multi-acento (claro + oscuro) — html + .admin (portales heredan de html) */
+html[data-accent="orange"]:has(.admin),
 html[data-accent="orange"] .admin {
   --primary: #fe4a19;
   --primary-foreground: #ffffff;
@@ -618,6 +650,7 @@ html[data-accent="orange"] .admin {
   --sidebar-ring: #fe4a19;
 }
 
+html[data-accent="green"]:has(.admin),
 html[data-accent="green"] .admin {
   --primary: #21c063;
   --primary-foreground: #0a0f0d;
@@ -627,6 +660,7 @@ html[data-accent="green"] .admin {
   --sidebar-ring: #21c063;
 }
 
+html[data-accent="blue"]:has(.admin),
 html[data-accent="blue"] .admin {
   --primary: #2563eb;
   --primary-foreground: #ffffff;
@@ -636,6 +670,7 @@ html[data-accent="blue"] .admin {
   --sidebar-ring: #2563eb;
 }
 
+html[data-accent="violet"]:has(.admin),
 html[data-accent="violet"] .admin {
   --primary: #7c3aed;
   --primary-foreground: #ffffff;
@@ -645,6 +680,7 @@ html[data-accent="violet"] .admin {
   --sidebar-ring: #7c3aed;
 }
 
+html.dark[data-accent="green"]:has(.admin),
 html.dark[data-accent="green"] .admin {
   --primary-foreground: #0a0f0d;
   --sidebar-primary-foreground: #0a0f0d;

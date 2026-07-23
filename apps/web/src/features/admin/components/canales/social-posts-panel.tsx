@@ -148,7 +148,7 @@ function PostInsightsModal({
           </div>
 
           {!hasInsights && post.insights?.insightsError ? (
-            <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-900">
+            <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
               Métricas detalladas no disponibles. Se muestran los contadores básicos.
               Reconecta la página para pedir permisos de insights.
             </p>

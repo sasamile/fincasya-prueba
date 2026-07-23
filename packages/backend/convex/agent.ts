@@ -108,7 +108,7 @@ type AgentContext = {
   status: 'ai' | 'human' | 'resolved';
   /** 'whatsapp' o 'web' (widget del sitio). En web los envíos por YCloud se
    * omiten y las fichas se guardan como fichas web para el widget. */
-  channel: 'whatsapp' | 'web';
+  channel: 'whatsapp' | 'web' | 'messenger' | 'instagram';
   contactPhone: string;
   contactName: string;
   history: Array<{ sender: 'user' | 'assistant'; content: string }>;
@@ -1759,6 +1759,21 @@ const TOOL_DEFS: ToolDef[] = [
 // Persistencia de la respuesta
 // ---------------------------------------------------------------------------
 
+/**
+ * Canales SIN catálogo de Meta: la ficha se guarda como tarjeta web (imagen +
+ * precio + link). El widget la pinta; en Messenger/Instagram sale como link.
+ */
+function esCanalDeFichaWeb(
+  channel: 'whatsapp' | 'web' | 'messenger' | 'instagram',
+): boolean {
+  return channel !== 'whatsapp';
+}
+
+/** ¿La conversación es un DM de Meta (Messenger o Instagram Direct)? */
+function esCanalMeta(channel: string): boolean {
+  return channel === 'messenger' || channel === 'instagram';
+}
+
 export const saveAssistantMessage = internalMutation({
   args: {
     conversationId: v.id('conversations'),
@@ -1777,6 +1792,17 @@ export const saveAssistantMessage = internalMutation({
       createdAt: now,
     });
     await ctx.db.patch(conversationId, { lastMessageAt: now });
+
+    // ENTREGA POR META: en Messenger/Instagram el texto no sale por YCloud.
+    // Este es el ÚNICO punto por donde pasan TODOS los mensajes del bot, así
+    // que enrutando aquí no queda ninguno sin entregar.
+    const conv = await ctx.db.get(conversationId);
+    if (conv && esCanalMeta(conv.channel) && conv.metaThreadId && content.trim()) {
+      await ctx.scheduler.runAfter(0, internal.metaBot.deliverBotMessage, {
+        threadId: conv.metaThreadId,
+        text: content,
+      });
+    }
   },
 });
 
@@ -2668,7 +2694,7 @@ export const runAgentTurn = internalAction({
                 // WEB: no hay catálogo Meta; la ficha se guarda con imagen y
                 // precio para que el widget la pinte como tarjeta. WhatsApp:
                 // se envía el producto Meta como siempre.
-                if (context.channel === 'web') {
+                if (esCanalDeFichaWeb(context.channel)) {
                   okCount++;
                   const card = {
                     propertyId: item.propertyId as Id<'properties'>,
@@ -2998,7 +3024,7 @@ export const runAgentTurn = internalAction({
                     { nombres: fincasArg },
                   );
                   for (const item of resolved.items) {
-                    if (context.channel === 'web') {
+                    if (esCanalDeFichaWeb(context.channel)) {
                       await ctx.runMutation(internal.agent.recordCatalogSend, {
                         conversationId,
                         sent: [

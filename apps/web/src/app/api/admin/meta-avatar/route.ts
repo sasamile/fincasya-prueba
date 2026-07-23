@@ -42,17 +42,26 @@ export async function GET(req: NextRequest) {
     });
 
     if (!url) {
+      // Meta no da foto (falta permiso o el usuario no la comparte). El
+      // placeholder es una respuesta válida: 200 + caché, para no repetir en
+      // cada carga una consulta a Graph que tarda segundos.
       return new NextResponse(PLACEHOLDER_SVG, {
-        status: 404,
-        headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' },
+        status: 200,
+        headers: {
+          'Content-Type': 'image/svg+xml',
+          'Cache-Control': 'private, max-age=900',
+        },
       });
     }
 
     const imgRes = await fetch(url);
     if (!imgRes.ok || !imgRes.body) {
       return new NextResponse(PLACEHOLDER_SVG, {
-        status: 404,
-        headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' },
+        status: 200,
+        headers: {
+          'Content-Type': 'image/svg+xml',
+          'Cache-Control': 'private, max-age=900',
+        },
       });
     }
 

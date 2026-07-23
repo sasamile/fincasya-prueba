@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '@fincasya/backend/convex/_generated/api';
 import {
+  Bot,
   Facebook,
   Instagram,
   Loader2,
@@ -13,6 +14,8 @@ import {
   Unplug,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -148,6 +151,30 @@ export default function SocialCrmApp() {
     }
   }
 
+  // Switch del bot de Meta (independiente del de WhatsApp).
+  const agentSettings = useQuery(api.agentSettings.getAgentSettings, {}) as
+    | { globalAiEnabled: boolean; metaBotEnabled: boolean }
+    | undefined;
+  const setMetaBot = useMutation(api.agentSettings.setMetaBotEnabled);
+  const [togglingBot, setTogglingBot] = useState(false);
+  const metaBotEnabled = agentSettings?.metaBotEnabled ?? false;
+
+  async function toggleMetaBot(on: boolean) {
+    setTogglingBot(true);
+    try {
+      await setMetaBot({ enabled: on });
+      toast.success(
+        on
+          ? 'Bot encendido en Messenger e Instagram.'
+          : 'Bot apagado: los DMs los responde un Experto.',
+      );
+    } catch {
+      toast.error('No se pudo cambiar el bot.');
+    } finally {
+      setTogglingBot(false);
+    }
+  }
+
   const isLoading = connections === undefined;
 
   return (
@@ -174,6 +201,33 @@ export default function SocialCrmApp() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {/* Bot de Meta: switch APARTE del de WhatsApp (Adriana, 22-jul).
+                Arranca apagado; con él encendido el mismo agente del inbox
+                responde los DMs con fichas web. */}
+            {view === 'inbox' ? (
+              <label
+                className="border-border/80 flex items-center gap-2 rounded-lg border px-2.5 py-1.5"
+                title={
+                  metaBotEnabled
+                    ? 'Bot ON en Messenger/Instagram: responde los DMs automáticamente.'
+                    : 'Bot OFF: los DMs los responde un Experto a mano.'
+                }
+              >
+                <Bot
+                  className={cn(
+                    'h-3.5 w-3.5',
+                    metaBotEnabled ? 'text-primary' : 'text-muted-foreground',
+                  )}
+                />
+                <span className="text-[11px] font-semibold">Bot</span>
+                <Switch
+                  checked={metaBotEnabled}
+                  onCheckedChange={(on) => void toggleMetaBot(on)}
+                  disabled={togglingBot}
+                  className="data-[state=checked]:bg-emerald-600"
+                />
+              </label>
+            ) : null}
             {connections && connections.length > 0 && activeConnection ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -263,7 +317,7 @@ export default function SocialCrmApp() {
         <div className="bg-border/70 h-px w-full shrink-0" />
 
         {activeConnection?.lastError ? (
-          <div className="border-amber-500/30 bg-amber-500/10 text-amber-200 shrink-0 border-b px-4 py-2 text-xs">
+          <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-900 dark:text-amber-200">
             {activeConnection.lastError}
           </div>
         ) : null}

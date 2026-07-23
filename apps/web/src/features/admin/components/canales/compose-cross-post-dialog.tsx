@@ -283,7 +283,7 @@ export function ComposeCrossPostDialog({
           )}
 
           {publishInstagram && !hasMedia ? (
-            <p className="text-muted-foreground rounded-lg bg-amber-500/10 px-3 py-2 text-xs dark:text-amber-200">
+            <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
               Instagram requiere foto o video. Facebook puede publicar solo texto.
             </p>
           ) : null}

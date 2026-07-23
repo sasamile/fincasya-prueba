@@ -788,37 +788,39 @@ export default function AdminLayout({
   const showInboxHumanAlerts = canAccessAdminPanel(user?.role);
   if (isFullScreenRoute) {
     return (
-      <SidebarProvider
-        defaultOpen={false}
-        open={conversationsSidebarOpen}
-        onOpenChange={setConversationsSidebarOpen}
-      >
-        <AdminSidebar showRail={false} />
-        <SidebarInset
-          className={cn(
-            "relative h-dvh max-h-dvh min-h-0 min-w-0 overflow-hidden",
-            isSocialCrmRoute ? "social-crm" : "inbox",
-          )}
+      <div className={cn(isSocialCrmRoute && "admin")}>
+        <SidebarProvider
+          defaultOpen={false}
+          open={conversationsSidebarOpen}
+          onOpenChange={setConversationsSidebarOpen}
         >
-          {isChecking ? (
-            <div className="z-50 flex min-h-screen flex-1 items-center justify-center bg-background">
-              <div className="flex flex-col items-center gap-4">
-                <div className="h-12 w-12 animate-spin rounded-full border-4 border-border border-t-foreground" />
-                <p className="animate-pulse text-xs font-bold tracking-widest text-muted-foreground uppercase">
-                  Verificando acceso...
-                </p>
+          <AdminSidebar showRail={false} />
+          <SidebarInset
+            className={cn(
+              "relative h-dvh max-h-dvh min-h-0 min-w-0 overflow-hidden",
+              isSocialCrmRoute ? "social-crm" : "inbox",
+            )}
+          >
+            {isChecking ? (
+              <div className="z-50 flex min-h-screen flex-1 items-center justify-center bg-background">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="h-12 w-12 animate-spin rounded-full border-4 border-border border-t-foreground" />
+                  <p className="animate-pulse text-xs font-bold tracking-widest text-muted-foreground uppercase">
+                    Verificando acceso...
+                  </p>
+                </div>
               </div>
-            </div>
-          ) : (
-            <>
-              <ContractSettingsRemoteSync />
-              <div className="relative z-0 flex h-dvh max-h-dvh min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                {children}
-              </div>
-            </>
-          )}
-        </SidebarInset>
-      </SidebarProvider>
+            ) : (
+              <>
+                <ContractSettingsRemoteSync />
+                <div className="relative z-0 flex h-dvh max-h-dvh min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                  {children}
+                </div>
+              </>
+            )}
+          </SidebarInset>
+        </SidebarProvider>
+      </div>
     );
   }
 

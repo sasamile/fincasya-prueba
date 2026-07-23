@@ -15,7 +15,10 @@ export const getAgentSettings = query({
       .query('agentSettings')
       .withIndex('by_key', (q) => q.eq('key', SETTINGS_KEY))
       .first();
-    return { globalAiEnabled: row?.globalAiEnabled ?? false };
+    return {
+      globalAiEnabled: row?.globalAiEnabled ?? false,
+      metaBotEnabled: row?.metaBotEnabled ?? false,
+    };
   },
 });
 
@@ -53,6 +56,40 @@ export const setGlobalAiEnabled = mutation({
     }
 
     return { globalAiEnabled: enabled, deactivatedCount };
+  },
+});
+
+/** Bot de Messenger/Instagram: switch aparte del de WhatsApp. */
+export const setMetaBotEnabled = mutation({
+  args: { enabled: v.boolean() },
+  handler: async (ctx, { enabled }) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query('agentSettings')
+      .withIndex('by_key', (q) => q.eq('key', SETTINGS_KEY))
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, { metaBotEnabled: enabled, updatedAt: now });
+    } else {
+      await ctx.db.insert('agentSettings', {
+        key: SETTINGS_KEY,
+        globalAiEnabled: false,
+        metaBotEnabled: enabled,
+        updatedAt: now,
+      });
+    }
+    return { metaBotEnabled: enabled };
+  },
+});
+
+export const getMetaBotEnabledInternal = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<boolean> => {
+    const row = await ctx.db
+      .query('agentSettings')
+      .withIndex('by_key', (q) => q.eq('key', SETTINGS_KEY))
+      .first();
+    return row?.metaBotEnabled ?? false;
   },
 });
 

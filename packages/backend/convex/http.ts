@@ -834,16 +834,29 @@ http.route({
               ? '[Adjunto]'
               : undefined;
 
-        await ctx.runMutation(internal.metaChannels.ingestDmMessage, {
-          pageId: resolvedPageId,
-          platform,
-          participantId,
-          metaMessageId: message.mid,
-          direction,
-          text,
-          fromId: senderId,
-          createdAt: normalizeWebhookTimestamp(messaging.timestamp),
-        });
+        const ingested = await ctx.runMutation(
+          internal.metaChannels.ingestDmMessage,
+          {
+            pageId: resolvedPageId,
+            platform,
+            participantId,
+            metaMessageId: message.mid,
+            direction,
+            text,
+            fromId: senderId,
+            createdAt: normalizeWebhookTimestamp(messaging.timestamp),
+          },
+        );
+
+        // BOT DE META: solo mensajes ENTRANTES y solo si el switch está
+        // encendido (arranca apagado). Si no, el asesor responde a mano.
+        if (direction === 'inbound' && text?.trim() && ingested?.threadId) {
+          await ctx.runMutation(internal.metaBot.handleInboundDm, {
+            threadId: String(ingested.threadId),
+            platform,
+            text,
+          });
+        }
       }
     }
 

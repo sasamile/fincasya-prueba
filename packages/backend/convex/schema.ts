@@ -105,7 +105,15 @@ export default defineSchema(
 
     conversations: defineTable({
       contactId: v.id('contacts'),
-      channel: v.union(v.literal('whatsapp'), v.literal('web')),
+      channel: v.union(
+        v.literal('whatsapp'),
+        v.literal('web'),
+        /** DM de Messenger / Instagram: mismo agente, fichas web. */
+        v.literal('messenger'),
+        v.literal('instagram'),
+      ),
+      /** Hilo de Meta que originó la conversación (para responder por su API). */
+      metaThreadId: v.optional(v.string()),
       /** ai = responde la IA; human = solo humano; resolved = cerrada */
       status: v.union(v.literal('ai'), v.literal('human'), v.literal('resolved')),
       /**
@@ -1744,6 +1752,12 @@ export default defineSchema(
     agentSettings: defineTable({
       key: v.string(),
       globalAiEnabled: v.boolean(),
+      /**
+       * Bot en Messenger / Instagram Direct. APARTE del de WhatsApp a
+       * propósito (Adriana, 22-jul): se puede tener el bot andando en WhatsApp
+       * y apagado en Meta. Arranca APAGADO.
+       */
+      metaBotEnabled: v.optional(v.boolean()),
       updatedAt: v.number(),
     }).index('by_key', ['key']),
 
