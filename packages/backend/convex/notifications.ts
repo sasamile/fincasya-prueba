@@ -27,14 +27,22 @@ import {
   formatDateTime,
 } from './lib/emailTemplates';
 import { isHiddenAccessLogEmail } from './lib/roles';
+import { siteUrl } from './lib/publicSiteUrl';
+import { resolveSaleLinkReference } from './lib/saleLinkReference';
 
-function siteUrl(): string {
-  return (
-    process.env.SITE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    'https://fincasya.com'
-  ).replace(/\/$/, '');
+/** Asunto de correos de pago: finca + CR cuando existan. */
+function paymentEmailSubject(
+  prefix: string,
+  opts: { propertyName?: string | null; cr?: string | null; clientName?: string | null },
+): string {
+  const parts = [prefix];
+  const finca = opts.propertyName?.trim();
+  const cr = opts.cr?.trim();
+  if (finca) parts.push(finca);
+  if (cr) parts.push(cr);
+  const client = opts.clientName?.trim();
+  if (client) parts.push(client);
+  return parts.join(' · ');
 }
 
 function formatHoraIngreso(hora?: string | null, ms?: number): string {
@@ -81,6 +89,7 @@ export const _saleLinkEmailData = internalQuery({
       clientName: link.clientData?.nombre,
       clientEmail: link.clientData?.email,
       propertyName,
+      cr: resolveSaleLinkReference(link),
       totalValue: link.totalValue,
       proofAmount: link.paymentProofAmount,
       checkIn: link.checkIn,
@@ -138,6 +147,7 @@ export const notifyAdminSaleLinkPayment = internalAction({
       bodyHtml: rows([
         ['Cliente', data.clientName],
         ['Finca', data.propertyName],
+        ['CR', data.cr],
         ['Monto reportado', formatCOP(data.proofAmount)],
         ['Valor total', formatCOP(data.totalValue)],
         ['Check-in', formatDate(data.checkIn)],
@@ -151,7 +161,11 @@ export const notifyAdminSaleLinkPayment = internalAction({
 
     await sendEmail({
       to: admins.map((email: string) => ({ email })),
-      subject: `Soporte de pago — ${data.clientName ?? 'Cliente'}`,
+      subject: paymentEmailSubject('Soporte de pago', {
+        propertyName: data.propertyName,
+        cr: data.cr,
+        clientName: data.clientName,
+      }),
       html,
     });
   },
@@ -172,6 +186,7 @@ export const emailClientPaymentValidated = internalAction({
       intro: `Hola ${data.clientName ?? ''}, confirmamos tu pago. Ya puedes continuar con tu reserva.`,
       bodyHtml: rows([
         ['Finca', data.propertyName],
+        ['CR', data.cr],
         ['Check-in', formatDate(data.checkIn)],
         ['Check-out', formatDate(data.checkOut)],
         ['Huéspedes', data.guests ? String(data.guests) : undefined],
@@ -182,7 +197,10 @@ export const emailClientPaymentValidated = internalAction({
 
     await sendEmail({
       to: [{ email: data.clientEmail, name: data.clientName }],
-      subject: '✅ Tu pago fue validado — FincasYa',
+      subject: paymentEmailSubject('✅ Pago validado', {
+        propertyName: data.propertyName,
+        cr: data.cr,
+      }),
       html,
     });
   },

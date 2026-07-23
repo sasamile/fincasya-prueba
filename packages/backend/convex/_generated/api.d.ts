@@ -94,6 +94,7 @@ import type * as lib_parseUserAgent from "../lib/parseUserAgent.js";
 import type * as lib_permissionModules from "../lib/permissionModules.js";
 import type * as lib_prompts from "../lib/prompts.js";
 import type * as lib_propertyImages from "../lib/propertyImages.js";
+import type * as lib_publicSiteUrl from "../lib/publicSiteUrl.js";
 import type * as lib_receiptAi from "../lib/receiptAi.js";
 import type * as lib_roles from "../lib/roles.js";
 import type * as lib_saleLinkReference from "../lib/saleLinkReference.js";
@@ -235,6 +236,7 @@ declare const fullApi: ApiFromModules<{
   "lib/permissionModules": typeof lib_permissionModules;
   "lib/prompts": typeof lib_prompts;
   "lib/propertyImages": typeof lib_propertyImages;
+  "lib/publicSiteUrl": typeof lib_publicSiteUrl;
   "lib/receiptAi": typeof lib_receiptAi;
   "lib/roles": typeof lib_roles;
   "lib/saleLinkReference": typeof lib_saleLinkReference;

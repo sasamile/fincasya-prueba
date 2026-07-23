@@ -10,6 +10,7 @@ import type { Id } from './_generated/dataModel';
 import { createBoldPaymentLink } from './lib/bold';
 import { sendEmail } from './lib/email';
 import { verifyCedulaPhoto } from './lib/cedulaAi';
+import { getPublicSiteOrigin } from './lib/publicSiteUrl';
 
 function ymdFromMs(ms: number): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -211,10 +212,13 @@ export const createWithBold = action({
       contractCode,
     });
 
+    const rawOrigin = args.portalOrigin?.trim() || '';
     const origin =
-      args.portalOrigin?.trim() ||
-      process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-      'https://fincasya.com';
+      rawOrigin &&
+      !/\.vercel\.app/i.test(rawOrigin) &&
+      !/localhost|127\.0\.0\.1/i.test(rawOrigin)
+        ? rawOrigin
+        : getPublicSiteOrigin();
     const callbackUrl = `${origin.replace(/\/$/, '')}/fincas/book/success?ref=${encodeURIComponent(reference)}`;
 
     let boldPaymentUrl: string | undefined;

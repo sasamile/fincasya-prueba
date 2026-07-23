@@ -17,6 +17,7 @@ import { checkinGuestValidator } from './lib/checkinGuest';
 import { verifyCedulaPhoto, decideCedulaVerdict } from './lib/cedulaAi';
 import { verifyPaymentReceiptPhoto } from './lib/receiptAi';
 import { verifySignedContractPhoto } from './lib/signedContractAi';
+import { getPublicSiteOrigin } from './lib/publicSiteUrl';
 
 function bogotaYmd(ms: number): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -105,20 +106,19 @@ function resolveBoldCallbackUrl(
   const fromClient = String(portalOrigin ?? '')
     .trim()
     .replace(/\/$/, '');
-  const fallback = (
-    process.env.SITE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    ''
-  ).replace(/\/$/, '');
+  // Preferir origen del cliente solo si no es un preview de Vercel.
+  let base = '';
+  if (fromClient && !/\.vercel\.app/i.test(fromClient) && !/localhost|127\.0\.0\.1/i.test(fromClient)) {
+    base = fromClient;
+  } else {
+    base = getPublicSiteOrigin();
+  }
 
-  const base = fromClient || fallback;
   if (!base) return undefined;
 
   try {
     const url = new URL(base);
-    // Solo https (requisito Bold). No usar un SITE_URL distinto al origen
-    // del cliente si el cliente ya mandó uno válido.
+    // Solo https (requisito Bold).
     if (url.protocol !== 'https:') return undefined;
     return `${url.origin}/venta/${encodeURIComponent(token)}?bold=return`;
   } catch {

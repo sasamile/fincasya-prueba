@@ -38,15 +38,12 @@ import {
   mergeSchedules,
 } from "./lib/automationSchedules";
 
+import { siteUrl as getPublicSiteOrigin } from './lib/publicSiteUrl';
+
 const YCLOUD_TEMPLATES_BASE = "https://api.ycloud.com/v2/whatsapp/templates";
 
 function siteBase(): string {
-  return (
-    process.env.SITE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    "https://fincasya.com"
-  ).replace(/\/$/, "");
+  return getPublicSiteOrigin();
 }
 
 function checkinPortalBase(): string {

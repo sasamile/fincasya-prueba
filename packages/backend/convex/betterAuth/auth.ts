@@ -41,7 +41,15 @@ export function buildTrustedOrigins(): string[] {
 export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
   const database = authComponent.adapter(ctx);
 
-  const siteUrl = process.env.SITE_URL || 'http://localhost:3789';
+  // Preferir dominio público real; no usar *.vercel.app como siteUrl de
+  // crossDomain (rompe cookies/sesión y links al abrir desde el correo).
+  const rawSite = process.env.SITE_URL?.trim().replace(/\/$/, '') || '';
+  const siteUrl =
+    rawSite && !/\.vercel\.app/i.test(rawSite)
+      ? rawSite
+      : process.env.NODE_ENV === 'development'
+        ? 'http://localhost:3789'
+        : 'https://www.fincasya.com';
   const convexSiteUrl =
     process.env.CONVEX_SITE_URL ?? 'https://modest-husky-871.convex.site';
 

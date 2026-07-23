@@ -299,14 +299,27 @@ export function ChatAssistantWidget() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={open ? 'Cerrar asistente' : 'Abrir asistente FincasYa'}
+        aria-label={open ? 'Cerrar asistente' : 'Soy Naya, asistente IA de FincasYa'}
         aria-expanded={open}
-        className="flex h-11 w-11 items-center justify-center rounded-full bg-[#1a5c2e] shadow-lg transition-transform hover:scale-105"
+        className="group relative flex h-11 w-11 items-center justify-center rounded-full bg-[#1a5c2e] shadow-lg transition-transform hover:scale-105 active:scale-95"
       >
+        {!open ? (
+          <span
+            className="pointer-events-none absolute right-[calc(100%+10px)] top-1/2 z-10 -translate-y-1/2 whitespace-nowrap rounded-full bg-[#1a5c2e] px-3 py-1.5 text-xs font-semibold text-white opacity-0 shadow-md transition-all duration-200 group-hover:opacity-100 group-hover:-translate-x-0.5 group-focus-visible:opacity-100"
+            aria-hidden
+          >
+            Soy Naya · IA
+            <span className="absolute top-1/2 -right-1 h-2 w-2 -translate-y-1/2 rotate-45 bg-[#1a5c2e]" />
+          </span>
+        ) : null}
         {open ? (
-          <X className="h-5 w-5 text-white" />
+          <X className="h-5 w-5 text-white transition-transform duration-300 group-hover:rotate-90" />
         ) : (
-          <img src="/favicon2.png" alt="" className="h-6 w-6 object-contain" />
+          <img
+            src="/favicon2.png"
+            alt=""
+            className="h-6 w-6 object-contain transition-transform duration-300 ease-out group-hover:-translate-y-0.5 group-hover:scale-110 group-hover:rotate-[-8deg]"
+          />
         )}
       </button>
     </div>
