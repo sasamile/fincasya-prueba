@@ -510,6 +510,12 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
   const [draft, setDraft] = useState<ContractDraft>(EMPTY_DRAFT);
   const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
   const [selectedFirmanteId, setSelectedFirmanteId] = useState<string>('');
+  /**
+   * Link para que el cliente cargue el soporte de pago y siga solo con su
+   * reserva (Santiago, 23-jul). APAGADO por defecto: el flujo es nuevo y el
+   * asesor decide en cuáles casos mandarlo.
+   */
+  const [enviarLinkSoporte, setEnviarLinkSoporte] = useState(false);
   const selectedBankPayload = useMemo(
     () => resolveSelectedBankPayload(bankAccounts, selectedBankIds),
     [bankAccounts, selectedBankIds],
@@ -1838,6 +1844,10 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
                 } satisfies StoreBankAccount)
               : null
           }
+          knownHolders={bankAccounts.map((a) => ({
+            name: a.ownerName ?? '',
+            cedula: a.ownerCedula || undefined,
+          }))}
           onSave={(data) => {
             if (editingBank) {
               void handleUpdateBank(editingBank.id, data);
@@ -2099,7 +2109,26 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         </p>
       </Section>
 
-      <div className="sticky bottom-0 -mx-4 mt-auto flex items-center gap-2 border-t border-border bg-background/90 px-4 py-3 backdrop-blur">
+      <div className="sticky bottom-0 -mx-4 mt-auto border-t border-border bg-background/90 px-4 py-3 backdrop-blur">
+        {/* Link de soporte de pago: apagado por defecto (Santiago, 23-jul). */}
+        <label className="mb-2.5 flex cursor-pointer items-start gap-2.5 rounded-xl border border-border bg-card/60 px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={enviarLinkSoporte}
+            onChange={(e) => setEnviarLinkSoporte(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+          />
+          <span className="min-w-0">
+            <span className="block text-xs font-bold leading-tight">
+              Enviar link para cargar el soporte de pago
+            </span>
+            <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+              El cliente sube su comprobante y sigue solo. Al aprobarlo, se crea
+              la reserva y le llega la confirmación con el check-in.
+            </span>
+          </span>
+        </label>
+        <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={() => {
@@ -2122,6 +2151,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
         >
           <FileText className="h-4 w-4" /> Ver y enviar
         </button>
+        </div>
       </div>
 
       {showPreview ? (
@@ -2133,6 +2163,7 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
           selectedBankIds={selectedBankPayload.bankAccountIds}
           selectedBankAccounts={selectedBankPayload.bankAccounts}
           generalPaymentImageUrls={generalPaymentImageUrls}
+          enviarLinkSoporte={enviarLinkSoporte}
           firmanteFields={firmanteContractFields}
           conversation={conversation}
           propertyTitle={

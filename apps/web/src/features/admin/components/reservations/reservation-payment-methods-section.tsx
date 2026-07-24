@@ -1609,6 +1609,10 @@ export function ReservationPaymentMethodsSection({
         initial={editingBank}
         prefill={accountPrefill}
         lockHolderFields={Boolean(accountPrefill?.ownerName?.trim() && !editingBank)}
+        knownHolders={[...ownerHolders, ...empresaHolders].map((h) => ({
+          name: h.name,
+          cedula: h.cedula || undefined,
+        }))}
         onSave={handleSaveAccount}
       />
     </div>

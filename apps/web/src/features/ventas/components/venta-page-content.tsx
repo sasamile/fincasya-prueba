@@ -95,6 +95,8 @@ export type SaleLinkPublicData = {
   };
   clientPortalUiStep?: number;
   clientDraftPhase?: "datos" | "preview" | "pago";
+  /** Link nacido de un contrato ya enviado: sin paso de datos ni de contrato. */
+  soloSoportePago?: boolean;
   clientDraftPaymentAmount?: number;
   /** Veredicto de IA ya guardado en el link (evita revalidar en cada refresh). */
   cedulaCheck?: {
@@ -311,6 +313,21 @@ export function VentaPageContent({
   const activeStep = Math.min(viewStep ?? maxStep, 6);
   const isReviewingPastStep = viewStep !== null && viewStep < maxStep;
 
+  /**
+   * LINK SOLO DE SOPORTE DE PAGO (Santiago, 23-jul): el contrato ya se hizo y
+   * se envió por WhatsApp desde el panel, así que aquí NO se vuelve a generar
+   * → se esconde el paso "Contrato".
+   *
+   * El paso 2 SÍ se queda (es donde vive la carga del soporte), pero se llama
+   * "Pago": los datos ya vienen precargados y el cliente entra directo ahí.
+   * Los links de venta normales no llevan la marca y ven todos los pasos.
+   */
+  const pasosVisibles = data.soloSoportePago
+    ? STEPS.filter((s) => s.id !== 4).map((s) =>
+        s.id === 2 ? { ...s, label: 'Pago' } : s,
+      )
+    : STEPS;
+
   return (
     <div className="landing min-h-dvh bg-background">
       <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
@@ -331,7 +348,7 @@ export function VentaPageContent({
 
         <div className="mb-8">
           <VentaStepper
-            steps={STEPS}
+            steps={pasosVisibles}
             maxStep={maxStep}
             activeStep={activeStep}
             onStepClick={(stepId) => {

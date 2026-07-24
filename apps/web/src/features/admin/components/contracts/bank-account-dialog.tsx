@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +43,21 @@ export type BankAccountPrefill = {
   accountType?: string;
 };
 
+/** Titulares ya creados para sugerir al escribir el nombre. */
+export type KnownBankHolder = {
+  name: string;
+  cedula?: string;
+};
+
+function normalizeSearch(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/g, " ");
+}
+
 export interface BankAccountDialogProps {
   open: boolean;
   onClose: () => void;
@@ -50,6 +65,8 @@ export interface BankAccountDialogProps {
   prefill?: BankAccountPrefill | null;
   /** Bloquea titular/cédula al agregar cuenta a un titular existente. */
   lockHolderFields?: boolean;
+  /** Personas ya creadas (sugerencias al escribir en Titular). */
+  knownHolders?: KnownBankHolder[];
   onSave: (data: Omit<BankAccount, "id">) => void;
   /** Tema oscuro inbox, etc. */
   contentClassName?: string;
@@ -61,6 +78,7 @@ export function BankAccountDialog({
   initial,
   prefill,
   lockHolderFields = false,
+  knownHolders = [],
   onSave,
   contentClassName,
 }: BankAccountDialogProps) {
@@ -75,6 +93,8 @@ export function BankAccountDialog({
     brebKey: false,
   });
   const [uploading, setUploading] = useState(false);
+  const [holderSuggestOpen, setHolderSuggestOpen] = useState(false);
+  const holderBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (initial) {
@@ -106,7 +126,44 @@ export function BankAccountDialog({
         brebKey: false,
       });
     }
+    setHolderSuggestOpen(false);
   }, [initial, open, prefill]);
+
+  useEffect(() => {
+    return () => {
+      if (holderBlurTimer.current) clearTimeout(holderBlurTimer.current);
+    };
+  }, []);
+
+  const holderSuggestions = useMemo(() => {
+    if (lockHolderFields || initial) return [];
+    const q = normalizeSearch(form.ownerName);
+    if (q.length < 2) return [];
+
+    const seen = new Set<string>();
+    const matches: KnownBankHolder[] = [];
+    for (const holder of knownHolders) {
+      const name = holder.name.trim();
+      if (!name) continue;
+      const key = normalizeSearch(name);
+      if (seen.has(key)) continue;
+      if (!key.includes(q) && !q.includes(key)) continue;
+      if (key === q) continue;
+      seen.add(key);
+      matches.push({ name, cedula: holder.cedula?.trim() || undefined });
+      if (matches.length >= 8) break;
+    }
+    return matches;
+  }, [form.ownerName, knownHolders, lockHolderFields, initial]);
+
+  const pickHolder = (holder: KnownBankHolder) => {
+    setForm((prev) => ({
+      ...prev,
+      ownerName: holder.name,
+      ownerCedula: holder.cedula?.trim() || prev.ownerCedula,
+    }));
+    setHolderSuggestOpen(false);
+  };
 
   const labelClass =
     "text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1.5 block";
@@ -331,7 +388,7 @@ export function BankAccountDialog({
             </div>
           ) : null}
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
+            <div className="relative space-y-1">
               <Label className={labelClass}>Titular</Label>
               <Input
                 className={inputClass}
@@ -339,10 +396,52 @@ export function BankAccountDialog({
                 value={form.ownerName}
                 readOnly={lockHolderFields}
                 disabled={lockHolderFields}
-                onChange={(e) =>
-                  setForm({ ...form, ownerName: e.target.value })
-                }
+                autoComplete="off"
+                onFocus={() => {
+                  if (!lockHolderFields && !initial) setHolderSuggestOpen(true);
+                }}
+                onBlur={() => {
+                  holderBlurTimer.current = setTimeout(
+                    () => setHolderSuggestOpen(false),
+                    150,
+                  );
+                }}
+                onChange={(e) => {
+                  setForm({ ...form, ownerName: e.target.value });
+                  setHolderSuggestOpen(true);
+                }}
               />
+              {holderSuggestOpen && holderSuggestions.length > 0 ? (
+                <ul className="absolute z-50 mt-1 max-h-44 w-full overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-md">
+                  {holderSuggestions.map((holder) => (
+                    <li key={`${holder.name}-${holder.cedula ?? ""}`}>
+                      <button
+                        type="button"
+                        className="hover:bg-muted flex w-full flex-col gap-0.5 rounded-lg px-3 py-2 text-left"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => pickHolder(holder)}
+                      >
+                        <span className="text-sm font-medium text-foreground">
+                          {holder.name}
+                        </span>
+                        {holder.cedula ? (
+                          <span className="text-[11px] text-muted-foreground">
+                            C.C. {holder.cedula}
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {!lockHolderFields &&
+              !initial &&
+              knownHolders.length > 0 &&
+              form.ownerName.trim().length < 2 ? (
+                <p className="text-[10px] text-muted-foreground">
+                  Escribe al menos 2 letras para sugerir titulares existentes.
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1">
               <Label className={labelClass}>Cédula titular</Label>

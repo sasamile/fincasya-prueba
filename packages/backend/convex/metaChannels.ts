@@ -22,10 +22,23 @@ import {
   query,
 } from './_generated/server';
 import { api, internal } from './_generated/api';
-import type { Doc } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
+import {
+  buildPropertyCommentReply,
+  extractPropertySlugFromText,
+  publicPropertyUrl,
+  sanitizeFincasYaUrlsInText,
+} from './lib/metaCommentLinks';
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v21.0';
 const GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
+const COMMENT_WHATSAPP = 'https://wa.me/573157773937';
+
+const COMMENT_BOT_LINK_RULES = `Enlaces (obligatorio):
+- NUNCA inventes URLs de fincas ni inventes slugs.
+- El formato correcto de una ficha es solo: ${publicPropertyUrl('SLUG-REAL')} (con /fincas/…).
+- Si las instrucciones no traen una URL exacta de finca, NO pongas link a fincasya.com: invita a WhatsApp ${COMMENT_WHATSAPP}.
+- Está prohibido usar rutas como https://www.fincasya.com/finca-nombre-inventado (sin /fincas/).`;
 
 // Permisos mínimos de Pages para CRM: leer/gestionar comentarios y metadata.
 // pages_manage_posts e Instagram/Messaging se habilitan vía META_ENABLE_* una
@@ -481,6 +494,7 @@ export const recordWebhookEvent = internalMutation({
         commentId: args.commentId!,
         fromId: args.fromId,
         text: args.text,
+        postId: args.objectId,
       });
     }
 
@@ -1102,8 +1116,6 @@ export const replyToComment = action({
     ctx,
     args,
   ): Promise<{ ok: boolean; id?: string; error?: string }> => {
-    const text = args.message.trim();
-    if (!text) return { ok: false, error: 'Mensaje vacío' };
     const conn = await ctx.runQuery(
       internal.metaChannels.getConnectionByPageId,
       { pageId: args.pageId },
@@ -1112,6 +1124,10 @@ export const replyToComment = action({
       return { ok: false, error: 'Página no conectada' };
     }
     const token = conn.pageAccessToken;
+
+    const slugs = await ctx.runQuery(internal.metaChannels.listKnownPropertySlugs, {});
+    const text = sanitizeFincasYaUrlsInText(args.message.trim(), slugs).trim();
+    if (!text) return { ok: false, error: 'Mensaje vacío' };
 
     // IG: /{comment-id}/replies ; FB: /{comment-id}/comments
     const edge = args.provider === 'instagram' ? 'replies' : 'comments';
@@ -1489,12 +1505,13 @@ export const suggestCommentReply = action({
     fromName: v.optional(v.string()),
     postPreview: v.optional(v.string()),
   },
-  handler: async (_ctx, args): Promise<{ suggestions: string[]; error?: string }> => {
+  handler: async (ctx, args): Promise<{ suggestions: string[]; error?: string }> => {
     try {
       const { chatCompletion } = await import('./lib/openai');
       const system = `Te llamas Naya y eres la asesora virtual de FincasYa.com, respondiendo comentarios públicos en Facebook o Instagram.
 Genera exactamente 3 respuestas distintas, cortas (máximo 280 caracteres), cálidas, en español colombiano, tuteando al cliente.
-Una puede invitar a WhatsApp https://wa.me/573157773937; otra puede pedir fechas y número de personas si preguntan precio o capacidad.
+Una puede invitar a WhatsApp ${COMMENT_WHATSAPP}; otra puede pedir fechas y número de personas si preguntan precio o capacidad.
+${COMMENT_BOT_LINK_RULES}
 No uses markdown. Responde SOLO JSON válido: {"suggestions":["respuesta1","respuesta2","respuesta3"]}`;
 
       const user = `Comentario de ${args.fromName ?? 'un usuario'}: "${args.commentText.trim()}"
@@ -1511,15 +1528,70 @@ ${args.postPreview ? `Publicación relacionada: ${args.postPreview.slice(0, 200)
       const raw = (content ?? '').trim();
       const jsonText = raw.startsWith('{') ? raw : raw.slice(raw.indexOf('{'));
       const parsed = JSON.parse(jsonText) as { suggestions?: unknown };
-      const suggestions = Array.isArray(parsed.suggestions)
+      let suggestions = Array.isArray(parsed.suggestions)
         ? parsed.suggestions.filter((s): s is string => typeof s === 'string').slice(0, 3)
         : [];
+
+      const slugs = await ctx.runQuery(internal.metaChannels.listKnownPropertySlugs, {});
+      suggestions = suggestions.map((s) =>
+        sanitizeFincasYaUrlsInText(s, slugs),
+      );
 
       return { suggestions };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { suggestions: [], error: message };
     }
+  },
+});
+
+/** Slugs reales de fincas (para validar links en respuestas). */
+export const listKnownPropertySlugs = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const props = await ctx.db.query('properties').collect();
+    return props
+      .map((p) => p.slug?.trim().toLowerCase())
+      .filter((s): s is string => Boolean(s));
+  },
+});
+
+/** Busca fincas para insertar su link público en comentarios / plantillas. */
+export const searchPropertyLinks = query({
+  args: { q: v.string() },
+  handler: async (ctx, { q }) => {
+    const filtro = q
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+    if (filtro.length < 2) return [];
+
+    const norm = (s: string) =>
+      s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+
+    const props = await ctx.db.query('properties').collect();
+    return props
+      .filter((p) => {
+        if (!p.slug?.trim()) return false;
+        if (p.active === false) return false;
+        return (
+          norm(p.title).includes(filtro) ||
+          norm(p.code ?? '').includes(filtro) ||
+          norm(p.slug).includes(filtro) ||
+          norm(p.location ?? '').includes(filtro)
+        );
+      })
+      .sort((a, b) => a.title.localeCompare(b.title, 'es'))
+      .slice(0, 12)
+      .map((p) => ({
+        id: p._id,
+        title: p.title,
+        code: p.code?.trim() || null,
+        slug: p.slug!.trim(),
+        location: p.location ?? '',
+        url: publicPropertyUrl(p.slug!.trim()),
+      }));
   },
 });
 
@@ -1765,6 +1837,7 @@ export const maybeAutoReplyComment = internalAction({
     commentId: v.string(),
     fromId: v.string(),
     text: v.string(),
+    postId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const conn = await ctx.runQuery(internal.metaChannels.getConnectionByPageId, {
@@ -1779,15 +1852,33 @@ export const maybeAutoReplyComment = internalAction({
     });
     if (existing) return;
 
-    const mode = conn.autoReplyMode ?? 'template';
-    let message = '';
+    // Preferir respuesta corta con finca de la publicación + WhatsApp FincasYa.
+    const property = await ctx.runAction(
+      internal.metaChannels.resolvePostProperty,
+      {
+        pageId: args.pageId,
+        provider: args.provider,
+        postId: args.postId,
+        pageAccessToken: conn.pageAccessToken,
+      },
+    );
 
-    if (mode === 'bot') {
-      const instructions = conn.autoReplyInstructions?.trim();
-      if (!instructions) return;
-      try {
-        const { chatCompletion } = await import('./lib/openai');
-        const system = `Eres el bot de comentarios de FincasYa.com en Facebook/Instagram.
+    let message = '';
+    if (property?.url) {
+      message = buildPropertyCommentReply({
+        propertyUrl: property.url,
+        propertyTitle: property.title,
+      });
+    } else {
+      const mode = conn.autoReplyMode ?? 'template';
+      if (mode === 'bot') {
+        const instructions = conn.autoReplyInstructions?.trim();
+        if (!instructions) {
+          message = buildPropertyCommentReply({});
+        } else {
+          try {
+            const { chatCompletion } = await import('./lib/openai');
+            const system = `Eres el bot de comentarios de FincasYa.com en Facebook/Instagram.
 Sigue estas instrucciones del operador al pie de la letra para redactar UNA sola respuesta al comentario:
 
 ---
@@ -1798,34 +1889,44 @@ Reglas fijas:
 - Responde en español colombiano, tono cálido y profesional.
 - Máximo 280 caracteres.
 - No uses markdown ni JSON; solo el texto de la respuesta.
-- No inventes precios, disponibilidades ni promesas que no estén en las instrucciones.`;
+- No inventes precios, disponibilidades ni promesas que no estén en las instrucciones.
+${COMMENT_BOT_LINK_RULES}`;
 
-        const { content } = await chatCompletion({
-          messages: [
-            { role: 'system', content: system },
-            {
-              role: 'user',
-              content: `Comentario recibido: "${args.text.trim().slice(0, 500)}"`,
-            },
-          ],
-          temperature: 0.7,
-        });
-        message = (content ?? '').trim().replace(/^["']|["']$/g, '');
-      } catch {
-        return;
+            const { content } = await chatCompletion({
+              messages: [
+                { role: 'system', content: system },
+                {
+                  role: 'user',
+                  content: `Comentario recibido: "${args.text.trim().slice(0, 500)}"`,
+                },
+              ],
+              temperature: 0.7,
+            });
+            message = (content ?? '').trim().replace(/^["']|["']$/g, '');
+          } catch {
+            message = buildPropertyCommentReply({});
+          }
+        }
+      } else {
+        const tpls = conn.commentTemplates ?? [];
+        if (conn.autoReplyTemplateId) {
+          const tpl = tpls.find(
+            (t: { id: string; text: string; label: string }) =>
+              t.id === conn.autoReplyTemplateId,
+          );
+          message = tpl?.text?.trim() ?? '';
+        }
+        if (!message) {
+          message = buildPropertyCommentReply({});
+        }
       }
-    } else {
-      const tpls = conn.commentTemplates ?? [];
-      if (!conn.autoReplyTemplateId) return;
-      const tpl = tpls.find(
-        (t: { id: string; text: string; label: string }) =>
-          t.id === conn.autoReplyTemplateId,
-      );
-      if (!tpl?.text?.trim()) return;
-      message = tpl.text.trim();
     }
 
     if (!message) return;
+
+    const slugs = await ctx.runQuery(internal.metaChannels.listKnownPropertySlugs, {});
+    message = sanitizeFincasYaUrlsInText(message, slugs);
+    if (!message.trim()) return;
 
     await ctx.runAction(api.metaChannels.replyToComment, {
       pageId: args.pageId,
@@ -1834,6 +1935,239 @@ Reglas fijas:
       message,
       auto: true,
     });
+  },
+});
+
+/** Resuelve la finca de una publicación (vínculo manual → URL en caption → título). */
+export const resolvePostProperty = internalAction({
+  args: {
+    pageId: v.string(),
+    provider: v.union(v.literal('facebook'), v.literal('instagram')),
+    postId: v.optional(v.string()),
+    pageAccessToken: v.optional(v.string()),
+    captionHint: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    propertyId: Id<'properties'>;
+    title: string;
+    slug: string;
+    url: string;
+  } | null> => {
+    if (args.postId) {
+      const linked = await ctx.runQuery(internal.metaChannels.getPostPropertyLink, {
+        provider: args.provider,
+        postId: args.postId,
+      });
+      if (linked) return linked;
+    }
+
+    let caption = args.captionHint?.trim() ?? '';
+    if (!caption && args.postId && args.pageAccessToken) {
+      try {
+        const fields =
+          args.provider === 'instagram' ? 'caption' : 'message';
+        const res = await fetch(
+          `${GRAPH}/${args.postId}?` +
+            new URLSearchParams({
+              fields,
+              access_token: args.pageAccessToken,
+            }).toString(),
+        );
+        const data = await res.json();
+        caption = String(data?.caption ?? data?.message ?? '').trim();
+      } catch {
+        caption = '';
+      }
+    }
+
+    if (!caption) return null;
+
+    const fromSlug = await ctx.runQuery(
+      internal.metaChannels.findPropertyByCaption,
+      { caption },
+    );
+    return fromSlug;
+  },
+});
+
+export const getPostPropertyLink = internalQuery({
+  args: {
+    provider: v.union(v.literal('facebook'), v.literal('instagram')),
+    postId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query('metaPostProperties')
+      .withIndex('by_post', (q) =>
+        q.eq('provider', args.provider).eq('postId', args.postId),
+      )
+      .first();
+    if (!row) return null;
+    const prop = await ctx.db.get(row.propertyId);
+    if (!prop?.slug?.trim()) return null;
+    const slug = prop.slug.trim();
+    return {
+      propertyId: prop._id,
+      title: prop.title,
+      slug,
+      url: publicPropertyUrl(slug),
+    };
+  },
+});
+
+export const findPropertyByCaption = internalQuery({
+  args: { caption: v.string() },
+  handler: async (ctx, { caption }) => {
+    const slug = extractPropertySlugFromText(caption);
+    if (slug) {
+      const props = await ctx.db.query('properties').collect();
+      const hit = props.find(
+        (p) => p.slug?.trim().toLowerCase() === slug && p.active !== false,
+      );
+      if (hit?.slug) {
+        return {
+          propertyId: hit._id,
+          title: hit.title,
+          slug: hit.slug.trim(),
+          url: publicPropertyUrl(hit.slug.trim()),
+        };
+      }
+    }
+
+    const norm = (s: string) =>
+      s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+    const hay = norm(caption);
+    if (hay.length < 8) return null;
+
+    const props = await ctx.db.query('properties').collect();
+    const candidates = props
+      .filter((p) => p.slug?.trim() && p.active !== false && p.title.trim().length >= 6)
+      .map((p) => ({
+        p,
+        titleNorm: norm(p.title),
+      }))
+      .filter(({ titleNorm }) => hay.includes(titleNorm))
+      .sort((a, b) => b.titleNorm.length - a.titleNorm.length);
+
+    const best = candidates[0]?.p;
+    if (!best?.slug) return null;
+    return {
+      propertyId: best._id,
+      title: best.title,
+      slug: best.slug.trim(),
+      url: publicPropertyUrl(best.slug.trim()),
+    };
+  },
+});
+
+/** Vincula una finca a una publicación (panel de comentarios). */
+export const linkPostProperty = mutation({
+  args: {
+    pageId: v.string(),
+    provider: v.union(v.literal('facebook'), v.literal('instagram')),
+    postId: v.string(),
+    propertyId: v.id('properties'),
+  },
+  handler: async (ctx, args) => {
+    const prop = await ctx.db.get(args.propertyId);
+    if (!prop?.slug?.trim()) throw new Error('La finca no tiene slug público');
+
+    const existing = await ctx.db
+      .query('metaPostProperties')
+      .withIndex('by_post', (q) =>
+        q.eq('provider', args.provider).eq('postId', args.postId),
+      )
+      .first();
+
+    const now = Date.now();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        propertyId: args.propertyId,
+        pageId: args.pageId,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert('metaPostProperties', {
+        pageId: args.pageId,
+        provider: args.provider,
+        postId: args.postId,
+        propertyId: args.propertyId,
+        updatedAt: now,
+      });
+    }
+
+    return {
+      propertyId: prop._id,
+      title: prop.title,
+      slug: prop.slug.trim(),
+      url: publicPropertyUrl(prop.slug.trim()),
+    };
+  },
+});
+
+export const getLinkedPostProperty = query({
+  args: {
+    provider: v.union(v.literal('facebook'), v.literal('instagram')),
+    postId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query('metaPostProperties')
+      .withIndex('by_post', (q) =>
+        q.eq('provider', args.provider).eq('postId', args.postId),
+      )
+      .first();
+    if (!row) return null;
+    const prop = await ctx.db.get(row.propertyId);
+    if (!prop?.slug?.trim()) return null;
+    const slug = prop.slug.trim();
+    return {
+      propertyId: prop._id,
+      title: prop.title,
+      slug,
+      url: publicPropertyUrl(slug),
+    };
+  },
+});
+
+/** Texto corto listo para pegar (finca + WhatsApp FincasYa). */
+export const buildCommentReplyForProperty = query({
+  args: {
+    propertyId: v.optional(v.id('properties')),
+    provider: v.optional(v.union(v.literal('facebook'), v.literal('instagram'))),
+    postId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (args.propertyId) {
+      const prop = await ctx.db.get(args.propertyId);
+      if (prop?.slug?.trim()) {
+        return buildPropertyCommentReply({
+          propertyUrl: publicPropertyUrl(prop.slug.trim()),
+          propertyTitle: prop.title,
+        });
+      }
+    }
+    if (args.provider && args.postId) {
+      const row = await ctx.db
+        .query('metaPostProperties')
+        .withIndex('by_post', (q) =>
+          q.eq('provider', args.provider!).eq('postId', args.postId!),
+        )
+        .first();
+      if (row) {
+        const prop = await ctx.db.get(row.propertyId);
+        if (prop?.slug?.trim()) {
+          return buildPropertyCommentReply({
+            propertyUrl: publicPropertyUrl(prop.slug.trim()),
+            propertyTitle: prop.title,
+          });
+        }
+      }
+    }
+    return buildPropertyCommentReply({});
   },
 });
 

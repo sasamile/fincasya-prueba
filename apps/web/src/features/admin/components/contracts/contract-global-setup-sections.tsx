@@ -100,6 +100,10 @@ export function ContractGlobalSetupSections({
         <BankAccountDialog
           open={bankDialogOpen}
           initial={editingBank}
+          knownHolders={bankAccounts.map((a) => ({
+            name: a.ownerName,
+            cedula: a.ownerCedula || undefined,
+          }))}
           onClose={() => {
             setBankDialogOpen(false);
             setEditingBank(null);

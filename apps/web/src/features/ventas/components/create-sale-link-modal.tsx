@@ -1979,6 +1979,14 @@ export function CreateSaleLinkModal({
       onClose={closeBankDialog}
       prefill={bankDialogPrefill}
       lockHolderFields={bankDialogTarget !== "other"}
+      knownHolders={[
+        ...empresaHolders,
+        ...ownerHolders,
+        ...otherHolders,
+      ].map((h) => ({
+        name: h.name,
+        cedula: h.cedula || undefined,
+      }))}
       onSave={handleBankDialogSave}
       contentClassName={
         isInbox ? "inbox z-110 border-border bg-card text-foreground" : undefined

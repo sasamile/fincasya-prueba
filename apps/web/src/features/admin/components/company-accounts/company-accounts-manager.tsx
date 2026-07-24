@@ -399,6 +399,10 @@ export function CompanyAccountsManager() {
         initial={editing}
         prefill={prefill}
         lockHolderFields={lockHolder}
+        knownHolders={empresaHolders.map((h) => ({
+          name: h.name,
+          cedula: h.cedula || undefined,
+        }))}
         onSave={(data) => {
           void handleSave(data);
         }}

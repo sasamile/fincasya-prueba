@@ -230,6 +230,13 @@ async function assertContractCodeAvailable(
   ctx: MutationCtx,
   rawCode: string,
   excludeId?: Id<'saleLinks'>,
+  /**
+   * El link NACE de un contrato que ya existe con esa misma codificación
+   * (link de soporte de pago): compartir el código es lo correcto, no un
+   * choque. Sin esto, crear el link justo después de enviar el contrato
+   * fallaba con "Ya existe un contrato con la codificación …".
+   */
+  permitirContratoExistente = false,
 ) {
   const code = normalizeContractCode(rawCode);
   if (!code || code.length < 2) {
@@ -252,22 +259,24 @@ async function assertContractCodeAvailable(
     throw new Error(`Ya existe una reserva con la codificación ${code}`);
   }
 
-  const existingContract = await ctx.db
-    .query('contracts')
-    .withIndex('by_contract_number', (q) => q.eq('contractNumber', code))
-    .first();
-  if (existingContract) {
-    throw new Error(`Ya existe un contrato con la codificación ${code}`);
-  }
-  // También con espacios (CR 2912) por si se guardó así.
-  const withSpace = rawCode.trim().toUpperCase();
-  if (withSpace !== code) {
-    const spaced = await ctx.db
+  if (!permitirContratoExistente) {
+    const existingContract = await ctx.db
       .query('contracts')
-      .withIndex('by_contract_number', (q) => q.eq('contractNumber', withSpace))
+      .withIndex('by_contract_number', (q) => q.eq('contractNumber', code))
       .first();
-    if (spaced) {
-      throw new Error(`Ya existe un contrato con la codificación ${withSpace}`);
+    if (existingContract) {
+      throw new Error(`Ya existe un contrato con la codificación ${code}`);
+    }
+    // También con espacios (CR 2912) por si se guardó así.
+    const withSpace = rawCode.trim().toUpperCase();
+    if (withSpace !== code) {
+      const spaced = await ctx.db
+        .query('contracts')
+        .withIndex('by_contract_number', (q) => q.eq('contractNumber', withSpace))
+        .first();
+      if (spaced) {
+        throw new Error(`Ya existe un contrato con la codificación ${withSpace}`);
+      }
     }
   }
 
@@ -525,10 +534,47 @@ export const create = mutation({
     checkinClientPaymentProofUploadEnabled: v.optional(v.boolean()),
     checkinGuestListUnlocked: v.optional(v.boolean()),
     checkinOwnerShareGuestList: v.optional(v.boolean()),
+    /**
+     * LINK DE SOPORTE DE PAGO (Santiago, 23-jul): cuando el contrato ya se hizo
+     * en el panel, el cliente NO tiene que volver a teclear sus datos. Se
+     * crean precargados y el link arranca directo en el paso donde sube el
+     * comprobante (paso 2), en vez del paso 1.
+     */
+    clientData: v.optional(
+      v.object({
+        nombre: v.string(),
+        cedula: v.string(),
+        email: v.string(),
+        telefono: v.string(),
+        telefonoRespaldo: v.optional(v.string()),
+        direccion: v.string(),
+        ciudad: v.optional(v.string()),
+        fechaNacimiento: v.optional(v.string()),
+        filledAt: v.number(),
+      }),
+    ),
+    clientStep: v.optional(v.number()),
+    /** Fase inicial del paso 2: 'pago' hace que caiga directo a subir soporte. */
+    clientDraftPhase: v.optional(
+      v.union(v.literal('datos'), v.literal('preview'), v.literal('pago')),
+    ),
+    /**
+     * LINK SOLO PARA SOPORTE DE PAGO (Santiago, 23-jul): el contrato ya se hizo
+     * y se envió desde el panel, así que este link NO vuelve a pedir datos ni
+     * a generar contrato — el cliente solo sube su comprobante y sigue.
+     */
+    soloSoportePago: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { contractCode: rawContractCode, ...rest } = args;
-    const contractCode = await assertContractCodeAvailable(ctx, rawContractCode);
+    const { contractCode: rawContractCode, clientStep, ...rest } = args;
+    // Con datos precargados el link NACE de un contrato que ya existe con esa
+    // misma codificación (link de soporte de pago): compartirla es lo correcto.
+    const contractCode = await assertContractCodeAvailable(
+      ctx,
+      rawContractCode,
+      undefined,
+      Boolean(args.clientData),
+    );
     await assertFechasLibres(ctx, args.propertyId, args.checkIn, args.checkOut);
     const token = generateToken();
     const now = Date.now();
@@ -542,7 +588,8 @@ export const create = mutation({
       contractCode,
       ...rest,
       advancePaymentAmount: advance,
-      clientStep: 1,
+      // Con datos precargados arranca donde sube el soporte; si no, en el paso 1.
+      clientStep: clientStep ?? 1,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -2620,6 +2667,8 @@ export const getPublicByToken = query({
       clientPortalUiStep: link.clientPortalUiStep,
       clientDraftPhase: link.clientDraftPhase,
       clientDraftPaymentAmount: link.clientDraftPaymentAmount,
+      /** Link nacido de un contrato ya enviado: sin paso de datos ni contrato. */
+      soloSoportePago: link.soloSoportePago,
       property,
       checkIn: link.checkIn,
       checkOut: link.checkOut,
@@ -2865,6 +2914,8 @@ export const getForPortal = internalQuery({
       clientPortalUiStep: link.clientPortalUiStep,
       clientDraftPhase: link.clientDraftPhase,
       clientDraftPaymentAmount: link.clientDraftPaymentAmount,
+      /** Link nacido de un contrato ya enviado: sin paso de datos ni contrato. */
+      soloSoportePago: link.soloSoportePago,
       property,
       checkIn: link.checkIn,
       checkOut: link.checkOut,

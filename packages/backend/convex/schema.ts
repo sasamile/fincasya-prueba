@@ -771,6 +771,13 @@ export default defineSchema(
         v.union(v.literal('datos'), v.literal('preview'), v.literal('pago')),
       ),
       clientDraftPaymentAmount: v.optional(v.number()),
+      /**
+       * Link SOLO para cargar el soporte de pago (Santiago, 23-jul): el
+       * contrato ya se hizo y se envió desde el panel. El portal no vuelve a
+       * pedir datos ni a generar contrato — el cliente sube su comprobante y
+       * sigue directo a la confirmación.
+       */
+      soloSoportePago: v.optional(v.boolean()),
       status: v.union(
         v.literal('active'),
         v.literal('completed'),
@@ -2138,6 +2145,20 @@ export default defineSchema(
       auto: v.optional(v.boolean()),
     })
       .index('by_comment', ['provider', 'commentId'])
+      .index('by_page', ['pageId']),
+
+    /**
+     * Finca vinculada a una publicación de Meta (para auto-respuesta
+     * con el link real /fincas/{slug}).
+     */
+    metaPostProperties: defineTable({
+      pageId: v.string(),
+      provider: v.union(v.literal('facebook'), v.literal('instagram')),
+      postId: v.string(),
+      propertyId: v.id('properties'),
+      updatedAt: v.number(),
+    })
+      .index('by_post', ['provider', 'postId'])
       .index('by_page', ['pageId']),
 
     /**

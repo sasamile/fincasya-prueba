@@ -19,12 +19,12 @@ import '@harbour-enterprises/superdoc/style.css';
 import type { ConversationRow } from '@/features/inbox/types';
 import { buildInboxContractUpsertArgs } from '@/features/inbox/utils/persist-inbox-contract';
 import {
-  collectContractPaymentImageUrls,
   resolveSelectedBankPayload,
 } from '@/features/inbox/utils/selected-bank-accounts';
 import { firmaUrlToDataUrl } from '@/features/inbox/utils/firma-to-data-url';
 import { toStoredCopLabel } from '@/features/admin/components/contracts/cop-money-input';
 import { carpetaDeContrato } from '@/lib/contract-folder';
+import { authClient } from '@/lib/auth-client';
 
 export type PreviewDraft = {
   fincaId: string;
@@ -56,6 +56,19 @@ export type PreviewDraft = {
   clientAddress: string;
 };
 
+/**
+ * RNT de la AGENCIA: uno solo para todas las fincas.
+ *
+ * URL PÚBLICA absoluta a propósito: YCloud descarga el archivo desde sus
+ * servidores, así que un `localhost:3789` no le sirve — en dev fallaba con
+ * "Parameter 'link' must be a URL starting with http or https".
+ */
+const RNT_AGENCIA_URL =
+  (process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://fincasya.com').replace(
+    /\/+$/,
+    '',
+  ) + '/docs/rnt-agencia-2026.pdf';
+
 const EDITOR_ID = 'superdoc-contract-editor';
 const TOOLBAR_ID = 'superdoc-contract-toolbar';
 
@@ -68,6 +81,7 @@ export function ContractPreviewModal({
   selectedBankIds,
   selectedBankAccounts = [],
   generalPaymentImageUrls = [],
+  enviarLinkSoporte = false,
   firmanteFields = {},
   conversation,
   propertyTitle,
@@ -87,6 +101,8 @@ export function ContractPreviewModal({
   }>;
   /** Flyer general (todas las cuentas) — se envía junto al contrato. */
   generalPaymentImageUrls?: string[];
+  /** Mandar el link para que el cliente cargue el soporte y siga solo. */
+  enviarLinkSoporte?: boolean;
   firmanteFields?: {
     adminName?: string;
     adminCedula?: string;
@@ -102,13 +118,12 @@ export function ContractPreviewModal({
   const sendImage = useAction(api.advisorDocuments.sendImageToConversation);
   const upsertContract = useMutation(api.contracts.upsert);
   const registerDocument = useMutation(api.contractDocuments.registerDocument);
-  // RNT de la finca: se manda junto al contrato (Adriana, 22-jul).
-  const rnt = useQuery(
-    api.propertyOwners.getRntForProperty,
-    draft.fincaId
-      ? { propertyId: draft.fincaId as Id<'properties'> }
-      : 'skip',
-  );
+  const crearLinkSoporte = useMutation(api.saleLinks.create);
+  const sendAdvisorMessage = useMutation(api.inbox.sendAdvisorMessage);
+  // Quién manda: viaja en el link y en el mensaje para el historial de atención.
+  const { data: session } = authClient.useSession();
+  const actorId = session?.user?.id ? String(session.user.id) : undefined;
+  const actorName = session?.user?.name ?? undefined;
   const superdocRef = useRef<SuperDocInstance | null>(null);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -356,10 +371,23 @@ export function ContractPreviewModal({
   ]);
 
   /** Exporta el docx editado del editor como Blob. */
+  /**
+   * Exporta el .docx del editor SIN descargarlo al equipo del asesor.
+   *
+   * SuperDoc trae `triggerDownload: true` por defecto, así que cada envío le
+   * dejaba un Word en Descargas — y se usa varias veces por envío (para el
+   * PDF y para archivar el Word), así que caían 2-3 archivos por contrato
+   * (Santiago, 23-jul). El Word queda en la carpeta del contrato, en
+   * Documentos, que es de donde se baja cuando se necesita.
+   */
   async function exportEditedDocx(): Promise<Blob> {
     const sd = superdocRef.current;
     if (!sd) throw new Error('El editor no está listo.');
-    const blob = await sd.export({ exportType: ['docx'], exportedName: baseName });
+    const blob = await sd.export({
+      exportType: ['docx'],
+      exportedName: baseName,
+      triggerDownload: false,
+    });
     if (!(blob instanceof Blob)) throw new Error('No se pudo exportar el Word.');
     return blob;
   }
@@ -532,33 +560,27 @@ export function ContractPreviewModal({
         console.error('[inbox] no se pudo archivar el Word del contrato', err);
       }
       // RNT en un segundo mensaje, apenas sale el contrato.
-      if (rnt?.rntPdfUrl) {
-        try {
-          const rntRes = await sendDocument({
-            conversationId: conversation.conversationId,
-            documentUrl: rnt.rntPdfUrl,
-            filename: `RNT${rnt.rntNumber ? `-${rnt.rntNumber}` : ''}.pdf`,
-            caption: rnt.rntNumber
-              ? `Registro Nacional de Turismo N.º ${rnt.rntNumber}`
-              : 'Registro Nacional de Turismo (RNT)',
-          });
-          if (!rntRes.ok) {
-            toast.warning('El contrato salió, pero el RNT no se pudo enviar.');
-          }
-        } catch {
+      // Es el RNT de la AGENCIA, uno solo para todas las fincas (Santiago,
+      // 23-jul). Antes se buscaba por propiedad y la mayoría no lo tiene
+      // cargado, así que el contrato salía sin RNT.
+      try {
+        const rntRes = await sendDocument({
+          conversationId: conversation.conversationId,
+          documentUrl: RNT_AGENCIA_URL,
+          filename: 'RNT-FincasYa.pdf',
+          caption: 'Registro Nacional de Turismo (RNT)',
+        });
+        if (!rntRes.ok) {
           toast.warning('El contrato salió, pero el RNT no se pudo enviar.');
         }
-      } else {
-        toast.warning(
-          'Esta finca no tiene RNT cargado: el contrato salió sin el RNT.',
-        );
+      } catch {
+        toast.warning('El contrato salió, pero el RNT no se pudo enviar.');
       }
 
-      // Flyer general + fotos por cuenta (QR), sin duplicar.
-      const paymentImages = collectContractPaymentImageUrls({
-        generalImageUrls: generalPaymentImageUrls,
-        selectedAccounts: selectedBankAccounts,
-      });
+      // SOLO EL FLYER GENERAL (Santiago, 23-jul): antes salía también el QR de
+      // cada cuenta seleccionada y al cliente le llegaban 3 o 4 imágenes
+      // seguidas. Va únicamente la foto general del titular.
+      const paymentImages = generalPaymentImageUrls.filter((u) => u?.trim());
       if (paymentImages.length > 0) {
         let sentOk = 0;
         for (let i = 0; i < paymentImages.length; i++) {
@@ -587,6 +609,80 @@ export function ContractPreviewModal({
         toast.warning(
           'El contrato salió sin foto de medios de pago. Abre el titular y carga su flyer general.',
         );
+      }
+
+      // LINK DE SOPORTE DE PAGO (Santiago, 23-jul): solo si el asesor lo marcó.
+      // Reusa la ficha del link de venta con los datos del cliente YA cargados
+      // y arrancando en el paso 2 (subir comprobante): el cliente no vuelve a
+      // teclear nada. Si falla, el contrato igual salió.
+      if (enviarLinkSoporte) {
+        try {
+          const noches = (() => {
+            const a = new Date(`${draft.checkIn}T12:00:00`).getTime();
+            const b = new Date(`${draft.checkOut}T12:00:00`).getTime();
+            return Number.isFinite(a) && Number.isFinite(b) && b > a
+              ? Math.max(1, Math.round((b - a) / 86400000))
+              : 1;
+          })();
+          const porNoche = Number(draft.pricePerNight) || 0;
+          const alquiler = porNoche * noches;
+          const aseo = Number(draft.cleaningFee) || 0;
+          const deposito = Number(draft.refundableDeposit) || 0;
+          const total = alquiler + aseo + deposito;
+
+          const creado = await crearLinkSoporte({
+            propertyId: draft.fincaId as Id<'properties'>,
+            contractCode: draft.contractCode,
+            createdBy: actorId ?? 'inbox',
+            createdByName: actorName,
+            checkIn: new Date(`${draft.checkIn}T12:00:00`).getTime(),
+            checkOut: new Date(`${draft.checkOut}T12:00:00`).getTime(),
+            nights: noches,
+            guests: Number(draft.guests) || 1,
+            checkInTime: draft.checkInTime,
+            checkOutTime: draft.checkOutTime,
+            totalValue: total,
+            rentalValue: alquiler,
+            depositAmount: deposito,
+            cleaningFee: aseo,
+            petDeposit: Number(draft.petDeposit) || undefined,
+            petSurcharge: Number(draft.petServiceFee) || undefined,
+            petCount: Number(draft.petCount) || undefined,
+            selectedBankAccountIds: selectedBankIds,
+            clientData: {
+              nombre: String(draft.clientName || '').trim(),
+              cedula: String(draft.clientCedula || '').trim(),
+              email: String(draft.clientEmail || '').trim(),
+              telefono: String(draft.clientPhone || '').trim(),
+              direccion: String(draft.clientAddress || '').trim(),
+              ciudad: String(draft.clientCity || '').trim() || undefined,
+              filledAt: Date.now(),
+            },
+            clientStep: 2,
+            // Cae directo a subir el soporte, con los medios de pago que el
+            // asesor eligió — no vuelve a pedir datos ni a generar contrato.
+            clientDraftPhase: 'pago',
+            soloSoportePago: true,
+          });
+
+          const url = `${window.location.origin}/venta/${creado.token}`;
+          await sendAdvisorMessage({
+            conversationId: conversation.conversationId,
+            content:
+              'Para continuar con tu proceso de reserva, ingresa a este link y carga tu soporte de pago 👇\n\n' +
+              `${url}\n\n` +
+              'Apenas validemos el pago te llega tu confirmación de reserva ✅',
+            actorId,
+            actorName,
+          });
+        } catch (err) {
+          console.error('[contrato] no se pudo crear el link de soporte', err);
+          toast.warning(
+            err instanceof Error
+              ? `El contrato salió, pero el link de soporte no: ${err.message}`
+              : 'El contrato salió, pero el link de soporte no se pudo crear.',
+          );
+        }
       }
 
       toast.success(

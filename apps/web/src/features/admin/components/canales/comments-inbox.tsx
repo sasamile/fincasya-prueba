@@ -17,7 +17,10 @@ import {
   Trash2,
   LayoutTemplate,
   Layers,
+  Home,
 } from 'lucide-react';
+import { useQuery } from 'convex/react';
+import { api } from '@fincasya/backend/convex/_generated/api';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -48,6 +51,10 @@ import {
   type MetaConnection,
 } from '@/features/admin/api/meta-channels.api';
 import { MetaSocialAvatar, type MetaAvatarPlatform } from '@/features/admin/components/canales/meta-social-avatar';
+import {
+  CommentPropertyLinkPicker,
+  buildShortFincaReply,
+} from '@/features/admin/components/canales/comment-property-link-picker';
 
 type FilterMode = 'all' | 'facebook' | 'instagram';
 type ReplyFilter = 'all' | 'pending' | 'replied';
@@ -232,6 +239,13 @@ export function CommentsInbox({
 
   const activeGroup =
     filteredGroups.find((g) => postKey(g) === activePostKey) ?? filteredGroups[0] ?? null;
+
+  const linkedProperty = useQuery(
+    api.metaChannels.getLinkedPostProperty,
+    activeGroup
+      ? { provider: activeGroup.provider, postId: activeGroup.postId }
+      : 'skip',
+  );
 
   const activeComments = activeGroup?.comments ?? [];
 
@@ -873,6 +887,9 @@ export function CommentsInbox({
                 rows={4}
                 className="resize-none border-0 bg-muted/70 shadow-none"
               />
+              <CommentPropertyLinkPicker
+                onPickUrl={(_url, suggested) => setNewTplText(suggested)}
+              />
               <Button
                 type="button"
                 className="gap-1.5"
@@ -906,8 +923,9 @@ export function CommentsInbox({
             <DialogTitle>Bot de comentarios</DialogTitle>
             <DialogDescription>
               Indica la información y la lógica con la que el bot debe contestar
-              comentarios nuevos (precios, tono, qué ofrecer, cuándo invitar a
-              WhatsApp, etc.).
+              comentarios nuevos. No pongas links inventados de fincas: si
+              necesitas uno, pégalo con el buscador de finca (formato
+              /fincas/slug). Si no hay URL real, el bot debe invitar a WhatsApp.
             </DialogDescription>
           </DialogHeader>
 
@@ -939,7 +957,8 @@ export function CommentsInbox({
               onChange={(e) => setDraftInstructions(e.target.value)}
               placeholder={`Ejemplo:
 Eres la asesora de FincasYa. Responde comentarios de forma amable y breve.
-Si preguntan precios o disponibilidad, pide fechas, número de personas y city, e invita a WhatsApp +57 315 777 3937.
+Si preguntan precios o disponibilidad, pide fechas, número de personas y ciudad, e invita a WhatsApp +57 315 777 3937.
+NUNCA inventes links de fincas (nada como fincasya.com/finca-nombre). Solo usa WhatsApp o una URL /fincas/… que te den en estas instrucciones.
 No inventes tarifas. Si solo saludan, agradece y ofrece ayuda.`}
               rows={10}
               className="resize-y text-sm"
@@ -1094,13 +1113,39 @@ No inventes tarifas. Si solo saludan, agradece y ofrece ayuda.`}
           <div className="flex min-h-0 flex-col bg-card">
             {activeGroup && activeComment ? (
               <>
-                <div className="flex items-center justify-between px-4 py-2.5">
-                  <p className="text-muted-foreground text-[10px] font-semibold tracking-[0.08em] uppercase">
-                    Hilo
-                  </p>
-                  {loadingThreads ? (
-                    <Loader2 className="text-muted-foreground h-3.5 w-3.5 animate-spin" />
-                  ) : null}
+                <div className="flex flex-col gap-1.5 px-4 py-2.5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-muted-foreground text-[10px] font-semibold tracking-[0.08em] uppercase">
+                      Hilo
+                    </p>
+                    {loadingThreads ? (
+                      <Loader2 className="text-muted-foreground h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                  </div>
+                  {linkedProperty ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setReplyText(
+                          buildShortFincaReply(
+                            linkedProperty.url,
+                            linkedProperty.title,
+                          ),
+                        )
+                      }
+                      className="bg-muted/50 text-muted-foreground hover:text-foreground flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-[11px] ring-1 ring-border/60 transition-colors"
+                      title="Pegar respuesta corta con link + WhatsApp"
+                    >
+                      <Home className="h-3.5 w-3.5 shrink-0" />
+                      <span className="min-w-0 truncate">
+                        Finca: <span className="text-foreground font-medium">{linkedProperty.title}</span>
+                      </span>
+                    </button>
+                  ) : (
+                    <p className="text-muted-foreground text-[11px]">
+                      Busca abajo la finca de esta publicación para pegar el link + WhatsApp.
+                    </p>
+                  )}
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
@@ -1283,6 +1328,13 @@ No inventes tarifas. Si solo saludan, agradece y ofrece ayuda.`}
                       Crea plantillas para insertar respuestas con un clic.
                     </p>
                   )}
+
+                  <CommentPropertyLinkPicker
+                    pageId={connection.pageId}
+                    provider={activeGroup.provider}
+                    postId={activeGroup.postId}
+                    onPickUrl={(_url, suggested) => setReplyText(suggested)}
+                  />
 
                   <div className="bg-card overflow-hidden rounded-xl ring-1 ring-border/70">
                     <Textarea
