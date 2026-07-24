@@ -1848,6 +1848,10 @@ function ContratoTool({ conversation }: { conversation: ConversationRow | null }
             name: a.ownerName ?? '',
             cedula: a.ownerCedula || undefined,
           }))}
+          knownHolders={bankAccounts.map((a) => ({
+            name: a.ownerName ?? '',
+            cedula: a.ownerCedula || undefined,
+          }))}
           onSave={(data) => {
             if (editingBank) {
               void handleUpdateBank(editingBank.id, data);
