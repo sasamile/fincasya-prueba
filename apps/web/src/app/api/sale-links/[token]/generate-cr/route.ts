@@ -8,6 +8,7 @@ import {
 } from "@/lib/server/cr-docx";
 import { convertDocxToPdfDetailed } from "@/lib/server/docx-to-pdf";
 import { computeConfirmationFinancials } from "@/lib/server/confirmation-financials";
+import { carpetaDeContrato } from "@/lib/contract-folder";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -150,6 +151,13 @@ export async function POST(
       new File([new Uint8Array(pdf)], filename, { type: "application/pdf" }),
     );
     fd.append("folder", "documents");
+    // A LA CARPETA DEL CÓDIGO (Santiago, 23-jul): venga del link de venta o del
+    // inbox, cada documento vive en documents/{codificación}/{subcarpeta}. Antes
+    // el CR del link caía suelto en la raíz y no salía en Documentos.
+    const carpeta = link.contractCode?.trim()
+      ? carpetaDeContrato(link.contractCode)
+      : null;
+    if (carpeta) fd.append("subpath", `${carpeta}/confirmaciones`);
     const up = await fetch(`${origin}/api/admin/upload`, {
       method: "POST",
       body: fd,
@@ -174,6 +182,22 @@ export async function POST(
         { error: attach.reason || "No se pudo adjuntar la confirmación." },
         { status: 500 },
       );
+    }
+
+    // Registrarlo para que aparezca en Documentos (el subpath solo lo ubica en
+    // S3; el explorador lee de contractDocuments). Si falla, el CR igual salió.
+    if (link.contractCode?.trim()) {
+      try {
+        await convex.mutation(api.contractDocuments.registerDocument, {
+          contractNumber: link.contractCode.trim(),
+          tipo: "confirmacion",
+          estado: "enviado",
+          url: upData.url,
+          filename,
+        });
+      } catch (err) {
+        console.error("[generate-cr] no se pudo archivar el CR", err);
+      }
     }
 
     return NextResponse.json({ ok: true, crUrl: upData.url });

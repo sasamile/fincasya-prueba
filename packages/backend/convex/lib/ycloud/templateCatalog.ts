@@ -129,13 +129,15 @@ export const EXTRA_TEMPLATES: Record<ExtraTemplateKey, TemplateDef> = {
       "valorPagado",
       "linkCheckin",
     ],
+    // Meta NO permite que el cuerpo empiece ni termine con una variable.
     bodyText:
-      "¡{{1}}, tu reserva quedó confirmada! ✅\n\n" +
+      "¡Hola, {{1}}! Tu reserva quedó confirmada ✅\n\n" +
       "📄 Confirmación N.º {{2}}\n" +
       "🏡 {{3}}\n" +
       "📅 Entrada: {{4}} · Salida: {{5}}\n" +
       "💰 Pago recibido: {{6}}\n\n" +
-      "Adjunta encontrarás tu confirmación de reserva. Para completar tu check-in y registrar a tus invitados, entra aquí: {{7}}",
+      "Adjunta encontrarás tu confirmación de reserva. Para completar tu check-in y registrar a tus invitados, entra aquí: {{7}}\n\n" +
+      "¡Te esperamos! 💚",
     headerDocument: {
       exampleUrl: "https://fincasya.com/ejemplos/confirmacion-reserva.pdf",
       filename: "Confirmacion-de-reserva.pdf",
@@ -365,10 +367,11 @@ export function buildRegisterPayload(
   if (def.headerDocument) {
     // Meta aprueba el FORMATO con un archivo de muestra; el PDF real viaja en
     // cada envío.
+    // YCloud pide `header_url` (no el `header_handle` de la API cruda de Meta).
     components.push({
       type: "HEADER",
       format: "DOCUMENT",
-      example: { header_handle: [def.headerDocument.exampleUrl] },
+      example: { header_url: [def.headerDocument.exampleUrl] },
     });
   } else if (def.header) {
     components.push({ type: "HEADER", format: "TEXT", text: def.header });

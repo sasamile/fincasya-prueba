@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getConvexHttpClient, api } from "@/lib/convex-server";
+import { carpetaDeContrato } from "@/lib/contract-folder";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -155,6 +156,12 @@ export async function POST(
     const fd = new FormData();
     fd.append("file", new File([bytes], filename, { type: mime }));
     fd.append("folder", "documents");
+    // A LA CARPETA DEL CÓDIGO (Santiago, 23-jul): venga del link de venta o del
+    // inbox, cada documento vive en documents/{codificación}/{subcarpeta}.
+    const carpeta = link.contractCode?.trim()
+      ? carpetaDeContrato(link.contractCode)
+      : null;
+    if (carpeta) fd.append("subpath", `${carpeta}/contratos`);
     const upRes = await fetch(`${origin}/api/admin/upload`, {
       method: "POST",
       body: fd,
@@ -179,6 +186,22 @@ export async function POST(
         { error: attach.reason || "No se pudo adjuntar el contrato." },
         { status: 500 },
       );
+    }
+
+    // Registrarlo para que aparezca en Documentos (el subpath solo lo ubica en
+    // S3). Si falla, el contrato igual salió.
+    if (link.contractCode?.trim()) {
+      try {
+        await convex.mutation(api.contractDocuments.registerDocument, {
+          contractNumber: link.contractCode.trim(),
+          tipo: "contrato",
+          estado: "enviado",
+          url: upData.url,
+          filename,
+        });
+      } catch (err) {
+        console.error("[generate-contract] no se pudo archivar el contrato", err);
+      }
     }
 
     return NextResponse.json({ ok: true, mode: "final", contractUrl: upData.url });
