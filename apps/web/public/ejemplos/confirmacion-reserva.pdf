@@ -1,0 +1,39 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 522 >>
+stream
+BT /F1 22 Tf 60 480 Td (Confirmacion de Reserva - EJEMPLO) Tj ET
+BT /F1 12 Tf 60 440 Td (Documento de muestra. Los datos son ficticios.) Tj ET
+BT /F1 12 Tf 60 405 Td (Confirmacion N.o 0000) Tj ET
+BT /F1 12 Tf 60 385 Td (Cliente: NOMBRE APELLIDO) Tj ET
+BT /F1 12 Tf 60 365 Td (Finca: FINCA DE EJEMPLO 10 PAX) Tj ET
+BT /F1 12 Tf 60 345 Td (Entrada: 01 DE ENERO DEL 2027   Salida: 03 DE ENERO DEL 2027) Tj ET
+BT /F1 12 Tf 60 325 Td (Valor total: 0) Tj ET
+BT /F1 10 Tf 60 285 Td (FincasYa.com - Los expertos en alquiler) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000814 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+884
+%%EOF
